@@ -28,7 +28,7 @@ def call_llm(messages, azure_deployment_model = None, max_tokens=2048, temperatu
     azure_endpoint = os.environ['AZURE_OPENAI_ENDPOINT']
     api_version = os.environ['AZURE_OPENAI_API_VERSION']
     if azure_deployment_model is None:
-        azure_deployment_model = os.environ['AZURE_DEPLOYMENT_MODEL'] # default model
+        azure_deployment_model = os.environ['AZURE_OPENAI_DEPLOYMENT_NAME'] # default model
     
 
     headers = {
