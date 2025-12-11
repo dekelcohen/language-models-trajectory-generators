@@ -39,8 +39,7 @@ def call_llm(messages, azure_deployment_model = None, max_tokens=2048, temperatu
     # Build the payload
     payload = {
         "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature" : temperature,
+        "max_completion_tokens": max_tokens,        
     }
 
     # Construct the Azure OpenAI endpoint URL
@@ -53,17 +52,21 @@ def call_llm(messages, azure_deployment_model = None, max_tokens=2048, temperatu
     try:
         response = requests.post(GPT_ENDPOINT_URL, headers=headers, json=payload)
         response.raise_for_status()  # Raise an error for non-2xx responses
-    except requests.RequestException as e:
+    except requests.RequestException as e:        
+        if e.response is not None:
+            print("Status Code:", e.response.status_code)
+            print("Response Body:", e.response.text)
         raise SystemExit(f"Failed to make the request. Error: {e}")
 
     # Parse the JSON response
     response_json = response.json()
+    
 
     # Extract the message content from the first choice
     message_content = response_json["choices"][0]["message"]["content"]
-
+    
     # Convert the content string to a JSON object (if necessary)
-    final_response = json.loads(message_content)
+    final_response = message_content # json.loads(message_content)
     
     return final_response
 
@@ -86,6 +89,6 @@ if __name__ == "__main__":
         "role": "assistant",
         "content": "<expected answer for first few shot example>",
     }]
-    response = call_llm(messages)
+    response = call_llm(messages, azure_deployment_model = 'gpt-5')
     # Handle the response as needed (e.g., print or process)
     print(response.json())
