@@ -111,10 +111,10 @@ if __name__ == "__main__":
                         if len(block.split("```")) > 1:
                             code = block.split("```")[0]
                             block_number += 1
-                            try:
+                            try:                                
+                                print('Before execute code\n=================\n',code)
                                 f = StringIO()
-                                with redirect_stdout(f):
-                                    print('Before execute code\n=================\n',code)
+                                with redirect_stdout(f):                                    
                                     exec(code)
                             except Exception:
                                 error_message = traceback.format_exc()
