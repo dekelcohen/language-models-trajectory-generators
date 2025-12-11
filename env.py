@@ -40,7 +40,7 @@ def run_simulation_environment(args, env_connection, logger):
     # Environment set-up
     logger.info(PROGRESS + "Setting up environment..." + ENDC)
 
-    physics_client = p.connect(p.GUI)
+    physics_client = p.connect(p.DIRECT) # Dekel: Changed for headless offscreen (no GUI) - was p.GUI
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.setGravity(0, 0, -9.81)
     plane = p.loadURDF("plane.urdf")
