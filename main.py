@@ -114,6 +114,7 @@ if __name__ == "__main__":
                             try:
                                 f = StringIO()
                                 with redirect_stdout(f):
+                                    print('Before execute code\n=================\n',code)
                                     exec(code)
                             except Exception:
                                 error_message = traceback.format_exc()
