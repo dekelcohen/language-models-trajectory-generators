@@ -44,11 +44,35 @@ def get_langsam_output(image, model, segmentation_texts, segmentation_count):
 
 
 def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdout):
-
     print(role + ":", file=file)
     print(new_prompt, file=file)
-    messages.append({"role":role, "content":new_prompt})
+    messages.append({"role": role, "content": new_prompt})
 
+    # ----------------------------------------------------------------------
+    # 1. Azure OpenAI mode: model name starts with "azure-"
+    # ----------------------------------------------------------------------
+    if model.startswith("azure-"):
+        from azure_openai import call_llm   # import your Azure helper
+
+        # deployment name is the substring after "azure-"
+        deployment = model[len("azure-"):]
+
+        print("assistant:", file=file)
+
+        # Call Azure endpoint (non-streaming)
+        azure_response = call_llm(messages, azure_deployment_model=deployment)
+
+        # Convert LLM JSON response to text
+        new_output = json.dumps(azure_response, ensure_ascii=False)
+
+        print(new_output, file=file)
+
+        messages.append({"role": "assistant", "content": new_output})
+        return messages
+
+    # ----------------------------------------------------------------------
+    # 2. OpenAI normal mode (original code)
+    # ----------------------------------------------------------------------
     completion = client.chat.completions.create(
         model=model,
         temperature=0,
@@ -69,8 +93,7 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdou
         else:
             print("finish_reason:", finish_reason, file=file)
 
-    messages.append({"role":"assistant", "content":new_output})
-
+    messages.append({"role": "assistant", "content": new_output})
     return messages
 
 
