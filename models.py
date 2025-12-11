@@ -13,33 +13,61 @@ from XMem.inference.inference_core import InferenceCore
 from XMem.inference.interact.interactive_utils import image_to_torch, index_numpy_to_one_hot_torch, torch_prob_to_numpy_mask, overlay_davis
 
 def get_langsam_output(image, model, segmentation_texts, segmentation_count):
+    """
+    Updated to handle new LangSAM output format:
+    model.predict([image], [text_prompt]) → list of result dicts.
+    """
 
-    #segmentation_texts = " . ".join(segmentation_texts) # Dekel - 
+    # Ensure segmentation_texts is a list of strings.
+    if isinstance(segmentation_texts, str):
+        segmentation_texts = [segmentation_texts]
 
-    masks, boxes, phrases, logits = model.predict([image], segmentation_texts)
+    # Run LangSAM
+    results = model.predict([image], segmentation_texts)
 
-    _, ax = plt.subplots(1, 1 + len(masks), figsize=(5 + (5 * len(masks)), 5))
+    # LangSAM returns a list (one per image). We only passed one image → results[0]
+    result = results[0]
+
+    # Extract arrays
+    masks_np = result["masks"]            # shape: (N, H, W)
+    boxes_np = result["boxes"]            # shape: (N, 4)
+    phrases = result["text_labels"]       # list of N strings
+
+    # Convert numpy masks and boxes to torch tensors for visualization
+    masks = torch.from_numpy(masks_np).bool()        # (N, H, W)
+    boxes = torch.from_numpy(boxes_np).float()       # (N, 4)
+
+    # --- Visualization identical to your old code ---
+    _, ax = plt.subplots(1, 1 + len(masks), figsize=(5 + 5 * len(masks), 5))
     [a.axis("off") for a in ax.flatten()]
     ax[0].imshow(image)
 
+    to_tensor = transforms.PILToTensor()
+    to_pil = transforms.ToPILImage()
+
     for i, (mask, box, phrase) in enumerate(zip(masks, boxes, phrases)):
-        to_tensor = transforms.PILToTensor()
         image_tensor = to_tensor(image)
-        box = box.unsqueeze(dim=0)
+        box = box.unsqueeze(0)
+
         image_tensor = draw_bounding_boxes(image_tensor, box, colors=["red"], width=3)
         image_tensor = draw_segmentation_masks(image_tensor, mask, alpha=0.5, colors=["cyan"])
-        to_pil_image = transforms.ToPILImage()
-        image_pil = to_pil_image(image_tensor)
+        image_pil = to_pil(image_tensor)
 
         ax[1 + i].imshow(image_pil)
-        ax[1 + i].text(box[0][0], box[0][1] - 15, phrase, color="red", bbox={"facecolor":"white", "edgecolor":"red", "boxstyle":"square"})
+        ax[1 + i].text(
+            box[0][0].item(),
+            box[0][1].item() - 15,
+            phrase,
+            color="red",
+            bbox={"facecolor": "white", "edgecolor": "red", "boxstyle": "square"}
+        )
 
     plt.savefig(config.langsam_image_path.format(object=segmentation_count))
     plt.show()
 
-    masks = masks.float()
+    # Return exactly what your downstream code expects
+    return masks.float(), boxes, phrases
 
-    return masks, boxes, phrases
 
 
 
