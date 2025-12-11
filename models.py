@@ -14,9 +14,9 @@ from XMem.inference.interact.interactive_utils import image_to_torch, index_nump
 
 def get_langsam_output(image, model, segmentation_texts, segmentation_count):
 
-    segmentation_texts = " . ".join(segmentation_texts)
+    #segmentation_texts = " . ".join(segmentation_texts) # Dekel - 
 
-    masks, boxes, phrases, logits = model.predict(image, segmentation_texts)
+    masks, boxes, phrases, logits = model.predict([image], segmentation_texts)
 
     _, ax = plt.subplots(1, 1 + len(masks), figsize=(5 + (5 * len(masks)), 5))
     [a.axis("off") for a in ax.flatten()]
