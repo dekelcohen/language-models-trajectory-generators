@@ -60,10 +60,10 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdou
         print("assistant:", file=file)
 
         # Call Azure endpoint (non-streaming)
-        azure_response = call_llm(messages, azure_deployment_model=deployment)
+        new_output = call_llm(messages, azure_deployment_model=deployment)
 
         # Convert LLM JSON response to text
-        new_output = json.dumps(azure_response, ensure_ascii=False)
+        #new_output = json.dumps(azure_response, ensure_ascii=False)
 
         print(new_output, file=file)
 
