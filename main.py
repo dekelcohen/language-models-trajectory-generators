@@ -112,7 +112,6 @@ if __name__ == "__main__":
                             code = block.split("```")[0]
                             block_number += 1
                             try:                                
-                                print('Before execute code\n=================\n',code)
                                 f = StringIO()
                                 with redirect_stdout(f):                                    
                                     exec(code)

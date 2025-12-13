@@ -94,7 +94,10 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdou
         #new_output = json.dumps(azure_response, ensure_ascii=False)
 
         print(new_output, file=file)
-
+        
+        if not new_output or len(new_output) < 50:
+            print(f'Warning: Model response is empty or very short {new_output}. prompt: {new_prompt}')
+            
         messages.append({"role": "assistant", "content": new_output})
         return messages
 
