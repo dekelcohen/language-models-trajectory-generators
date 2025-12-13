@@ -4,7 +4,7 @@ import os
 import glob
 
 def create_video_from_images(
-    folder_path: str = ' images/trajectory', 
+    folder_path: str = 'images/trajectory', 
     base_name: str = 'rgb_image',   # <--- New Parameter
     start_idx: int = 0, 
     end_idx: int = float('inf'), 
