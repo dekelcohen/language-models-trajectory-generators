@@ -96,7 +96,7 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdou
         print(new_output, file=file)
         
         if not new_output or len(new_output) < 50:
-            print(f'Warning: Model response is empty or very short {new_output}. prompt: {new_prompt}')
+            print(f'Warning: Model response is empty or very short {new_output}. messages: {messages}')
             
         messages.append({"role": "assistant", "content": new_output})
         return messages
