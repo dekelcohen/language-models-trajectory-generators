@@ -83,11 +83,15 @@ if __name__ == "__main__":
     },
     {
         "role": "user",
-        "content": "<prompt - instructions + context text + first few shot example>",
+        "content": "Extract the PLO entities from the following document: Roni went to the sea with Dani",
     },
     {
         "role": "assistant",
-        "content": "<expected answer for first few shot example>",
+        "content": "Ron - PER, Dani - PER",
+    },
+    {
+        "role": "user",
+        "content": "Extract the PLO entities from the following document: Dudu went to the desert with Roei",
     }]
     response = call_llm(messages, azure_deployment_model = 'gpt-5')
     # Handle the response as needed (e.g., print or process)
