@@ -57,4 +57,125 @@ Finally, perform each of these steps one by one. Name each trajectory variable w
 Stop generation after each code block to wait for it to finish executing before continuing with your plan.
 
 The user command is "[INSERT TASK]".
+
+Here is an in context example of multiple LLM responses for each step
+--------------------------------------------------------------------------
+The user command is: Pick up the blue can
+Desc: It is a blue near-cylindrical object
+ 
+Preception module outputs:
+
+Predicting 1 masks
+Predicted 1 masks
+
+Object detected: blue can
+
+Position of blue can: [pos_x, pos_y, pos_z]
+
+Dimensions:
+- Width: dim_width
+- Length: dim_length
+- Height: dim_height
+
+Orientation:
+- Orientation along shorter side (length): angle_short
+- Orientation along longer side (width): angle_long
+Assistant (Reasoning and Plan):
+
+Approach decision and plan:
+
+Only one blue can is detected, so we will interact with that instance.
+
+Best approach: move the end-effector directly above the can’s center, maintain a safe hover height above the top surface, then descend vertically to the mid-height of the can body to grasp the side walls.
+
+The gripper orientation is aligned with the can’s shorter side orientation (angle_short). For a near-cylindrical object this alignment is not strictly required, but it provides consistency.
+
+Collision avoidance: perform all XY motion above the object; descend strictly along the Z-axis.
+
+Grasping strategy: close the gripper at mid-height, then lift vertically to confirm a stable grasp.
+
+Step-by-Step Trajectory Execution
+Step 1: Move to a safe hover pose above the can
+python
+Copy code
+# Utility function: generate straight-line end-effector trajectory
+def generate_linear_trajectory(start_pose, end_pose, num_points=N_pts):
+    sx, sy, sz, s_theta = start_pose
+    ex, ey, ez, e_theta = end_pose
+    traj = []
+    for i in range(num_points):
+        t = i / (num_points - 1)
+        traj.append([
+            sx + (ex - sx) * t,
+            sy + (ey - sy) * t,
+            sz + (ez - sz) * t,
+            s_theta + (e_theta - s_theta) * t
+        ])
+    return traj
+
+# Perception-derived variables
+can_position = [pos_x, pos_y, pos_z]
+can_height = dim_height
+grip_orientation = angle_short
+
+# Derived heights
+top_z = pos_z + can_height / 2
+hover_clearance = clearance_hover
+pre_grasp_z = top_z + hover_clearance
+
+# Current robot state
+current_pose = [ee_x, ee_y, ee_z, ee_theta]
+
+# Target hover pose
+hover_pose = [pos_x, pos_y, pre_grasp_z, grip_orientation]
+
+trajectory_1 = generate_linear_trajectory(current_pose, hover_pose)
+execute_trajectory(trajectory_1)
+Step 2: Open the gripper
+python
+Copy code
+open_gripper()
+Step 3: Descend to just above the top surface
+python
+Copy code
+z_above_top = top_z + clearance_top
+
+approach_pose = [pos_x, pos_y, z_above_top, grip_orientation]
+
+trajectory_2 = generate_linear_trajectory(hover_pose, approach_pose)
+execute_trajectory(trajectory_2)
+Step 4: Descend to pre-close height near grasp level
+python
+Copy code
+z_grasp = pos_z
+z_preclose = z_grasp + clearance_preclose
+
+pre_close_pose = [pos_x, pos_y, z_preclose, grip_orientation]
+
+trajectory_3 = generate_linear_trajectory(approach_pose, pre_close_pose)
+execute_trajectory(trajectory_3)
+Step 5: Descend to grasp height
+python
+Copy code
+grasp_pose = [pos_x, pos_y, z_grasp, grip_orientation]
+
+trajectory_4 = generate_linear_trajectory(pre_close_pose, grasp_pose)
+execute_trajectory(trajectory_4)
+Step 6: Close the gripper
+python
+Copy code
+close_gripper()
+Step 7: Lift the object to a safe height
+python
+Copy code
+lift_pose = [pos_x, pos_y, pre_grasp_z, grip_orientation]
+
+trajectory_5 = generate_linear_trajectory(grasp_pose, lift_pose)
+execute_trajectory(trajectory_5)
+
+-------------------- End of Sample -----------------
+Instructions:
+Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
+Stop generation after each code block to wait for it to finish executing before continuing with your plan.
+
 """

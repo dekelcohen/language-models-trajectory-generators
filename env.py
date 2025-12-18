@@ -19,7 +19,7 @@ class Environment:
 
         object_start_position = config.object_start_position
         object_start_orientation_q = p.getQuaternionFromEuler(config.object_start_orientation_e)
-        object_model = p.loadURDF("ycb_assets/002_master_chef_can.urdf", object_start_position, object_start_orientation_q, useFixedBase=False, globalScaling=config.global_scaling)
+        object_model = p.loadURDF("ycb_assets/003_cracker_box.urdf", object_start_position, object_start_orientation_q, useFixedBase=False, globalScaling=config.global_scaling)
 
         if self.mode == "default":
 
