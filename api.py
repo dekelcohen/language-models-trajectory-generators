@@ -39,7 +39,14 @@ class API:
 
         self.logger.info(PROGRESS + "Capturing head and wrist camera images..." + ENDC)
         self.main_connection.send([CAPTURE_IMAGES])
-        [head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message] = self.main_connection.recv()
+        recv_payload = self.main_connection.recv()
+        # Support both backends: PyBullet returns 5 elements; Metaworld server adds calib as 6th
+        if isinstance(recv_payload, list) and len(recv_payload) >= 5:
+            head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload[:5]
+            self.calibration = recv_payload[5] if len(recv_payload) > 5 else None
+        else:
+            head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload
+            self.calibration = None
         self.logger.info(env_connection_message)
 
         self.head_camera_position = head_camera_position
@@ -49,7 +56,22 @@ class API:
 
         rgb_image_head = Image.open(config.rgb_image_head_path).convert("RGB")
         depth_image_head = Image.open(config.depth_image_head_path).convert("L")
+        # Handle depth according to depth_format and backend calibration
+        depth_format = getattr(self.args, "depth_format", "norm_1m")
         depth_array = np.array(depth_image_head) / 255.
+        if getattr(self, "calibration", None) and isinstance(self.calibration, dict):
+            head_cal = self.calibration.get("head")
+            if head_cal and self.calibration.get("depth_encoding") == "opengl":
+                znear = float(head_cal.get("znear", 0.01))
+                zfar = float(head_cal.get("zfar", 100.0))
+                d = depth_array.astype(np.float64)
+                Z = (znear * zfar) / (zfar - d * (zfar - znear))
+                if depth_format == "raw":
+                    depth_array = np.clip(Z, znear, zfar)
+                elif depth_format == "norm_zfar":
+                    depth_array = np.clip(Z / zfar, 0.0, 1.0)
+                else:  # norm_1m
+                    depth_array = np.clip(Z, 0.0, 1.0)
 
         if self.segmentation_count == 0:
             xmem_image = Image.fromarray(np.zeros_like(depth_array)).convert("L")
@@ -63,7 +85,22 @@ class API:
 
         masks = utils.get_segmentation_mask(model_predictions, config.segmentation_threshold)
 
-        bounding_cubes_world_coordinates, bounding_cubes_orientations = utils.get_bounding_cube_from_point_cloud(rgb_image_head, masks, depth_array, self.head_camera_position, self.head_camera_orientation_q, self.segmentation_count)
+        # If calibration available from server, pass head K to utils for accurate projection
+        K_head = None
+        if getattr(self, "calibration", None) and isinstance(self.calibration, dict):
+            head_cal = self.calibration.get("head")
+            if head_cal and head_cal.get("K"):
+                K_head = head_cal.get("K")
+
+        bounding_cubes_world_coordinates, bounding_cubes_orientations = utils.get_bounding_cube_from_point_cloud(
+            rgb_image_head,
+            masks,
+            depth_array,
+            self.head_camera_position,
+            self.head_camera_orientation_q,
+            self.segmentation_count,
+            K_override=K_head,
+        )
 
         utils.save_xmem_image(masks)
 
@@ -168,7 +205,22 @@ class API:
                     object_mask[object_mask == object] = True
                     object_mask = torch.Tensor(object_mask)
 
-                    bounding_cubes, orientations = utils.get_bounding_cube_from_point_cloud(rgb_image, [object_mask], depth_array, self.head_camera_position, self.head_camera_orientation_q, object - 1)
+                    # Reuse head calibration if available
+                    K_head = None
+                    if getattr(self, "calibration", None) and isinstance(self.calibration, dict):
+                        head_cal = self.calibration.get("head")
+                        if head_cal and head_cal.get("K"):
+                            K_head = head_cal.get("K")
+
+                    bounding_cubes, orientations = utils.get_bounding_cube_from_point_cloud(
+                        rgb_image,
+                        [object_mask],
+                        depth_array,
+                        self.head_camera_position,
+                        self.head_camera_orientation_q,
+                        object - 1,
+                        K_override=K_head,
+                    )
 
                     if len(bounding_cubes) == 0:
 

@@ -40,6 +40,9 @@ if __name__ == "__main__":
     parser.add_argument("-lm", "--language_model", choices=["azure-gpt-5", "azure-gpt-4o", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"], default="azure-gpt-5", help="select language model")
     parser.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")
     parser.add_argument("-m", "--mode", choices=["default", "debug"], default="default", help="select mode to run")
+    parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
+    parser.add_argument("--task", type=str, default="sawyer_door_v3", help="task/environment name (metaworld only)")
+    parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
     args = parser.parse_args()
 
     # Logging
@@ -60,8 +63,33 @@ if __name__ == "__main__":
     langsam_model = LangSAM()
     xmem_model = XMem(config.xmem_config, "./XMem/saves/XMem.pth", device).eval().to(device)
 
+    # Create connection to the chosen simulator, then build API with it
+    if args.sim == "pybullet":
+        main_connection, env_connection = Pipe()
+        # Start process
+        env_process = Process(target=run_simulation_environment, name="EnvProcess", args=[args, env_connection, logger])
+        env_process.start()
+        [env_connection_message] = main_connection.recv()
+        logger.info(env_connection_message)
+    else:
+        from providers.subproc_connection import SubprocessJSONConnection
+        server_path = os.path.join(os.path.dirname(__file__), "providers", "metaworld_server.py")
+        py_exe = os.environ.get("METAWORLD_PYTHON", sys.executable)
+        # Pass env/task and depth format via CLI and env vars
+        cmd = [py_exe, server_path, "--env", args.task]
+        # Prepare environment for the server
+        env_vars = os.environ.copy()
+        env_vars["DEPTH_FORMAT"] = args.depth_format
+        # Allow user to set METAWORLD_REPO externally
+        env_connection = SubprocessJSONConnection(cmd)
+        main_connection = env_connection
+        ready_msg = main_connection.recv()
+        if isinstance(ready_msg, list) and ready_msg:
+            logger.info(ready_msg[0])
+        else:
+            logger.info("\033[92mFinished setting up environment!\033[0m")
+
     # API set-up
-    main_connection, env_connection = Pipe()
     api = API(args, main_connection, logger, client, langsam_model, xmem_model, device)
 
     detect_object = api.detect_object
@@ -69,13 +97,6 @@ if __name__ == "__main__":
     open_gripper = api.open_gripper
     close_gripper = api.close_gripper
     task_completed = api.task_completed
-
-    # Start process
-    env_process = Process(target=run_simulation_environment, name="EnvProcess", args=[args, env_connection, logger])
-    env_process.start()
-
-    [env_connection_message] = main_connection.recv()
-    logger.info(env_connection_message)
 
     # User input
     command = input("Enter a command: ")

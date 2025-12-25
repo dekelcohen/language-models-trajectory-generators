@@ -1,9 +1,9 @@
-import pybullet as p
 import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
 import torch
 import math
+import os
 import config
 from PIL import Image
 from torchvision.utils import save_image
@@ -44,14 +44,54 @@ def get_max_contour(image, image_width, image_height):
 
 
 
-def get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q):
+def _quat_to_rotmat(q):
+    # Expect [x, y, z, w]
+    x, y, z, w = q
+    xx = x * x
+    yy = y * y
+    zz = z * z
+    xy = x * y
+    xz = x * z
+    yz = y * z
+    wx = w * x
+    wy = w * y
+    wz = w * z
+    R = np.array([
+        [1 - 2 * (yy + zz),     2 * (xy - wz),         2 * (xz + wy)],
+        [2 * (xy + wz),         1 - 2 * (xx + zz),     2 * (yz - wx)],
+        [2 * (xz - wy),         2 * (yz + wx),         1 - 2 * (xx + yy)],
+    ])
+    return R
 
-    fov = (config.fov / 360) * 2 * math.pi
-    f_x = f_y = image_height / (2 * math.tan(fov / 2))
-    K = np.array([[f_x, 0, 0], [0, f_y, 0], [0, 0, 1]])
 
-    R = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
-    Rt = np.hstack((R, np.array(camera_position).reshape(3, 1)))
+def get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=None):
+    """
+    Returns intrinsics K and extrinsics Rt. If K_override is provided (from server), use it.
+    When running under PyBullet, optionally compare PyBullet's getMatrixFromQuaternion with our pure-numpy
+    version under DEBUG_DIFF flag for quick validation.
+    """
+    if K_override is not None:
+        K = np.array(K_override, dtype=float)
+    else:
+        fov = (config.fov / 360) * 2 * math.pi
+        f_x = f_y = image_height / (2 * math.tan(fov / 2))
+        # Keep principal point at (0,0); caller subtracts image center, matching existing pipeline
+        K = np.array([[f_x, 0, 0], [0, f_y, 0], [0, 0, 1]])
+
+    R_np = _quat_to_rotmat(camera_orientation_q)
+
+    # Optional: compare with PyBullet's quaternion->matrix if available and DEBUG_DIFF set
+    if os.environ.get("DEBUG_DIFF", "0") == "1":
+        try:
+            import pybullet as p
+            R_pb = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
+            diff = np.abs(R_pb - R_np).max()
+            if diff > 1e-6:
+                print(f"[DEBUG_DIFF] Rotation matrix diff max: {diff}")
+        except Exception as e:
+            print(f"[DEBUG_DIFF] PyBullet compare failed: {e}")
+
+    Rt = np.hstack((R_np, np.array(camera_position).reshape(3, 1)))
     Rt = np.vstack((Rt, np.array([0, 0, 0, 1])))
 
     return K, Rt
@@ -73,7 +113,7 @@ def save_xmem_image(masks):
 
 
 
-def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_position, camera_orientation_q, segmentation_count):
+def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_position, camera_orientation_q, segmentation_count, K_override=None):
 
     image_width, image_height = image.size
 
@@ -90,7 +130,7 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
         if contour is not None:
 
             contour_pixel_points = [(c, r, depth_array[r][c]) for r in range(image_height) for c in range(image_width) if cv.pointPolygonTest(contour, (c, r), measureDist=False) == 1]
-            contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, pixel_point) for pixel_point in contour_pixel_points]
+            contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, pixel_point, K_override=K_override) for pixel_point in contour_pixel_points]
             max_z_coordinate = np.max(np.array(contour_world_points)[:, 2])
             min_z_coordinate = np.min(np.array(contour_world_points)[:, 2])
             top_surface_world_points = [world_point for world_point in contour_world_points if world_point[2] > max_z_coordinate - config.point_cloud_top_surface_filter]
@@ -119,18 +159,26 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
 
 
 
-def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image, point):
+def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image, point, K_override=None):
 
     image_width, image_height = image.size
 
-    K, Rt = get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q)
+    if K_override is not None:
+        K_use = np.array(K_override, dtype=float)
+    else:
+        K_use = None
+    K, Rt = get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=K_use)
 
-    pixel_point = np.array([[point[0] - (image_width / 2)], [(image_height / 2) - point[1]], [1.0]])
-
-    if camera == "wrist":
-        pixel_point = [pixel_point[1], pixel_point[0], pixel_point[2]]
-    elif camera == "head":
-        pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
+    if K_override is not None:
+        # Use pixel coordinates directly (u, v, 1) and rely on provided K
+        pixel_point = np.array([[point[0]], [point[1]], [1.0]])
+    else:
+        # Legacy PyBullet path: recenter and apply axis flips
+        pixel_point = np.array([[point[0] - (image_width / 2)], [(image_height / 2) - point[1]], [1.0]])
+        if camera == "wrist":
+            pixel_point = [pixel_point[1], pixel_point[0], pixel_point[2]]
+        elif camera == "head":
+            pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
 
     world_point_camera_frame = (np.linalg.inv(K) @ pixel_point) * point[2]
     world_point_world_frame = Rt @ np.vstack((world_point_camera_frame, np.array([1.0])))
