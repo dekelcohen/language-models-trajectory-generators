@@ -94,11 +94,34 @@ def main():
             cam_names = []
     head_id = 0
     wrist_id = 0
-    for i, name in enumerate(cam_names):
-        if name and "corner" in name.lower():
-            head_id = i
-        if name and "gripper" in name.lower():
-            wrist_id = i
+    # Prefer intuitive viewpoints: head → topview or first corner; wrist → gripperPOV/behindGripper
+    lower_names = [n.lower() if isinstance(n, str) else "" for n in cam_names]
+    # Head selection
+    try:
+        head_candidates = [i for i, n in enumerate(lower_names) if "topview" in n]
+        if head_candidates:
+            head_id = head_candidates[0]
+        else:
+            corner_candidates = [i for i, n in enumerate(lower_names) if "corner" in n]
+            if corner_candidates:
+                head_id = corner_candidates[0]
+    except Exception:
+        pass
+    # Wrist selection
+    try:
+        wrist_candidates = [i for i, n in enumerate(lower_names) if "gripperpov" in n]
+        if wrist_candidates:
+            wrist_id = wrist_candidates[0]
+        else:
+            wrist_candidates = [i for i, n in enumerate(lower_names) if "behindgripper" in n]
+            if wrist_candidates:
+                wrist_id = wrist_candidates[0]
+            else:
+                generic_gripper = [i for i, n in enumerate(lower_names) if "gripper" in n]
+                if generic_gripper:
+                    wrist_id = generic_gripper[0]
+    except Exception:
+        pass
 
     gripper_open = True
     traj_step = 1
