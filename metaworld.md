@@ -26,6 +26,8 @@ Run Metaworld server from another env:
 	  cd /d D:\NLP\Robotics\VLM_Robotics\language-models-trajectory-generators
 	  # Opens MuJoCo viewer, shows env at reset, runs a short passive loop
       %METAWORLD_PYTHON% providers\metaworld_server.py --env sawyer_door_v3 --viewer
+	) Run metaworld env server directly (to see cameras, if it works)
+      python providers\metaworld_server.py --env sawyer_door_v3 --cameras both	
     ) Tests
       cd /d D:\NLP\Robotics\VLM_Robotics\language-models-trajectory-generators
 	  python -m unittest tests/test_metaworld_server.py -v

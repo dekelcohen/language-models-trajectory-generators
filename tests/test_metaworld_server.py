@@ -73,6 +73,8 @@ class TestMetaworldServer(unittest.TestCase):
             except Exception:
                 continue
             if isinstance(msg, dict) and msg.get('status') == 'ready':
+                # Echo the startup banner so camera names/IDs are visible in test output
+                print(s)
                 break
         else:
             raise RuntimeError('server did not start with a JSON banner. Output so far:\n' + ''.join(buffer))
