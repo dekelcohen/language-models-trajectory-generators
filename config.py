@@ -90,6 +90,14 @@ OPEN_GRIPPER = 5
 CLOSE_GRIPPER = 6
 TASK_COMPLETED = 7
 RESET_ENVIRONMENT = 8
+# Extended commands for observability/testing
+GET_STATE = 9
+GET_CAMERA_INFO = 10
+CAPTURE_ANNOTATED_IMAGES = 11
+MOVE_EEF_ABS = 12
+STEP_N = 13
+SET_SEED = 14
+SET_TASK_FROM_RAND_VEC = 15
 
 # Paths
 rgb_image_wrist_path = "./images/rgb_image_wrist.png"
@@ -99,6 +107,18 @@ depth_image_head_path = "./images/depth_image_head.png"
 rgb_image_trajectory_path = "./images/trajectory/rgb_image_{step}.png"
 depth_image_trajectory_path = "./images/trajectory/depth_image_{step}.png"
 bounding_cube_mask_image_path = "./images/bounding_cube_mask_{object}_{mask}.png"
+
+# Overlays and runs
+overlay_image_path = "./images/overlay/overlay_{step}.png"
+runs_dir = "./runs"
+
+# Logging throttles
+# Only write trajectory frames every N steps (>=1)
+trajectory_log_every = 5
+# For perception captures of static elements, log only for first N events
+perception_log_first_n = 1
+# Optionally, re-log every M frames (0 disables)
+perception_log_interval_frames = 0
 
 langsam_image_path = "./images/langsam_image_{object}.png"
 xmem_input_path = "./images/xmem_input.png"
