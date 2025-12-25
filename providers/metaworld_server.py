@@ -66,12 +66,32 @@ def main():
         pass
     obs, info = env.reset()
 
-    # Choose cameras by name fallback
+    # Choose cameras by name; robust fallback if names are unavailable
     try:
         import mujoco
-        cam_names = [env.model.id2name(i, mujoco.mjtObj.mjOBJ_CAMERA) for i in range(env.model.ncam)]
-    except Exception:
+        ncam = int(getattr(env.model, "ncam", 0))
         cam_names = []
+        for i in range(ncam):
+            name = None
+            try:
+                # MuJoCo >= 2.3 API
+                name = mujoco.mj_id2name(env.model, mujoco.mjtObj.mjOBJ_CAMERA, i)
+            except Exception:
+                try:
+                    # Legacy mujoco_py-style convenience
+                    name = env.model.id2name(i, mujoco.mjtObj.mjOBJ_CAMERA)
+                except Exception:
+                    name = None
+            if not name:
+                name = f"camera_{i}"
+            cam_names.append(name)
+    except Exception:
+        try:
+            # Fallback without mujoco: synthesize names by count if available
+            ncam = int(getattr(getattr(env, "model", None), "ncam", 0))
+            cam_names = [f"camera_{i}" for i in range(ncam)]
+        except Exception:
+            cam_names = []
     head_id = 0
     wrist_id = 0
     for i, name in enumerate(cam_names):
@@ -114,6 +134,10 @@ def main():
     cameras_info = {
         "names": cam_names,
         "selected": {"head": int(head_id), "wrist": int(wrist_id)},
+        "selected_names": {
+            "head": cam_names[int(head_id)] if int(head_id) < len(cam_names) else None,
+            "wrist": cam_names[int(wrist_id)] if int(wrist_id) < len(cam_names) else None,
+        },
     }
     print(json.dumps({"status": "ready", "env": args.env, "cameras": cameras_info}))
     sys.stdout.flush()
