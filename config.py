@@ -98,6 +98,8 @@ MOVE_EEF_ABS = 12
 STEP_N = 13
 SET_SEED = 14
 SET_TASK_FROM_RAND_VEC = 15
+QUERY_ENV_ATTR = 16
+MAKE_TRAJECTORY_VIDEO = 17
 
 # Paths
 rgb_image_wrist_path = "./images/rgb_image_wrist.png"
@@ -115,6 +117,9 @@ runs_dir = "./runs"
 # Logging throttles
 # Only write trajectory frames every N steps (>=1)
 trajectory_log_every = 5
+trajectory_folder = "./images/trajectory"
+trajectory_video_fps = 15
+trajectory_image_base = "rgb_image"
 # For perception captures of static elements, log only for first N events
 perception_log_first_n = 1
 # Optionally, re-log every M frames (0 disables)

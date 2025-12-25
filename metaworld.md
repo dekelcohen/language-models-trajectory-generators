@@ -9,7 +9,7 @@ Run Metaworld server from another env:
 	cd /mnt/robotics/
 	git clone https://github.com/dekelcohen/Metaworld.git
 	pip install -e .
-	pip install packaging
+	pip install packaging opencv-python remote-pdb
 * Every time:	
      How To Use:
 	) General: The main process talks to the Metaworld server over JSON. Images and camera calibration flow back for accurate point-clouds.
@@ -39,7 +39,11 @@ Run Metaworld server from another env:
 		  - perception_log_first_n = 1
 		  - perception_log_interval_frames = 0
 	  - These keep logging minimal at runtime. Only every Nth trajectory frame is saved; perception overlays log once at the start unless you set a frame interval.	
-	  
+	 ) Debug metaworld_server 
+       ) Problem: The client captures its stdio (pipe) so cannot simply use pdb 
+       ) Solution: Add breakpoint() --> it triggers a dbg-hook --> trigger pdb-remote that listens on port 7890. connect with 
+	     telnet 127.0.0.1 7890 --> you are in pdb like cmd line !
+		 ) For remote debugging change 127.0.0.1 to server addr 
       
 	  
 	  

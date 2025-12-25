@@ -66,6 +66,7 @@ def main():
         pass
     obs, info = env.reset()
 
+  
     # Choose cameras by name; robust fallback if names are unavailable
     try:
         import mujoco
@@ -233,6 +234,12 @@ def main():
         except Exception:
             d = np.clip(depth_raw, 0.0, 1.0)
             Image.fromarray((d * 255).astype(np.uint8)).save(depth_path)
+
+    def render_and_save_rgb(cam_id, rgb_path):
+        # Save only RGB — used for trajectory logging
+        set_active_camera(cam_id)
+        rgb = env.mujoco_renderer.render(render_mode="rgb_array")
+        Image.fromarray(rgb).save(rgb_path)
 
     def _rotmat_to_quat_xyzw(R):
         """Convert 3x3 rotation matrix to quaternion (x, y, z, w) with NumPy only.
@@ -422,19 +429,21 @@ def main():
                         action[:3] = np.clip(delta / env.action_scale, -1.0, 1.0)
                         action[3] = 1.0 if gripper_open else -1.0
                         env.step(action)
-                    # Save a trajectory frame similar to pybullet behavior
-                    # Throttled logging to avoid sim slowdown
-                    if traj_step % int(getattr(config, "trajectory_log_every", 5)) == 0:
+                    # Save RGB trajectory frame sparsely per config
+                    if traj_step % int(config.trajectory_log_every) == 0:
                         rgb_p = rgb_traj_path_tpl.format(step=traj_step)
-                        d_p = depth_traj_path_tpl.format(step=traj_step)
-                        render_and_save(head_id, rgb_p, d_p)
+                        render_and_save_rgb(head_id, rgb_p)
                     traj_step += 1
 
             elif cmd == config.OPEN_GRIPPER:  # OPEN_GRIPPER
                 gripper_open = True
+                print(json.dumps({"gripper_open": True}))
+                sys.stdout.flush()
 
             elif cmd == config.CLOSE_GRIPPER:  # CLOSE_GRIPPER
                 gripper_open = False
+                print(json.dumps({"gripper_open": False}))
+                sys.stdout.flush()
 
             elif cmd == config.TASK_COMPLETED:  # TASK_COMPLETED
                 print(json.dumps(["\u001b[92mFinished executing all generated trajectories!\u001b[0m"]))
@@ -530,6 +539,11 @@ def main():
                             env.reset()
                     except Exception:
                         env.reset()
+                    # Save RGB trajectory frames per config interval
+                    if traj_step % int(config.trajectory_log_every) == 0:
+                        rgb_p = rgb_traj_path_tpl.format(step=traj_step)
+                        render_and_save_rgb(head_id, rgb_p)
+                    traj_step += 1
                 ee_final = env.get_endeff_pos().copy()
                 print(json.dumps({"eef_pos": ee_final.tolist(), "pos_err": float(np.linalg.norm(target - ee_final))}))
                 sys.stdout.flush()
@@ -562,6 +576,52 @@ def main():
                     pass
                 env.reset()
                 print(json.dumps({"rand_vec": rv.tolist()}))
+                sys.stdout.flush()
+            
+            elif cmd == config.QUERY_ENV_ATTR:  # QUERY_ENV_ATTR
+                # args: {"name": "reachCompleted"} or method name. Returns value or None.
+                name = str(args.get("name", "")) if args else ""
+                result = None
+                try:
+                    if hasattr(env, name):
+                        attr = getattr(env, name)
+                        result = attr() if callable(attr) else attr
+                except Exception:
+                    result = None
+                print(json.dumps({"name": name, "value": result}))
+                sys.stdout.flush()
+
+            elif cmd == config.MAKE_TRAJECTORY_VIDEO:  # MAKE_TRAJECTORY_VIDEO
+                try:
+                    from debug.dbg_utils import create_video_from_images
+                    import glob
+                    
+                    folder = args.get("folder", config.trajectory_folder) if args else config.trajectory_folder
+                    base = args.get("base", config.trajectory_image_base) if args else config.trajectory_image_base
+                    fps = int(args.get("fps", config.trajectory_video_fps)) if args else config.trajectory_video_fps
+                    # Auto-detect start/end if not provided by finding available frame indices
+                    pattern = os.path.join(folder, f"{base}_*.png")
+                    files = glob.glob(pattern)
+                    if not files:
+                        print(json.dumps({"ok": False, "error": f"No frames found in {folder} with base '{base}'"}))
+                        sys.stdout.flush()
+                        continue
+                    def _idx_from_name(p):
+                        try:
+                            stem = os.path.basename(p)
+                            return int(stem.rsplit("_", 1)[1].split(".")[0])
+                        except Exception:
+                            return None
+                    indices = sorted([i for i in (_idx_from_name(p) for p in files) if i is not None])
+                    start = int(args.get("start", indices[0])) if args else indices[0]
+                    end = int(args.get("end", indices[-1])) if args else indices[-1]                    
+                    
+                    create_video_from_images(folder_path=folder, base_name=base, start_idx=start, end_idx=end, ext="png", fps=fps)
+                    out_path = os.path.join(folder, f"{base}_{start}_{end}.mp4")
+                    ok = os.path.exists(out_path)
+                    print(json.dumps({"ok": bool(ok), "video": out_path}))
+                except Exception as e:
+                    print(json.dumps({"ok": False, "error": str(e)}))
                 sys.stdout.flush()
             else:
                 # Unknown

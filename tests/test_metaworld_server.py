@@ -149,6 +149,63 @@ class TestMetaworldServer(unittest.TestCase):
         res2 = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 5}})
         self.assertIn('terminated', res2)
 
+    def test_open_door_success_flag(self):
+        # Try to approach and grasp; then query env success flag (reachCompleted)
+        state0 = self._rpc({"cmd": config.GET_STATE, "args": {"objects": ["handle"]}})
+        handle_pos = state0.get('objects', {}).get('handle', {}).get('pos', None)
+        if handle_pos:
+            # Approach above the handle slightly to avoid collisions
+            approach = [handle_pos[0], handle_pos[1], handle_pos[2] + 0.01]
+            _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": approach, "iters": 80, "open_gripper": True}})
+            # Descend to contact and close
+            contact = [handle_pos[0], handle_pos[1], handle_pos[2]]
+            _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": contact, "iters": 60, "open_gripper": True}})
+            _ = self._rpc({"cmd": config.CLOSE_GRIPPER, "args": None})
+            # Pull along -X to rotate the door
+            for k in range(5):
+                tgt = [handle_pos[0] - 0.02 * (k + 1), handle_pos[1], handle_pos[2]]
+                _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": tgt, "iters": 50, "open_gripper": False}})
+                _ = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 4}})
+        # Step a bit to allow env to evaluate the success condition
+        _ = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 10}})
+        # Export a trajectory video for visual inspection BEFORE assertion
+        vid_resp = self._rpc({
+            "cmd": config.MAKE_TRAJECTORY_VIDEO,
+            "args": {"folder": config.trajectory_folder, "base": config.trajectory_image_base, "start": 0, "end": 9999, "fps": config.trajectory_video_fps}
+        })
+        if not vid_resp.get('ok', False):
+            print("MAKE_TRAJECTORY_VIDEO response:", vid_resp)
+            self.fail(f"Video creation failed: {vid_resp}")
+        if 'video' in vid_resp and isinstance(vid_resp['video'], str):
+            self.assertTrue(os.path.exists(vid_resp['video']))
+
+        # Now query env success flag
+        res = self._rpc({"cmd": config.QUERY_ENV_ATTR, "args": {"name": "reachCompleted"}})
+        # Must exist and be True for success
+        self.assertIn('value', res)
+        self.assertIsNotNone(res['value'])
+        self.assertIsInstance(res['value'], bool)
+        self.assertTrue(res['value'])
+
+    def test_make_trajectory_video(self):
+        """Generate a short trajectory and export a video to aid debugging."""
+        # Take a few small steps to ensure frames are saved
+        state = self._rpc({"cmd": config.GET_STATE, "args": None})
+        start = state['eef_pos']
+        for i in range(5):
+            tgt = [start[0] + 0.01 * (i + 1), start[1], start[2]]
+            _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": tgt, "iters": 20, "open_gripper": True}})
+        # Create the video from saved frames
+        vid_resp = self._rpc({
+            "cmd": config.MAKE_TRAJECTORY_VIDEO,
+            "args": {"folder": config.trajectory_folder, "base": config.trajectory_image_base, "start": 0, "end": 9999, "fps": config.trajectory_video_fps}
+        })
+        if not vid_resp.get('ok', False):
+            print("MAKE_TRAJECTORY_VIDEO response:", vid_resp)
+            self.fail(f"Video creation failed: {vid_resp}")
+        if 'video' in vid_resp and isinstance(vid_resp['video'], str):
+            self.assertTrue(os.path.exists(vid_resp['video']))
+
 
 if __name__ == '__main__':
     unittest.main()
