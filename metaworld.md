@@ -1,5 +1,12 @@
-Metaworld + pybullet providers
-========================================
+Metaworld provider (in addition to pybullet)
+=============================================
+
+1) TODO: test_open_door_success_flag doesn't work (open door scripted). it may be that the eef control is o.k but the LLM couldn't come up with a good traj for opening.
+2) TODO: Video is not generated - hard to debug cause stdio is captured by Pipe client 
+   ) Solution: change to websockets server - so can debug and be in normal protocol
+3) TODO: Need to cont test that point cloud and everything is compat with main.py and with prompts (axis x,y,z positions ...)
+   
+
 Run Metaworld server from another env:
 * First time:
   * Install Metaworld + SciPy in a separate virtualenv.
