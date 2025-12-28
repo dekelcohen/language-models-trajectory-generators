@@ -282,6 +282,36 @@ def main():
             return out
         # Send ready banner
         await websocket.send(json.dumps({"status": "ready", "env": args.env, "cameras": cameras_info}))
+        # Shared trajectory executor for both EXECUTE_TRAJECTORY and MOVE_EEF_ABS
+        async def _exec_traj(points, iters_per_point=30, reply=False, open_override=None):
+            nonlocal gripper_open, traj_step
+            last_target = None
+            if open_override is not None:
+                gripper_open = bool(open_override)
+            for pt in points or []:
+                target = np.array(pt[:3], dtype=np.float64)
+                last_target = target
+                for _ in range(max(int(iters_per_point), 1)):
+                    ee = env.get_endeff_pos().copy()
+                    delta = target - ee
+                    if np.linalg.norm(delta) < 1e-3:
+                        break
+                    action = np.zeros(4, dtype=np.float32)
+                    action[:3] = np.clip(delta / env.action_scale, -1.0, 1.0)
+                    action[3] = 1.0 if gripper_open else -1.0
+                    env.step(action)
+                try:
+                    if traj_step % int(config.trajectory_log_every) == 0:
+                        rgb_p = rgb_traj_path_tpl.format(step=traj_step)
+                        arr = env.mujoco_renderer.render(render_mode="rgb_array")
+                        Image.fromarray(arr).save(rgb_p)
+                except Exception:
+                    pass
+                traj_step += 1
+            ee_final = env.get_endeff_pos().copy()
+            pos_err = float(np.linalg.norm((last_target if last_target is not None else ee_final) - ee_final))
+            if reply:
+                await websocket.send(json.dumps({"eef_pos": ee_final.tolist(), "pos_err": pos_err}))
         while True:
             try:
                 line = await websocket.recv()
@@ -333,22 +363,17 @@ def main():
                 elif cmd == config.ADD_TRAJECTORY_POINTS:
                     pass
                 elif cmd == config.EXECUTE_TRAJECTORY:
-                    traj = req_args or []
-                    for pt in traj:
-                        target = np.array(pt[:3], dtype=np.float64)
-                        for _ in range(30):
-                            ee = env.get_endeff_pos().copy()
-                            delta = target - ee
-                            action = np.zeros(4, dtype=np.float32)
-                            if np.linalg.norm(delta) < 1e-3:
-                                break
-                            action[:3] = np.clip(delta / env.action_scale, -1.0, 1.0)
-                            action[3] = 1.0 if gripper_open else -1.0
-                            env.step(action)
-                        if traj_step % int(config.trajectory_log_every) == 0:
-                            rgb_p = rgb_traj_path_tpl.format(step=traj_step)
-                            render_and_save_rgb(head_id, rgb_p)
-                        traj_step += 1
+                    if isinstance(req_args, dict):
+                        pts = req_args.get("points", [])
+                        iters = int(req_args.get("iters_per_point", 30))
+                        reply = bool(req_args.get("reply", False))
+                        open_override = req_args.get("open_gripper")
+                    else:
+                        pts = req_args or []
+                        iters = 30
+                        reply = False
+                        open_override = None
+                    await _exec_traj(pts, iters_per_point=iters, reply=reply, open_override=open_override)
                 elif cmd == config.OPEN_GRIPPER:
                     gripper_open = True
                     await websocket.send(json.dumps({"gripper_open": True}))
@@ -390,31 +415,8 @@ def main():
                 elif cmd == config.MOVE_EEF_ABS:
                     target = np.array(req_args.get("pos", [0, 0, 0]), dtype=np.float64)
                     iters = int(req_args.get("iters", 30))
-                    ee = env.get_endeff_pos().copy()
-                    for _ in range(max(iters, 1)):
-                        ee = env.get_endeff_pos().copy()
-                        delta = target - ee
-                        if np.linalg.norm(delta) < 1e-3:
-                            break
-                        action = np.zeros(4, dtype=np.float32)
-                        action[:3] = np.clip(delta / env.action_scale, -1.0, 1.0)
-                        action[3] = 1.0 if gripper_open else -1.0
-                        env.step(action)
-                    # Log a trajectory RGB frame to support video creation
-                    try:
-                        if traj_step % int(config.trajectory_log_every) == 0:
-                            rgb_p = rgb_traj_path_tpl.format(step=traj_step)
-                            # Use head camera as default
-                            set_active = getattr(env, 'camera_id', None)
-                            _cam = head_id if set_active is None else int(head_id)
-                            # Save frame via renderer
-                            rgb = env.mujoco_renderer.render(render_mode="rgb_array")
-                            Image.fromarray(rgb).save(rgb_p)
-                        traj_step += 1
-                    except Exception:
-                        pass
-                    ee_final = env.get_endeff_pos().copy()
-                    await websocket.send(json.dumps({"eef_pos": ee_final.tolist(), "pos_err": float(np.linalg.norm(target - ee_final))}))
+                    open_override = req_args.get("open_gripper")
+                    await _exec_traj([target.tolist()], iters_per_point=iters, reply=True, open_override=open_override)
                 elif cmd == config.STEP_N:
                     action = np.array(req_args.get("action", [0, 0, 0, 0]), dtype=np.float32)
                     n = int(req_args.get("n", 1))
