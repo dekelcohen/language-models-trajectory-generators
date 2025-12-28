@@ -33,93 +33,37 @@ class TestMetaworldServer(unittest.TestCase):
                 if os.path.isdir(guess):
                     env['METAWORLD_REPO'] = guess
                     break
+        # Start WS server in a background process
         cls.proc = subprocess.Popen(
-            [cls.python, 'providers/metaworld_server.py', '--env', 'sawyer_door_v3'],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=False,   # binary pipes for Windows robustness
-            bufsize=0,
+            [cls.python, 'providers/metaworld_server.py', '--env', 'sawyer_door_v3', '--ws-host', '127.0.0.1', '--ws-port', '8899'],
+            stdin=None,
+            stdout=None,
+            stderr=None,
             env=env,
         )
-        # Wait for a JSON ready banner
-        start_deadline = time.time() + 15.0
-        buffer = []
-        while time.time() < start_deadline:
-            line = cls.proc.stdout.readline()
-            if not line:
-                if cls.proc.poll() is not None:
-                    try:
-                        rem = cls.proc.stdout.read()
-                        if rem:
-                            buffer.append(rem.decode('utf-8', errors='ignore'))
-                    except Exception:
-                        pass
-                    raise RuntimeError('server exited during startup. Output:\n' + ''.join(buffer))
-                time.sleep(0.02)
-                continue
-            try:
-                s = line.decode('utf-8', errors='ignore').strip()
-            except Exception:
-                continue
-            if s:
-                buffer.append(s + '\n')
-            if not s:
-                continue
-            if s[0] not in '{[':
-                continue
-            try:
-                msg = json.loads(s)
-            except Exception:
-                continue
-            if isinstance(msg, dict) and msg.get('status') == 'ready':
-                # Echo the startup banner so camera names/IDs are visible in test output
-                print(s)
-                break
-        else:
-            raise RuntimeError('server did not start with a JSON banner. Output so far:\n' + ''.join(buffer))
+        # Connect WS client
+        from providers.ws_connection import WsJSONConnection
+        cls.conn = WsJSONConnection('ws://127.0.0.1:8899')
+        # Read ready banner
+        ready = cls.conn.recv(timeout=15)
+        if not (isinstance(ready, dict) and ready.get('status') == 'ready'):
+            raise RuntimeError('Did not receive WS ready banner')
 
     @classmethod
     def tearDownClass(cls):
+        try:
+            cls.conn.close()
+        except Exception:
+            pass
         try:
             cls.proc.kill()
         except Exception:
             pass
 
     def _rpc(self, obj):
-        # Send request (ensure process is alive)
-        if self.__class__.proc.poll() is not None:
-            # Drain any remaining output to aid debugging
-            try:
-                leftover = self.__class__.proc.stdout.read()
-            except Exception:
-                leftover = ''
-            raise RuntimeError('server not running; output: ' + (leftover or ''))
-        payload = (json.dumps(obj) + "\n").encode('utf-8')
-        self.__class__.proc.stdin.write(payload)
-        self.__class__.proc.stdin.flush()
-        # Read until a valid JSON line
-        deadline = time.time() + 10.0
-        while time.time() < deadline:
-            line = self.__class__.proc.stdout.readline()
-            if not line:
-                if self.__class__.proc.poll() is not None:
-                    raise RuntimeError('server exited unexpectedly')
-                time.sleep(0.01)
-                continue
-            try:
-                s = line.decode('utf-8', errors='ignore').strip()
-            except Exception:
-                continue
-            if not s:
-                continue
-            if s[0] not in '{[':
-                continue
-            try:
-                return json.loads(s)
-            except Exception:
-                continue
-        raise TimeoutError('timed out waiting for JSON response')
+        # Use WS connection
+        self.__class__.conn.send([obj.get('cmd'), obj.get('args')])
+        return self.__class__.conn.recv(timeout=10)
 
     def test_capture_images_and_camera_info(self):
         # Capture once

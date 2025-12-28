@@ -2,8 +2,9 @@ Metaworld provider (in addition to pybullet)
 =============================================
 
 1) TODO: test_open_door_success_flag doesn't work (open door scripted). it may be that the eef control is o.k but the LLM couldn't come up with a good traj for opening.
-2) TODO: Video is not generated - hard to debug cause stdio is captured by Pipe client 
-   ) Solution: change to websockets server - so can debug and be in normal protocol
+2) Video generation debugging: switched Metaworld to a WebSockets server (stdio free)
+   - Rationale: stdio pipes captured by the client blocked pdb and muddled logs.
+   - Result: server runs with normal stdin/stdout; you can use breakpoint() directly.
 3) TODO: Need to cont test that point cloud and everything is compat with main.py and with prompts (axis x,y,z positions ...)
    
 
@@ -13,10 +14,11 @@ Run Metaworld server from another env:
     
 	conda create --prefix /mnt/robotics/envs/metaworld python=3.11 -y	  	
 	conda activate /mnt/robotics/envs/metaworld
-	cd /mnt/robotics/
+	cd /mnt/robotics/ # E:\Robotics\Simulators_Envs
 	git clone https://github.com/dekelcohen/Metaworld.git
+	cd Metaworld
 	pip install -e .
-	pip install packaging opencv-python remote-pdb
+	pip install websockets packaging opencv-python
 * Every time:	
      How To Use:
 	) General: The main process talks to the Metaworld server over JSON. Images and camera calibration flow back for accurate point-clouds.
@@ -24,17 +26,18 @@ Run Metaworld server from another env:
     ) PyBullet (unchanged default):
       python main.py --sim pybullet --depth-format norm_1m
       Optional validation: set DEBUG_DIFF=1 to compare rotation math.
-    ) Metaworld via main.py (headless):
+    ) Metaworld via main.py (WebSockets, headless):
 	  where python	  
-      set METAWORLD_PYTHON=C:\Users\dekelco\.conda\envs\metaworld\python.exe
+      set METAWORLD_PYTHON=C:\Users\dekelco\.conda\envs\metaworld\python.exe # C:\Users\dekel\miniconda3\envs\metaworld\python.exe
       set METAWORLD_REPO=D:\NLP\Robotics\Simulators_Envs\Metaworld
+      # main.py metaworld
       python main.py --sim metaworld --task sawyer_door_v3 --depth-format norm_zfar
     ) Viewer Metaworld - local sanity (viewer, independent of main.py):
 	  cd /d D:\NLP\Robotics\VLM_Robotics\language-models-trajectory-generators
 	  # Opens MuJoCo viewer, shows env at reset, runs a short passive loop
-      %METAWORLD_PYTHON% providers\metaworld_server.py --env sawyer_door_v3 --viewer
-	) Run metaworld env server directly (to see cameras, if it works)
-      python providers\metaworld_server.py --env sawyer_door_v3 --cameras both	
+      %METAWORLD_PYTHON% providers\metaworld_ws_server.py --env sawyer_door_v3 --viewer
+	) Run metaworld env server directly (to see cameras, WS mode)
+      %METAWORLD_PYTHON% providers\metaworld_server.py --env sawyer_door_v3 --cameras both 
     ) Tests
       cd /d D:\NLP\Robotics\VLM_Robotics\language-models-trajectory-generators
 	  python -m unittest tests/test_metaworld_server.py -v
@@ -46,11 +49,14 @@ Run Metaworld server from another env:
 		  - perception_log_first_n = 1
 		  - perception_log_interval_frames = 0
 	  - These keep logging minimal at runtime. Only every Nth trajectory frame is saved; perception overlays log once at the start unless you set a frame interval.	
-	 ) Debug metaworld_server 
-       ) Problem: The client captures its stdio (pipe) so cannot simply use pdb 
-       ) Solution: Add breakpoint() --> it triggers a dbg-hook --> trigger pdb-remote that listens on port 7890. connect with 
-	     telnet 127.0.0.1 7890 --> you are in pdb like cmd line !
-		 ) For remote debugging change 127.0.0.1 to server addr 
+ ) Debug metaworld WS server
+      - Now you can use native breakpoint() in providers/metaworld_ws_server.py handlers.
+      - Recommended workflow:
+        1) Terminal A: activate metaworld venv and run the WS server:
+           %METAWORLD_PYTHON% providers\metaworld_server.py --env sawyer_door_v3 [--ws-host 127.0.0.1 --ws-port 8765]
+        2) Terminal B: run main.py with --sim metaworld. It connects to ws://127.0.0.1:8765/ws (by default)
+        3) Insert breakpoint() where needed; pdb interacts with Terminal A’s console.
+      - Remote pdb is no longer required for standard debugging.
       
 	  
 	  

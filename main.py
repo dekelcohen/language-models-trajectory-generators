@@ -5,6 +5,7 @@ import torch
 import os
 import sys
 import argparse
+import json
 import traceback
 import multiprocessing
 import logging
@@ -30,6 +31,86 @@ print = functools.partial(print, flush=True)
 
 from XMem.model.network import XMem
 
+
+def _probe_metaworld_ws(server_url, logger, connect_timeout=2.0, ready_timeout=2.0, probe_timeout=3.0):
+    """Try connecting to an already-running Metaworld WS server.
+    Returns a connected WsJSONConnection if responsive; otherwise None.
+    """
+    try:
+        from providers.ws_connection import WsJSONConnection
+        conn = WsJSONConnection(server_url, connect_timeout=connect_timeout)
+        ready = conn.recv(timeout=ready_timeout)
+        if isinstance(ready, dict) and ready.get("status") == "ready":
+            # Send a short probe to confirm responsiveness
+            conn.send([config.GET_STATE])
+            resp = conn.recv(timeout=probe_timeout)
+            if isinstance(resp, dict) and "eef_pos" in resp:
+                logger.info("Using existing Metaworld WS server: %s" % json.dumps(ready))
+                return conn
+        conn.close()
+    except Exception:
+        pass
+    return None
+
+
+def _setup_metaworld_ws(args, logger):
+    """Connect to Metaworld WS server if already running; otherwise spawn and connect.
+    Returns a tuple: (connection, server_proc_or_None).
+    """
+    host = os.environ.get("METAWORLD_WS_HOST", "127.0.0.1")
+    port = int(os.environ.get("METAWORLD_WS_PORT", "8765"))
+    default_url = f"ws://{host}:{port}"
+    server_url = os.environ.get("METAWORLD_SERVER_URL", default_url)
+
+    conn = _probe_metaworld_ws(server_url, logger)
+    if conn:
+        return conn, None
+
+    # Spawn server without capturing stdio so pdb works normally
+    server_path = os.path.join(os.path.dirname(__file__), "providers", "metaworld_server.py")
+    py_exe = os.environ.get("METAWORLD_PYTHON", sys.executable)
+    import subprocess
+    cmd = [py_exe, server_path, "--env", args.task, "--ws-host", host, "--ws-port", str(port)]
+    _p = subprocess.Popen(cmd, stdin=None, stdout=None, stderr=None, cwd=os.getcwd())
+
+    # Connect to spawned server
+    from providers.ws_connection import WsJSONConnection
+    conn = WsJSONConnection(default_url, connect_timeout=15.0)
+    try:
+        _ready = conn.recv(timeout=15)
+        if isinstance(_ready, dict) and _ready.get("status") == "ready":
+            logger.info("Connected Metaworld WS server: %s" % json.dumps(_ready))
+    except Exception:
+        pass
+    return conn, _p
+
+
+def _safe_terminate(proc, logger, name="Metaworld WS server"):
+    try:
+        if proc is None:
+            return
+        # Try graceful terminate
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except Exception:
+            pass
+        if proc.poll() is None:
+            # Force kill
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+        if proc.poll() is None:
+            logger.info(PROGRESS + f"Warning: {name} pid {proc.pid} still running; please close it manually." + ENDC)
+    except Exception:
+        # Best-effort only
+        logger.info(PROGRESS + f"Warning: failed to terminate {name}." + ENDC)
+
 if __name__ == "__main__":
 
     openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -41,6 +122,7 @@ if __name__ == "__main__":
     parser.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")
     parser.add_argument("-m", "--mode", choices=["default", "debug"], default="default", help="select mode to run")
     parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
+    parser.add_argument("--transport", choices=["auto", "pipe", "ws"], default="auto", help="connection transport override; auto: pipe for pybullet, ws for metaworld")
     parser.add_argument("--task", type=str, default="sawyer_door_v3", help="task/environment name (metaworld only)")
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
     args = parser.parse_args()
@@ -64,6 +146,7 @@ if __name__ == "__main__":
     xmem_model = XMem(config.xmem_config, "./XMem/saves/XMem.pth", device).eval().to(device)
 
     # Create connection to the chosen simulator, then build API with it
+    server_proc = None
     if args.sim == "pybullet":
         main_connection, env_connection = Pipe()
         # Start process
@@ -72,22 +155,8 @@ if __name__ == "__main__":
         [env_connection_message] = main_connection.recv()
         logger.info(env_connection_message)
     else:
-        from providers.subproc_connection import SubprocessJSONConnection
-        server_path = os.path.join(os.path.dirname(__file__), "providers", "metaworld_server.py")
-        py_exe = os.environ.get("METAWORLD_PYTHON", sys.executable)
-        # Pass env/task and depth format via CLI and env vars
-        cmd = [py_exe, server_path, "--env", args.task]
-        # Prepare environment for the server
-        env_vars = os.environ.copy()
-        env_vars["DEPTH_FORMAT"] = args.depth_format
-        # Allow user to set METAWORLD_REPO externally
-        env_connection = SubprocessJSONConnection(cmd)
-        main_connection = env_connection
-        ready_msg = main_connection.recv()
-        if isinstance(ready_msg, list) and ready_msg:
-            logger.info(ready_msg[0])
-        else:
-            logger.info("\033[92mFinished setting up environment!\033[0m")
+        # Metaworld: WebSockets transport only
+        main_connection, server_proc = _setup_metaworld_ws(args, logger)
 
     # API set-up
     api = API(args, main_connection, logger, client, langsam_model, xmem_model, device)
@@ -98,9 +167,10 @@ if __name__ == "__main__":
     close_gripper = api.close_gripper
     task_completed = api.task_completed
 
-    # User input
-    command = input("Enter a command: ")
-    api.command = command
+    try:
+        # User input
+        command = input("Enter a command: ")
+        api.command = command
 
     # Main task execution loop
     logger.info(PROGRESS + "STARTING TASK..." + ENDC)
@@ -198,5 +268,15 @@ if __name__ == "__main__":
         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
+    except KeyboardInterrupt:
+        logger.info(PROGRESS + "Interrupted by user (Ctrl+C). Shutting down..." + ENDC)
+    finally:
+        # Close connection and terminate spawned server, if any
+        try:
+            if hasattr(main_connection, "close"):
+                main_connection.close()
+        except Exception:
+            pass
+        _safe_terminate(server_proc, logger)
 
         api.completed_task = False

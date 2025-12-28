@@ -7,6 +7,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 import json
 import time
+import asyncio
 import numpy as np
 from PIL import Image
 import argparse
@@ -23,6 +24,8 @@ def main():
         default="both",
         help="Select cameras to capture: 'head', 'wrist', or 'both' (default)."
     )
+    parser.add_argument("--ws-host", type=str, default=os.environ.get("METAWORLD_WS_HOST", "127.0.0.1"), help="WebSocket host to bind")
+    parser.add_argument("--ws-port", type=int, default=int(os.environ.get("METAWORLD_WS_PORT", "8765")), help="WebSocket port to bind")
     args = parser.parse_args()
     # Load metaworld from an external env path if provided
     # Expect env var METAWORLD_REPO or fallback to current sys.path
@@ -163,8 +166,7 @@ def main():
             "wrist": cam_names[int(wrist_id)] if int(wrist_id) < len(cam_names) else None,
         },
     }
-    print(json.dumps({"status": "ready", "env": args.env, "cameras": cameras_info}))
-    sys.stdout.flush()
+    # In WS mode the ready banner is sent on client connect
 
     # Optional local viewer for sanity checking
     if args.viewer:
@@ -201,6 +203,302 @@ def main():
             return
         except Exception as e:
             print(f"Viewer launch failed: {e}")
+
+    # WebSocket endpoint replacing stdin/stdout loop
+    async def _ws_handler(websocket):
+        # Ensure access to outer-scope state
+        nonlocal gripper_open, traj_step, frame_counter
+        # Local helpers
+        def _set_active_camera(cam_id):
+            try:
+                env.camera_id = int(cam_id)
+            except Exception:
+                pass
+            try:
+                rend = getattr(env, "mujoco_renderer", None)
+                if rend is not None and hasattr(rend, "camera_id"):
+                    rend.camera_id = int(cam_id)
+            except Exception:
+                pass
+        def _render_and_save(cam_id, rgb_path, depth_path):
+            _set_active_camera(cam_id)
+            try:
+                rgb = env.mujoco_renderer.render(render_mode="rgb_array")
+                depth_raw = env.mujoco_renderer.render(render_mode="depth_array")
+                Image.fromarray(rgb).save(rgb_path)
+                try:
+                    K, zn, zf, _, _ = get_intrinsics(cam_id)
+                    z_ndc = depth_raw * 2.0 - 1.0
+                    z_eye = (2.0 * zn * zf) / (zf + zn - z_ndc * (zf - zn))
+                    vis_far = min(zf, zn + 2.0)
+                    d_norm = np.clip((z_eye - zn) / (vis_far - zn + 1e-6), 0.0, 1.0)
+                    d_vis = (1.0 - d_norm)
+                    Image.fromarray((d_vis * 255).astype(np.uint8)).save(depth_path)
+                except Exception:
+                    d = np.clip(depth_raw, 0.0, 1.0)
+                    Image.fromarray((d * 255).astype(np.uint8)).save(depth_path)
+            except Exception:
+                Image.fromarray(np.zeros((256, 256, 3), dtype=np.uint8)).save(rgb_path)
+                if depth_path:
+                    Image.fromarray(np.zeros((256, 256), dtype=np.uint8)).save(depth_path)
+        def _render_and_save_rgb(cam_id, rgb_path):
+            _set_active_camera(cam_id)
+            try:
+                rgb = env.mujoco_renderer.render(render_mode="rgb_array")
+                Image.fromarray(rgb).save(rgb_path)
+            except Exception:
+                Image.fromarray(np.zeros((256, 256, 3), dtype=np.uint8)).save(rgb_path)
+        def _get_cam_pose(cam_id):
+            try:
+                pos = env.data.cam_xpos[cam_id].copy()
+                R = env.data.cam_xmat[cam_id].reshape(3, 3)
+                quat = _rotmat_to_quat_xyzw(R)
+                return pos.tolist(), quat.tolist()
+            except Exception:
+                return [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]
+        def _get_objects_pose(names):
+            out = {}
+            for name in (names or []):
+                pos = None
+                quat = None
+                try:
+                    pos = env.data.geom(name).xpos.copy()
+                    R = env.data.geom(name).xmat.reshape(3, 3)
+                    quat = _rotmat_to_quat_xyzw(R)
+                except Exception:
+                    try:
+                        pos = env.data.site(name).xpos.copy()
+                        R = env.data.site(name).xmat.reshape(3, 3)
+                        quat = _rotmat_to_quat_xyzw(R)
+                    except Exception:
+                        try:
+                            pos = env.data.body(name).xpos.copy()
+                            R = env.data.body(name).xmat.reshape(3, 3)
+                            quat = _rotmat_to_quat_xyzw(R)
+                        except Exception:
+                            pass
+                if pos is not None and quat is not None:
+                    out[name] = {"pos": pos.tolist(), "quat": quat.tolist()}
+            return out
+        # Send ready banner
+        await websocket.send(json.dumps({"status": "ready", "env": args.env, "cameras": cameras_info}))
+        while True:
+            try:
+                line = await websocket.recv()
+            except Exception:
+                break
+            if not line or not str(line).strip():
+                continue
+            try:
+                req = json.loads(line)
+            except Exception:
+                continue
+            cmd = req.get("cmd")
+            req_args = req.get("args")
+            try:
+                # The body of the handler is identical to the previous loop,
+                # but responses are sent via websocket.send(...)
+                if cmd == config.CAPTURE_IMAGES:
+                    for label, cid in _resolve_selected_cameras():
+                        if label == "head":
+                            _render_and_save(cid, rgb_head_path, depth_head_path)
+                        elif label == "wrist":
+                            _render_and_save(cid, rgb_wrist_path, depth_wrist_path)
+                    head_pos, head_quat = _get_cam_pose(head_id)
+                    wrist_pos, wrist_quat = _get_cam_pose(wrist_id)
+                    try:
+                        import mujoco
+                        fovy_h = float(env.model.cam_fovy[head_id])
+                        fovy_w = float(env.model.cam_fovy[wrist_id])
+                        width = int(env.width)
+                        height = int(env.height)
+                        znear = float(env.model.vis.map.znear)
+                        zfar = float(env.model.vis.map.zfar)
+                        fy_h = height / (2.0 * np.tan(np.deg2rad(fovy_h) / 2.0))
+                        fx_h = fy_h * (width / float(height))
+                        K_head = [[fx_h, 0.0, width / 2.0], [0.0, fy_h, height / 2.0], [0.0, 0.0, 1.0]]
+                        fy_w = height / (2.0 * np.tan(np.deg2rad(fovy_w) / 2.0))
+                        fx_w = fy_w * (width / float(height))
+                        K_wrist = [[fx_w, 0.0, width / 2.0], [0.0, fy_w, height / 2.0], [0.0, 0.0, 1.0]]
+                        calib = {
+                            "head": {"K": K_head, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_h},
+                            "wrist": {"K": K_wrist, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_w},
+                            "depth_encoding": "opengl",
+                        }
+                    except Exception:
+                        calib = None
+                    await websocket.send(json.dumps([head_pos, head_quat, wrist_pos, wrist_quat, "\u001b[92mFinished capturing head camera image!\u001b[0m", calib]))
+                elif cmd == config.ADD_BOUNDING_CUBES:
+                    await websocket.send(json.dumps(["\u001b[92mFinished adding bounding cubes to the environment!\u001b[0m"]))
+                elif cmd == config.ADD_TRAJECTORY_POINTS:
+                    pass
+                elif cmd == config.EXECUTE_TRAJECTORY:
+                    traj = req_args or []
+                    for pt in traj:
+                        target = np.array(pt[:3], dtype=np.float64)
+                        for _ in range(30):
+                            ee = env.get_endeff_pos().copy()
+                            delta = target - ee
+                            action = np.zeros(4, dtype=np.float32)
+                            if np.linalg.norm(delta) < 1e-3:
+                                break
+                            action[:3] = np.clip(delta / env.action_scale, -1.0, 1.0)
+                            action[3] = 1.0 if gripper_open else -1.0
+                            env.step(action)
+                        if traj_step % int(config.trajectory_log_every) == 0:
+                            rgb_p = rgb_traj_path_tpl.format(step=traj_step)
+                            render_and_save_rgb(head_id, rgb_p)
+                        traj_step += 1
+                elif cmd == config.OPEN_GRIPPER:
+                    gripper_open = True
+                    await websocket.send(json.dumps({"gripper_open": True}))
+                elif cmd == config.CLOSE_GRIPPER:
+                    gripper_open = False
+                    await websocket.send(json.dumps({"gripper_open": False}))
+                elif cmd == config.TASK_COMPLETED:
+                    await websocket.send(json.dumps(["\u001b[92mFinished executing all generated trajectories!\u001b[0m"]))
+                elif cmd == config.RESET_ENVIRONMENT:
+                    env.reset()
+                    gripper_open = True
+                    traj_step = 1
+                    await websocket.send(json.dumps(["\u001b[92mFinished resetting environment!\u001b[0m"]))
+                elif cmd == config.GET_STATE:
+                    eef = env.get_endeff_pos().copy()
+                    names = []
+                    if req_args and isinstance(req_args, dict):
+                        names = req_args.get("objects", []) or []
+                    objs = _get_objects_pose(names)
+                    try:
+                        qpos = float(env.data.joint("doorjoint").qpos.item())
+                    except Exception:
+                        qpos = None
+                    await websocket.send(json.dumps({"eef_pos": eef.tolist(), "objects": objs, "doorjoint_angle": qpos}))
+                elif cmd == config.GET_CAMERA_INFO:
+                    try:
+                        K_h, zn_h, zf_h, w, h = get_intrinsics(head_id)
+                        K_w, zn_w, zf_w, _, _ = get_intrinsics(wrist_id)
+                        await websocket.send(json.dumps({
+                            "head": {"K": K_h, "znear": zn_h, "zfar": zf_h, "width": w, "height": h},
+                            "wrist": {"K": K_w, "znear": zn_w, "zfar": zf_w, "width": w, "height": h},
+                        }))
+                    except Exception:
+                        await websocket.send(json.dumps(None))
+                elif cmd == config.CAPTURE_ANNOTATED_IMAGES:
+                    frame_counter += 1
+                    should_log = (frame_counter % max(int(getattr(config, 'perception_log_every', 10)), 1) == 0)
+                    await websocket.send(json.dumps({"logged": should_log, "frame": frame_counter}))
+                elif cmd == config.MOVE_EEF_ABS:
+                    target = np.array(req_args.get("pos", [0, 0, 0]), dtype=np.float64)
+                    iters = int(req_args.get("iters", 30))
+                    ee = env.get_endeff_pos().copy()
+                    for _ in range(max(iters, 1)):
+                        ee = env.get_endeff_pos().copy()
+                        delta = target - ee
+                        if np.linalg.norm(delta) < 1e-3:
+                            break
+                        action = np.zeros(4, dtype=np.float32)
+                        action[:3] = np.clip(delta / env.action_scale, -1.0, 1.0)
+                        action[3] = 1.0 if gripper_open else -1.0
+                        env.step(action)
+                    # Log a trajectory RGB frame to support video creation
+                    try:
+                        if traj_step % int(config.trajectory_log_every) == 0:
+                            rgb_p = rgb_traj_path_tpl.format(step=traj_step)
+                            # Use head camera as default
+                            set_active = getattr(env, 'camera_id', None)
+                            _cam = head_id if set_active is None else int(head_id)
+                            # Save frame via renderer
+                            rgb = env.mujoco_renderer.render(render_mode="rgb_array")
+                            Image.fromarray(rgb).save(rgb_p)
+                        traj_step += 1
+                    except Exception:
+                        pass
+                    ee_final = env.get_endeff_pos().copy()
+                    await websocket.send(json.dumps({"eef_pos": ee_final.tolist(), "pos_err": float(np.linalg.norm(target - ee_final))}))
+                elif cmd == config.STEP_N:
+                    action = np.array(req_args.get("action", [0, 0, 0, 0]), dtype=np.float32)
+                    n = int(req_args.get("n", 1))
+                    terminated = False
+                    truncated = False
+                    for _ in range(n):
+                        _, _, terminated, truncated, _ = env.step(action)
+                        if terminated or truncated:
+                            break
+                    await websocket.send(json.dumps({"terminated": terminated, "truncated": truncated}))
+                elif cmd == config.SET_SEED:
+                    seed = int(req_args.get("seed", 42))
+                    env.seed(seed)
+                    await websocket.send(json.dumps({"seed": seed}))
+                elif cmd == config.SET_TASK_FROM_RAND_VEC:
+                    rv = np.array(req_args.get("rand_vec", [0.1, 0.95, 0.15]), dtype=np.float64)
+                    try:
+                        setattr(env, "_freeze_rand_vec", True)
+                        setattr(env, "_last_rand_vec", rv)
+                        setattr(env, "_set_task_called", True)
+                    except Exception:
+                        pass
+                    env.reset()
+                    await websocket.send(json.dumps({"rand_vec": rv.tolist()}))
+                elif cmd == config.QUERY_ENV_ATTR:
+                    name = str(req_args.get("name", "")) if req_args else ""
+                    result = None
+                    try:
+                        if hasattr(env, name):
+                            attr = getattr(env, name)
+                            result = attr() if callable(attr) else attr
+                    except Exception:
+                        result = None
+                    await websocket.send(json.dumps({"name": name, "value": result}))
+                elif cmd == config.MAKE_TRAJECTORY_VIDEO:
+                    try:
+                        from debug.dbg_utils import create_video_from_images
+                        import glob
+                        folder = req_args.get("folder", config.trajectory_folder) if req_args else config.trajectory_folder
+                        base = req_args.get("base", config.trajectory_image_base) if req_args else config.trajectory_image_base
+                        fps = int(req_args.get("fps", config.trajectory_video_fps)) if req_args else config.trajectory_video_fps
+                        pattern = os.path.join(folder, f"{base}_*.png")
+                        files = glob.glob(pattern)
+                        if not files:
+                            await websocket.send(json.dumps({"ok": False, "error": f"No frames found in {folder} with base '{base}'"}))
+                            continue
+                        def _idx_from_name(p):
+                            try:
+                                stem = os.path.basename(p)
+                                return int(stem.rsplit("_", 1)[1].split(".")[0])
+                            except Exception:
+                                return None
+                        indices = sorted([i for i in (_idx_from_name(p) for p in files) if i is not None])
+                        start = int(req_args.get("start", indices[0])) if req_args else indices[0]
+                        end = int(req_args.get("end", indices[-1])) if req_args else indices[-1]
+                        create_video_from_images(folder_path=folder, base_name=base, start_idx=start, end_idx=end, ext="png", fps=fps)
+                        out_path = os.path.join(folder, f"{base}_{start}_{end}.mp4")
+                        ok = os.path.exists(out_path)
+                        await websocket.send(json.dumps({"ok": bool(ok), "video": out_path}))
+                    except Exception as e:
+                        await websocket.send(json.dumps({"ok": False, "error": str(e)}))
+                else:
+                    await websocket.send(json.dumps({"error": "unknown_cmd", "cmd": cmd}))
+            except Exception as e:
+                try:
+                    await websocket.send(json.dumps({"error": str(e)}))
+                except Exception:
+                    pass
+
+    async def _serve():
+        try:
+            import websockets
+        except Exception:
+            print("[error] websockets is required. pip install websockets")
+            raise
+        async with websockets.serve(_ws_handler, args.ws_host, args.ws_port, max_size=None):
+            await asyncio.Future()
+
+    try:
+        asyncio.run(_serve())
+    except KeyboardInterrupt:
+        pass
+    # WS server is running; exit before legacy helpers/pipe loop.
+    return
 
     def set_active_camera(cam_id):
         # Switch the env and renderer to a specific camera if supported.
