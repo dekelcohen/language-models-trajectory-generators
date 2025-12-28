@@ -569,7 +569,8 @@ def main():
                     frame_counter += 1
                     await websocket.send(json.dumps({"logged": should_log, "frame": frame_counter}))
                 elif cmd == config.MOVE_EEF_ABS:
-                    #print(f'MOVE_EEF_ABS args={req_args}', flush=True)
+                    print(f'MOVE_EEF_ABS args={req_args}', flush=True)
+                    
                     target = np.array(req_args.get("pos", [0, 0, 0]), dtype=np.float64)
                     iters = int(req_args.get("iters", 30))
                     open_override = req_args.get("open_gripper")                   

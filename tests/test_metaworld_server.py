@@ -106,8 +106,8 @@ class TestMetaworldServer(unittest.TestCase):
 
     def test_open_door_script(self):
         # Try to approach and grasp; then query env success flag (reachCompleted)        
-        state0 = self._rpc({"cmd": config.GET_STATE, "args": {"objects": ["handle"]}})
-        print('*** test_open_door_script after GET_STATE')                
+        state0 = self._rpc({"cmd": config.GET_STATE, "args": {"objects": ["handle", "goal"]}})
+        print(f'*** test_open_door_script after GET_STATE state0={state0}')
         handle_pos = state0.get('objects', {}).get('handle', {}).get('pos', None)
         if handle_pos:
             # Approach above the handle slightly to avoid collisions

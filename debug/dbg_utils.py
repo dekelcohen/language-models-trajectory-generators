@@ -9,7 +9,8 @@ def create_video_from_images(
     start_idx: int = 0, 
     end_idx: int = float('inf'), 
     ext: str = 'png', 
-    fps: int = 30
+    fps: int = 30,
+    lookahead_max: int = 50,
 ):
     """
     Creates an .mp4 video from images in the format: <base_name>_<idx>.<ext>
@@ -85,24 +86,26 @@ def create_video_from_images(
             
             if not os.path.exists(curr_path):
                 # --- Look Ahead Logic ---
-                next_idx = current_idx + 1
-                
-                if next_idx > end_idx:
-                    break
-                    
-                next_path = os.path.join(folder_path, f"{base_name}_{next_idx}.{ext}")
-                
-                if os.path.exists(next_path):
-                    print(f"[Warning] Frame {current_idx} missing. Skipping to {next_idx}...")
-                    current_idx += 1
-                    continue 
+                # Allow jumping ahead up to `lookahead_max` frames to find the next available frame.
+                next_found = None
+                for delta in range(1, int(lookahead_max) + 1):
+                    next_idx = current_idx + delta
+                    if next_idx > end_idx:
+                        break
+                    next_path = os.path.join(folder_path, f"{base_name}_{next_idx}.{ext}")
+                    if os.path.exists(next_path):
+                        next_found = next_idx
+                        break
+                if next_found is not None:
+                    print(f"[Warning] Frame {current_idx} missing. Skipping to {next_found}...")
+                    current_idx = next_found
+                    continue
+                # No further frames within lookahead window -> end sequence
+                if end_idx == float('inf'):
+                    print(f"[Info] Sequence ended at {current_idx}.")
                 else:
-                    # Both missing -> End of sequence
-                    if end_idx == float('inf'):
-                        print(f"[Info] Sequence ended at {current_idx}.")
-                    else:
-                        print(f"[Info] Sequence broken at {current_idx}. Stopping.")
-                    break
+                    print(f"[Info] Sequence broken at {current_idx}. Stopping.")
+                break
             
             # --- Write Frame ---
             frame = cv2.imread(curr_path)
