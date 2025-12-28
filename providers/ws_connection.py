@@ -16,7 +16,7 @@ class WsJSONConnection:
     Requires the 'websockets' package.
     """
 
-    def __init__(self, url: str, connect_timeout: float = 15.0):
+    def __init__(self, url: str, timeout: float | None = 15.0):
         try:
             import asyncio  # noqa: F401
             import websockets  # noqa: F401
@@ -30,14 +30,27 @@ class WsJSONConnection:
         self._rx_queue: Queue = Queue()
         self._loop = None
         self._ws = None
+        # Single override applied to connect/send/close. None => defaults per op; <0 => infinite
+        self._timeout_override = timeout
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
         # Wait for connection to establish
         start = time.time()
-        while time.time() - start < connect_timeout:
+        # Effective timeout for connect: default 15.0 unless overridden; negative => infinite
+        connect_to = None
+        if self._timeout_override is None:
+            connect_to = 15.0
+        elif isinstance(self._timeout_override, (int, float)) and self._timeout_override < 0:
+            connect_to = None
+        else:
+            connect_to = float(self._timeout_override)
+        deadline = None if connect_to is None else (start + connect_to)
+        while True:
             if self._ws is not None:
                 return
+            if deadline is not None and time.time() >= deadline:
+                break
             time.sleep(0.01)
         raise TimeoutError(f"Timed out connecting to WebSocket at {url}")
 
@@ -99,8 +112,15 @@ class WsJSONConnection:
             raise RuntimeError("WebSocket not connected")
         data = json.dumps(obj)
         fut = asyncio.run_coroutine_threadsafe(_send(self._ws, data), self._loop)
+        # Effective timeout for send: default 10.0 unless overridden; negative => infinite
+        if self._timeout_override is None:
+            send_to = 10.0
+        elif isinstance(self._timeout_override, (int, float)) and self._timeout_override < 0:
+            send_to = None
+        else:
+            send_to = float(self._timeout_override)
         # Wait for send to complete to preserve ordering semantics
-        fut.result(timeout=10)
+        fut.result(timeout=send_to)
 
     def recv(self, timeout=None):
         try:
@@ -133,7 +153,14 @@ class WsJSONConnection:
             if self._ws and self._loop:
                 fut = asyncio.run_coroutine_threadsafe(_close(self._ws), self._loop)
                 try:
-                    fut.result(timeout=5)
+                    # Effective timeout for close: default 5.0 unless overridden; negative => infinite
+                    if self._timeout_override is None:
+                        close_to = 5.0
+                    elif isinstance(self._timeout_override, (int, float)) and self._timeout_override < 0:
+                        close_to = None
+                    else:
+                        close_to = float(self._timeout_override)
+                    fut.result(timeout=close_to)
                 except Exception:
                     pass
         finally:
@@ -143,4 +170,3 @@ class WsJSONConnection:
                     self._thread.join(timeout=1.0)
             except Exception:
                 pass
-

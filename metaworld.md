@@ -52,6 +52,8 @@ Run Metaworld server from another env:
  ) Debug metaworld WS server
       - Now you can use native breakpoint() in providers/metaworld_ws_server.py handlers.
       - Recommended workflow:
+	    ) Tests disable timeout in ws: 
+		   python -m unittest -v tests.test_metaworld_server.TestMetaworldServer.test_make_trajectory_video --timeout=0
         1) Terminal A: activate metaworld venv and run the WS server:
            %METAWORLD_PYTHON% providers\metaworld_server.py --env sawyer_door_v3 [--ws-host 127.0.0.1 --ws-port 8765]
         2) Terminal B: run main.py with --sim metaworld. It connects to ws://127.0.0.1:8765/ws (by default)

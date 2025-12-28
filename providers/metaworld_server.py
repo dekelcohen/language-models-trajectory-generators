@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 import argparse
 import config
+from debug.dbg_utils import install_debug_reminder
 
 
 def main():
@@ -26,7 +27,12 @@ def main():
     )
     parser.add_argument("--ws-host", type=str, default=os.environ.get("METAWORLD_WS_HOST", "127.0.0.1"), help="WebSocket host to bind")
     parser.add_argument("--ws-port", type=int, default=int(os.environ.get("METAWORLD_WS_PORT", "8765")), help="WebSocket port to bind")
+    parser.add_argument("--timeout", default=None, help="Client timeout hint (0/-1/None = no timeout).")
     args = parser.parse_args()
+    # If provided, propagate to this process for any helpers that consult env
+    if args.timeout is not None:
+        os.environ["MW_TIMEOUT"] = str(args.timeout)
+    install_debug_reminder()
     # Load metaworld from an external env path if provided
     # Expect env var METAWORLD_REPO or fallback to current sys.path
     meta_root = os.environ.get("METAWORLD_REPO")
@@ -455,6 +461,7 @@ def main():
                     try:
                         from debug.dbg_utils import create_video_from_images
                         import glob
+                                                                        
                         folder = req_args.get("folder", config.trajectory_folder) if req_args else config.trajectory_folder
                         base = req_args.get("base", config.trajectory_image_base) if req_args else config.trajectory_image_base
                         fps = int(req_args.get("fps", config.trajectory_video_fps)) if req_args else config.trajectory_video_fps
@@ -756,7 +763,7 @@ def main():
                 print(json.dumps(["\u001b[92mFinished resetting environment!\u001b[0m"]))
                 sys.stdout.flush()
 
-            elif cmd == config.GET_STATE:  # GET_STATE
+            elif cmd == config.GET_STATE:  # GET_STATE                                               
                 eef = env.get_endeff_pos().copy()
                 names = []
                 if args and isinstance(args, dict):
@@ -938,3 +945,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

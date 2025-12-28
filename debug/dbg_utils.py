@@ -119,3 +119,55 @@ def create_video_from_images(
     finally:
         out.release()
         print(f"[Success] Saved {output_path} ({processed_frames} frames).")
+# -------------------------
+# Debug reminder utilities
+# -------------------------
+
+_REMINDER_INSTALLED = False
+_ORIG_BREAKPOINTHOOK = None
+_ORIG_EXCEPTHOOK = None
+_ORIG_THREADING_EXCEPTHOOK = None
+
+def install_debug_reminder(tip: str | None = None) -> None:
+    """Install simple hooks that print a reminder when debugging pauses.
+
+    - Prints a tip to stderr when builtin breakpoint() triggers (via sys.breakpointhook).
+    - Prints the same tip on uncaught exceptions in the main thread (sys.excepthook)
+      and in threads (threading.excepthook, if present).
+
+    Notes: intentionally simple  does not handle PYTHONBREAKPOINT overrides.
+    """
+    global _REMINDER_INSTALLED, _ORIG_BREAKPOINTHOOK, _ORIG_EXCEPTHOOK, _ORIG_THREADING_EXCEPTHOOK
+    if _REMINDER_INSTALLED:
+        return
+    import os, sys, threading
+    message = tip or os.getenv("MW_DEBUG_TIP", "Reminder: launch tests/main.py with --timeout=0 (or -1) to allow debugging.")
+
+    def _print_tip():
+        try:
+            print(f"[DEBUG TIP] {message}", file=sys.stderr, flush=True)
+        except Exception:
+            pass
+
+    _ORIG_BREAKPOINTHOOK = getattr(sys, "breakpointhook", None)
+    def _bp_hook(*a, **kw):
+        _print_tip()
+        if _ORIG_BREAKPOINTHOOK is not None:
+            return _ORIG_BREAKPOINTHOOK(*a, **kw)
+    sys.breakpointhook = _bp_hook
+
+    _ORIG_EXCEPTHOOK = sys.excepthook
+    def _exc_hook(t, v, tb):
+        _print_tip()
+        return _ORIG_EXCEPTHOOK(t, v, tb)
+    sys.excepthook = _exc_hook
+
+    if hasattr(threading, "excepthook"):
+        _ORIG_THREADING_EXCEPTHOOK = threading.excepthook
+        def _thread_exc_hook(args):
+            _print_tip()
+            return _ORIG_THREADING_EXCEPTHOOK(args)
+        threading.excepthook = _thread_exc_hook
+
+    _REMINDER_INSTALLED = True
+
