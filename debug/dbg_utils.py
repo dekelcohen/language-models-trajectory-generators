@@ -77,6 +77,7 @@ def create_video_from_images(
     # 4. Processing Loop
     current_idx = start_idx
     processed_frames = 0
+    skip_events = 0  # count how many times we had to jump ahead
 
     try:
         while current_idx <= end_idx:
@@ -97,7 +98,8 @@ def create_video_from_images(
                         next_found = next_idx
                         break
                 if next_found is not None:
-                    print(f"[Warning] Frame {current_idx} missing. Skipping to {next_found}...")
+                    # remember a skip event; defer noisy printing to the end
+                    skip_events += 1
                     current_idx = next_found
                     continue
                 # No further frames within lookahead window -> end sequence
@@ -121,7 +123,10 @@ def create_video_from_images(
             
     finally:
         out.release()
+        if skip_events > 0:
+            print(f"[Warning] Skipped {skip_events} gap(s) due to missing frames (lookahead <= {lookahead_max}).")
         print(f"[Success] Saved {output_path} ({processed_frames} frames).")
+        
 # -------------------------
 # Debug reminder utilities
 # -------------------------
