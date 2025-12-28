@@ -107,7 +107,7 @@ class TestMetaworldServer(unittest.TestCase):
     def test_open_door_script(self):
         # Try to approach and grasp; then query env success flag (reachCompleted)        
         state0 = self._rpc({"cmd": config.GET_STATE, "args": {"objects": ["handle"]}})
-        print('*** test_open_door_script after GET_STATE')
+        print('*** test_open_door_script after GET_STATE')                
         handle_pos = state0.get('objects', {}).get('handle', {}).get('pos', None)
         if handle_pos:
             # Approach above the handle slightly to avoid collisions
@@ -124,6 +124,7 @@ class TestMetaworldServer(unittest.TestCase):
                 _ = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 4}})
         # Step a bit to allow env to evaluate the success condition
         _ = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 10}})
+                        
         # Export a trajectory video for visual inspection BEFORE assertion
         vid_resp = self._rpc({
             "cmd": config.MAKE_TRAJECTORY_VIDEO,

@@ -211,7 +211,7 @@ perception_logged = 0
 
 
 # Shared trajectory executor for both EXECUTE_TRAJECTORY and MOVE_EEF_ABS
-async def _exec_traj(env, points, iters_per_point=30, open_override=None):
+async def _exec_traj(env, points, iters_per_point=30, open_override=None, cam_for_logging = None):
     global gripper_open, traj_step
     last_target = None
     if open_override is not None:
@@ -241,12 +241,13 @@ async def _exec_traj(env, points, iters_per_point=30, open_override=None):
             env.step(action)
             # Log trajectory RGB at configured interval per sim step
             try:
-                if traj_step % int(getattr(config, 'trajectory_log_every', 5)) == 0:
-                    rgb_p = rgb_traj_path_tpl.format(step=traj_step)
-                    arr = env.mujoco_renderer.render(render_mode="rgb_array")
-                    Image.fromarray(arr).save(rgb_p)
-            except Exception:
-                pass
+                if traj_step % int(config.trajectory_log_every) == 0:                    
+                    rgb_p = config.rgb_image_trajectory_path.format(step=traj_step)
+                    cam_id = int(cam_for_logging) if cam_for_logging is not None else 0
+                    _render_and_save_rgb(env, cam_id, rgb_p)
+            except Exception as ex:
+                print(f'++++ Failed to write env-cam traj rgb images', flush=True)
+                
             traj_step += 1
             # If getting worse repeatedly, shrink step to stabilize
             if last_dist is not None and dist > last_dist + 1e-4:
@@ -501,7 +502,10 @@ def main():
                         iters = 30
                         reply = False
                         open_override = None
-                    ee_final, pos_err = await _exec_traj(env, pts, iters_per_point=iters, open_override=open_override)
+                    # Use first selected camera (head by default) for logging frames
+                    selected = _resolve_selected_cameras()
+                    cam_for_logging = selected[0][1] if selected else head_id
+                    ee_final, pos_err = await _exec_traj(env, pts, iters_per_point=iters, open_override=open_override, cam_for_logging=cam_for_logging)
                     if reply:
                         await websocket.send(json.dumps({"eef_pos": ee_final, "pos_err": float(pos_err)}))
                 elif cmd == config.OPEN_GRIPPER:
@@ -565,10 +569,13 @@ def main():
                     frame_counter += 1
                     await websocket.send(json.dumps({"logged": should_log, "frame": frame_counter}))
                 elif cmd == config.MOVE_EEF_ABS:
+                    #print(f'MOVE_EEF_ABS args={req_args}', flush=True)
                     target = np.array(req_args.get("pos", [0, 0, 0]), dtype=np.float64)
                     iters = int(req_args.get("iters", 30))
-                    open_override = req_args.get("open_gripper")
-                    ee_final, pos_err = await _exec_traj(env, [target.tolist()], iters_per_point=iters, open_override=open_override)
+                    open_override = req_args.get("open_gripper")                   
+                    selected = _resolve_selected_cameras()
+                    cam_for_logging = selected[0][1] if selected else head_id
+                    ee_final, pos_err = await _exec_traj(env, [target.tolist()], iters_per_point=iters, open_override=open_override, cam_for_logging=cam_for_logging)
                     await websocket.send(json.dumps({"eef_pos": ee_final, "pos_err": float(pos_err)}))
                 elif cmd == config.STEP_N:
                     action = np.array(req_args.get("action", [0, 0, 0, 0]), dtype=np.float32)
@@ -636,6 +643,7 @@ def main():
                     await websocket.send(json.dumps({"error": "unknown_cmd", "cmd": cmd}))
             except Exception as e:
                 try:
+                    print(f'Exception {str(e)}', flush=True)
                     await websocket.send(json.dumps({"error": str(e)}))
                 except Exception:
                     pass
