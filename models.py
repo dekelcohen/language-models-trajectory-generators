@@ -9,9 +9,6 @@ from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
 
 sys.path.append("./XMem/")
 
-from XMem.inference.inference_core import InferenceCore
-from XMem.inference.interact.interactive_utils import image_to_torch, index_numpy_to_one_hot_torch, torch_prob_to_numpy_mask, overlay_davis
-
 def get_langsam_output(image, model, segmentation_texts, segmentation_count):
     """
     Updated to handle new LangSAM output format:
@@ -130,6 +127,17 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdou
 
 
 def get_xmem_output(model, device, trajectory_length):
+    # Import XMem utilities lazily to avoid hard dependency when tracking is disabled
+    try:
+        from XMem.inference.inference_core import InferenceCore  # type: ignore
+        from XMem.inference.interact.interactive_utils import (
+            image_to_torch,
+            index_numpy_to_one_hot_torch,
+            torch_prob_to_numpy_mask,
+            overlay_davis,
+        )  # type: ignore
+    except Exception as e:
+        raise RuntimeError("XMem components are unavailable. Ensure submodule and deps are installed.") from e
 
     mask = np.array(Image.open(config.xmem_input_path).convert("L"))
     mask = np.unique(mask, return_inverse=True)[1].reshape(mask.shape)

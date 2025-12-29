@@ -33,6 +33,8 @@ class API:
         self.wrist_camera_position = None
         self.wrist_camera_orientation_q = None
         self.command = None
+        # Tracking provider selection ("xmem" or "none")
+        self.track_provider = getattr(args, "track_provider", "xmem")
 
 
 
@@ -183,6 +185,12 @@ class API:
             self.main_connection.send([TASK_COMPLETED])
             [env_connection_message] = self.main_connection.recv()
             self.logger.info(env_connection_message)
+
+            # If tracking is disabled, skip XMem-based verification entirely
+            if self.track_provider == "none":
+                self.logger.info(PROGRESS + "Tracking disabled (--track-provider=none); skipping XMem verification." + ENDC)
+                self.completed_task = True
+                return
 
             self.logger.info(PROGRESS + "Generating XMem output..." + ENDC)
             masks = models.get_xmem_output(self.xmem_model, self.device, self.trajectory_length)

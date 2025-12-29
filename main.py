@@ -26,10 +26,7 @@ from prompts.task_failure_prompt import TASK_FAILURE_PROMPT
 from prompts.task_summary_prompt import TASK_SUMMARY_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC
 
-sys.path.append("./XMem/")
 print = functools.partial(print, flush=True)
-
-from XMem.model.network import XMem
 
 
 def _probe_metaworld_ws(server_url, logger, connect_timeout=2.0, ready_timeout=2.0, probe_timeout=3.0):
@@ -126,6 +123,7 @@ if __name__ == "__main__":
     parser.add_argument("--task", type=str, default="sawyer_door_v3", help="task/environment name (metaworld only)")
     parser.add_argument("--seg-provider", choices=["langsam", "sam3"], default="langsam", help="select segmentation provider (LangSAM or RoboFlow SAM3)")
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
+    parser.add_argument("--track-provider", choices=["xmem", "none"], default="xmem", help="tracking provider for success verification; set to 'none' to disable XMem usage")
     args = parser.parse_args()
 
     # Logging
@@ -148,7 +146,16 @@ if __name__ == "__main__":
         langsam_model = LangSAM()
     else:
         langsam_model = None
-    xmem_model = XMem(config.xmem_config, "./XMem/saves/XMem.pth", device).eval().to(device)
+    xmem_model = None
+    # Lazily load XMem only if requested
+    if args.track_provider == "xmem":
+        try:
+            sys.path.append("./XMem/")
+            from XMem.model.network import XMem  # type: ignore
+            xmem_model = XMem(config.xmem_config, "./XMem/saves/XMem.pth", device).eval().to(device)
+        except Exception as e:
+            # Do not crash if XMem submodule/weights are missing when disabled; surface a clear log when enabled
+            raise RuntimeError("Failed to initialize XMem model. Ensure the 'XMem' submodule and weights exist.") from e
 
     # Create connection to the chosen simulator, then build API with it
     server_proc = None
