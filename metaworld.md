@@ -2,11 +2,18 @@ Metaworld provider (in addition to pybullet)
 =============================================
 
 1) TODO: test_open_door_success_flag doesn't work (open door scripted). it may be that the eef control is o.k but the LLM couldn't come up with a good traj for opening.
-2) Video generation debugging: switched Metaworld to a WebSockets server (stdio free)
-   - Rationale: stdio pipes captured by the client blocked pdb and muddled logs.
-   - Result: server runs with normal stdin/stdout; you can use breakpoint() directly.
 3) TODO: Need to cont test that point cloud and everything is compat with main.py and with prompts (axis x,y,z positions ...)
-   
+   ) api.detect_object 
+     ) langsam (bbox, seg-masks)
+	 ) utils.get_bounding_cube_from_point_cloud(rgb_img, depth_img, masks, head_cam_pos + oriet, ) --> bounding_cubes_world_coordinates + orient 
+	 ) TODO: ADD_BOUNDING_CUBES - plot green lines around all objects 3D cubes in pyBullet (currently doesn't nothing in metaworld_server)
+	   ) Does the VLM ever sees these lines ? maybe in next CAPTURE_IMAGES ?
+	 
+   ) TODO: codex added calibration images from metaworld (optional) - it added a lot of code to  get_world_point_world_frame --> get_intrinsics_extrinsics
+     ) TODO: Run get_intrinsics_extrinsics under pyBullet to compare (DEBUG_DIFF flag) the output of pybullet matrices to the new codex code 
+	 ) TODO: Try metaworld with[out] calibration (disable it in server) --> compare outputs with pyBullet as much as possible (dims, cams should be similar - range of cell values ...)
+4) TODO: Moondream bbox and segmentation masks provider side by side with langsam 
+   ) 
 
 Run Metaworld server from another env:
 * First time:
@@ -536,3 +543,10 @@ depth normalization and clipping at 1m
           - norm_zfar: store Z/zfar (keeps full range, matches Metaworld server).
           - norm_1m: current PyBullet behavior (clip at 1 m, 0..1).
       - We can wire this flag to both providers so reconstruction is consistent across backends.	  
+
+
+DONE
+- - - -
+2) DONE: Video generation debugging: switched Metaworld to a WebSockets server (stdio free)
+   - Rationale: stdio pipes captured by the client blocked pdb and muddled logs.
+   - Result: server runs with normal stdin/stdout; you can use breakpoint() directly.
