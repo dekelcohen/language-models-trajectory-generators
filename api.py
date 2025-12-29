@@ -4,6 +4,7 @@ import torch
 import math
 import config
 import models
+from segmentation_adapter import get_segmentation_output
 import utils
 from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
@@ -80,7 +81,14 @@ class API:
         segmentation_texts = [segmentation_text]
 
         self.logger.info(PROGRESS + "Segmenting head camera image..." + ENDC)
-        model_predictions, boxes, segmentation_texts = models.get_langsam_output(rgb_image_head, self.langsam_model, segmentation_texts, self.segmentation_count)
+        # Provider-agnostic segmentation; defaults to LangSAM when not specified. supports RoboFlow SAM3 api
+        model_predictions, boxes, segmentation_texts = get_segmentation_output(
+            rgb_image_head,
+            self.langsam_model,
+            segmentation_texts,
+            self.segmentation_count,
+            provider=getattr(self.args, "seg_provider", "langsam"),
+        )
         self.logger.info(OK + "Finished segmenting head camera image!" + ENDC)
 
         masks = utils.get_segmentation_mask(model_predictions, config.segmentation_threshold)

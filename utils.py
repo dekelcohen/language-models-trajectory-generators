@@ -1,12 +1,10 @@
 import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
-import torch
 import math
 import os
 import config
 from PIL import Image
-from torchvision.utils import save_image
 from shapely.geometry import MultiPoint, Polygon, polygon
 
 def get_segmentation_mask(model_predictions, segmentation_threshold):
@@ -14,11 +12,18 @@ def get_segmentation_mask(model_predictions, segmentation_threshold):
     masks = []
 
     for model_prediction in model_predictions:
-        model_prediction_np = model_prediction.detach().cpu().numpy()
-        segmentation_threshold = np.max(model_prediction_np) - segmentation_threshold * (np.max(model_prediction_np) - np.min(model_prediction_np))
-        model_prediction[model_prediction < segmentation_threshold] = False
-        model_prediction[model_prediction >= segmentation_threshold] = True
-        masks.append(model_prediction)
+        # Support both torch.Tensor and numpy arrays for mask predictions
+        if hasattr(model_prediction, "detach"):
+            model_prediction_np = model_prediction.detach().cpu().numpy()
+            thr = np.max(model_prediction_np) - segmentation_threshold * (np.max(model_prediction_np) - np.min(model_prediction_np))
+            model_prediction[model_prediction < thr] = False
+            model_prediction[model_prediction >= thr] = True
+            masks.append(model_prediction)
+        else:
+            mp = np.asarray(model_prediction)
+            thr = np.max(mp) - segmentation_threshold * (np.max(mp) - np.min(mp))
+            bin_mask = (mp >= thr).astype(np.uint8)
+            masks.append(bin_mask)
 
     return masks
 
@@ -105,11 +110,15 @@ def save_xmem_image(masks):
 
     for mask in masks:
         mask_index = np.max(xmem_array) + 1
-        xmem_array[mask.detach().cpu().numpy().astype(bool)] = mask_index
+        if hasattr(mask, "detach"):
+            mask_bool = mask.detach().cpu().numpy().astype(bool)
+        else:
+            mask_bool = np.asarray(mask).astype(bool)
+        xmem_array[mask_bool] = mask_index
 
-    xmem_array = xmem_array / np.max(xmem_array)
-
-    save_image(torch.Tensor(xmem_array), config.xmem_input_path)
+    max_val = np.max(xmem_array)
+    norm = xmem_array / max_val if max_val > 0 else xmem_array
+    Image.fromarray((norm * 255).astype(np.uint8)).save(config.xmem_input_path)
 
 
 
@@ -122,7 +131,7 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
 
     for i, mask in enumerate(masks):
 
-        save_image(mask, config.bounding_cube_mask_image_path.format(object=segmentation_count, mask=i))
+        save_mask_image(mask, config.bounding_cube_mask_image_path.format(object=segmentation_count, mask=i))
         mask_np = cv.imread(config.bounding_cube_mask_image_path.format(object=segmentation_count, mask=i), cv.IMREAD_GRAYSCALE)
 
         contour = get_max_contour(mask_np, image_width, image_height)
@@ -185,3 +194,18 @@ def get_world_point_world_frame(camera_position, camera_orientation_q, camera, i
     world_point_world_frame = world_point_world_frame.squeeze()[:-1]
 
     return world_point_world_frame
+
+
+def save_mask_image(mask, path):
+    """
+    Save a binary or float mask to disk as a grayscale PNG, supporting both
+    torch.Tensor and numpy arrays. Avoids importing torchvision to keep
+    SAM3 runs torch-free.
+    """
+    if hasattr(mask, "detach"):
+        arr = mask.detach().cpu().numpy()
+    else:
+        arr = np.asarray(mask)
+    # Convert to binary 0/255 for robustness
+    arr = (arr > 0).astype(np.uint8) * 255
+    Image.fromarray(arr).save(path)

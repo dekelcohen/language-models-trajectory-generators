@@ -8,6 +8,7 @@ Metaworld provider (in addition to pybullet)
 	 ) utils.get_bounding_cube_from_point_cloud(rgb_img, depth_img, masks, head_cam_pos + oriet, ) --> bounding_cubes_world_coordinates + orient 
 	 ) TODO: ADD_BOUNDING_CUBES - plot green lines around all objects 3D cubes in pyBullet (currently doesn't nothing in metaworld_server)
 	   ) Does the VLM ever sees these lines ? maybe in next CAPTURE_IMAGES ?
+	 )   
 	 
    ) TODO: codex added calibration images from metaworld (optional) - it added a lot of code to  get_world_point_world_frame --> get_intrinsics_extrinsics
      ) TODO: Run get_intrinsics_extrinsics under pyBullet to compare (DEBUG_DIFF flag) the output of pybullet matrices to the new codex code 
@@ -17,11 +18,16 @@ Metaworld provider (in addition to pybullet)
 
 Run Metaworld server from another env:
 * First time:
-  * Install Metaworld + SciPy in a separate virtualenv.
-    
-	conda create --prefix /mnt/robotics/envs/metaworld python=3.11 -y	  	
+  * Install Metaworld + SciPy in a separate virtualenv.    
+	conda create --prefix /mnt/robotics/envs/metaworld python=3.11 -y  	
+	 # Win:
+	   conda create -n metaworld python=3.11 -y
 	conda activate /mnt/robotics/envs/metaworld
-	cd /mnt/robotics/ # E:\Robotics\Simulators_Envs
+	 # Win:
+	   conda activate metaworld
+	cd /mnt/robotics/ 
+	 # Win:
+	   cd %ROBOTICS_HOME%\Simulators_Envs
 	git clone https://github.com/dekelcohen/Metaworld.git
 	cd Metaworld
 	pip install -e .
@@ -36,11 +42,11 @@ Run Metaworld server from another env:
     ) Metaworld via main.py (WebSockets, headless):
 	  where python	  
       set METAWORLD_PYTHON=C:\Users\dekelco\.conda\envs\metaworld\python.exe # C:\Users\dekel\miniconda3\envs\metaworld\python.exe
-      set METAWORLD_REPO=D:\NLP\Robotics\Simulators_Envs\Metaworld
+      set METAWORLD_REPO=%ROBOTICS_HOME%\Simulators_Envs\Metaworld	  
       # main.py metaworld
-      python main.py --sim metaworld --task sawyer_door_v3 --depth-format norm_zfar
+      python main.py --sim metaworld --task sawyer_door_v3 [--depth-format norm_zfar] --seg-provider sam3
     ) Viewer Metaworld - local sanity (viewer, independent of main.py):
-	  cd /d D:\NLP\Robotics\VLM_Robotics\language-models-trajectory-generators
+	  cd /d %ROBOTICS_HOME%\VLM_Robotics\language-models-trajectory-generators
 	  # Opens MuJoCo viewer, shows env at reset, runs a short passive loop
       %METAWORLD_PYTHON% providers\metaworld_ws_server.py --env sawyer_door_v3 --viewer
 	) Run metaworld env server directly (to see cameras, WS mode)

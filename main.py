@@ -13,7 +13,7 @@ import functools
 import models
 import config
 from numpy import pi
-from lang_sam import LangSAM
+# LangSAM imported lazily only if selected as provider
 from multiprocessing import Process, Pipe
 from io import StringIO
 from contextlib import redirect_stdout
@@ -124,6 +124,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
     parser.add_argument("--transport", choices=["auto", "pipe", "ws"], default="auto", help="connection transport override; auto: pipe for pybullet, ws for metaworld")
     parser.add_argument("--task", type=str, default="sawyer_door_v3", help="task/environment name (metaworld only)")
+    parser.add_argument("--seg-provider", choices=["langsam", "sam3"], default="langsam", help="select segmentation provider (LangSAM or RoboFlow SAM3)")
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
     args = parser.parse_args()
 
@@ -142,7 +143,11 @@ if __name__ == "__main__":
     torch.set_grad_enabled(False)
 
     # Load models
-    langsam_model = LangSAM()
+    if args.seg_provider == "langsam":
+        from lang_sam import LangSAM
+        langsam_model = LangSAM()
+    else:
+        langsam_model = None
     xmem_model = XMem(config.xmem_config, "./XMem/saves/XMem.pth", device).eval().to(device)
 
     # Create connection to the chosen simulator, then build API with it
@@ -172,102 +177,102 @@ if __name__ == "__main__":
         command = input("Enter a command: ")
         api.command = command
 
-    # Main task execution loop
-    logger.info(PROGRESS + "STARTING TASK..." + ENDC)
-
-    messages = []
-
-    error = False
-
-    new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
-
-    logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-    messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
-    logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
-
-    while True:
-
-        while not api.completed_task:
-
-            new_prompt = ""
-
-            if len(messages[-1]["content"].split("```python")) > 1:
-
-                code_block = messages[-1]["content"].split("```python")
-
-                block_number = 0
-
-                for block in code_block:
-                    if not error:
-                        if len(block.split("```")) > 1:
-                            code = block.split("```")[0]
-                            block_number += 1
-                            try:                                
-                                f = StringIO()
-                                with redirect_stdout(f):                                    
-                                    exec(code)
-                            except Exception:
-                                error_message = traceback.format_exc()
-                                new_prompt += ERROR_CORRECTION_PROMPT.replace("[INSERT BLOCK NUMBER]", str(block_number)).replace("[INSERT ERROR MESSAGE]", error_message)
-                                new_prompt += "\n"
-                                error = True
-                            else:
-                                s = f.getvalue()
-                                error = False
-                                if s != "" and len(s) < 2000:
-                                    new_prompt += PRINT_OUTPUT_PROMPT.replace("[INSERT PRINT STATEMENT OUTPUT]", s)
+        # Main task execution loop
+        logger.info(PROGRESS + "STARTING TASK..." + ENDC)
+    
+        messages = []
+    
+        error = False
+    
+        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
+    
+        logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
+        logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
+    
+        while True:
+    
+            while not api.completed_task:
+    
+                new_prompt = ""
+    
+                if len(messages[-1]["content"].split("```python")) > 1:
+    
+                    code_block = messages[-1]["content"].split("```python")
+    
+                    block_number = 0
+    
+                    for block in code_block:
+                        if not error:
+                            if len(block.split("```")) > 1:
+                                code = block.split("```")[0]
+                                block_number += 1
+                                try:                                
+                                    f = StringIO()
+                                    with redirect_stdout(f):                                    
+                                        exec(code)
+                                except Exception:
+                                    error_message = traceback.format_exc()
+                                    new_prompt += ERROR_CORRECTION_PROMPT.replace("[INSERT BLOCK NUMBER]", str(block_number)).replace("[INSERT ERROR MESSAGE]", error_message)
                                     new_prompt += "\n"
                                     error = True
-
-            if error:
-
-                api.completed_task = False
-                api.failed_task = False
-
-            if not api.completed_task:
-
-                if api.failed_task:
-
-                    logger.info(FAIL + "FAILED TASK! Generating summary of the task execution attempt..." + ENDC)
-
-                    new_prompt += TASK_SUMMARY_PROMPT
-                    new_prompt += "\n"
-
-                    logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                    messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
-                    logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
-
-                    logger.info(PROGRESS + "RETRYING TASK..." + ENDC)
-
-                    new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
-                    new_prompt += "\n"
-                    new_prompt += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", messages[-1]["content"])
-
-                    messages = []
-
-                    error = False
-
-                    logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                    messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
-                    logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
-
+                                else:
+                                    s = f.getvalue()
+                                    error = False
+                                    if s != "" and len(s) < 2000:
+                                        new_prompt += PRINT_OUTPUT_PROMPT.replace("[INSERT PRINT STATEMENT OUTPUT]", s)
+                                        new_prompt += "\n"
+                                        error = True
+    
+                if error:
+    
+                    api.completed_task = False
                     api.failed_task = False
-
-                else:
-
-                    logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                    messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
-                    logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
-
-                    error = False
-
-        logger.info(OK + "FINISHED TASK!" + ENDC)
-
-        new_prompt = input("Enter a command: ")
-
-        logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
-        logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
+    
+                if not api.completed_task:
+    
+                    if api.failed_task:
+    
+                        logger.info(FAIL + "FAILED TASK! Generating summary of the task execution attempt..." + ENDC)
+    
+                        new_prompt += TASK_SUMMARY_PROMPT
+                        new_prompt += "\n"
+    
+                        logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
+                        logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
+    
+                        logger.info(PROGRESS + "RETRYING TASK..." + ENDC)
+    
+                        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
+                        new_prompt += "\n"
+                        new_prompt += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", messages[-1]["content"])
+    
+                        messages = []
+    
+                        error = False
+    
+                        logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
+                        logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
+    
+                        api.failed_task = False
+    
+                    else:
+    
+                        logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
+                        logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
+    
+                        error = False
+    
+            logger.info(OK + "FINISHED TASK!" + ENDC)
+    
+            new_prompt = input("Enter a command: ")
+    
+            logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+            messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
+            logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     except KeyboardInterrupt:
         logger.info(PROGRESS + "Interrupted by user (Ctrl+C). Shutting down..." + ENDC)
     finally:
