@@ -105,23 +105,53 @@ class TestMetaworldServer(unittest.TestCase):
         self.assertIn('terminated', res2)
 
     def test_open_door_script(self):
-        # Try to approach and grasp; then query env success flag (reachCompleted)        
+        # Try to approach and grasp; then pull handle toward the goal position
         state0 = self._rpc({"cmd": config.GET_STATE, "args": {"objects": ["handle", "goal"]}})
         print(f'*** test_open_door_script after GET_STATE state0={state0}')
-        handle_pos = state0.get('objects', {}).get('handle', {}).get('pos', None)
-        if handle_pos:
+        objs = state0.get('objects', {}) or {}
+        handle = (objs.get('handle') or {}).get('pos')
+        goal = (objs.get('goal') or {}).get('pos')
+        if handle and goal:
+            hx, hy, hz = handle
+            gx, gy, gz = goal
             # Approach above the handle slightly to avoid collisions
-            approach = [handle_pos[0], handle_pos[1], handle_pos[2] + 0.01]
-            _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": approach, "iters": 80, "open_gripper": True}})
+            approach = [hx, hy, hz + 0.02]
+            _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": approach, "iters": 100, "open_gripper": True}})
             # Descend to contact and close
-            contact = [handle_pos[0], handle_pos[1], handle_pos[2]]
-            _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": contact, "iters": 60, "open_gripper": True}})
+            contact = [hx, hy, hz]
+            _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": contact, "iters": 80, "open_gripper": True}})
             _ = self._rpc({"cmd": config.CLOSE_GRIPPER, "args": None})
-            # Pull along -X to rotate the door
-            for k in range(5):
-                tgt = [handle_pos[0] - 0.02 * (k + 1), handle_pos[1], handle_pos[2]]
-                _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": tgt, "iters": 50, "open_gripper": False}})
-                _ = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 4}})
+
+            # Curved half‑circle style pull:
+            # Phase A: pull inward toward robot base (negative X), keep Y almost constant
+            # Phase B: sweep left (negative Y) while continuing slight inward pull
+            import math
+            dx, dy = (gx - hx), (gy - hy)
+            total = max(1e-6, math.hypot(dx, dy))
+            # Split the journey: ~70% inward first, then leftward
+            inward_x = dx * 0.7
+            inward_y = dy * 0.2
+            sweep_x = dx - inward_x
+            sweep_y = dy - inward_y
+
+            def _linspace(n):
+                return [i / float(max(1, n)) for i in range(1, n + 1)]
+
+            # Phase A: 8 small inward steps
+            for t in _linspace(8):
+                tx = hx + inward_x * t
+                ty = hy + inward_y * t
+                tgt = [tx, ty, hz]
+                _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": tgt, "iters": 70, "open_gripper": False}})
+                _ = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 2}})
+
+            # Phase B: 8 step sweep left, adding a gentle inward bias
+            for t in _linspace(8):
+                tx = hx + inward_x + sweep_x * t
+                ty = hy + inward_y + sweep_y * t
+                tgt = [tx, ty, hz]
+                _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": tgt, "iters": 70, "open_gripper": False}})
+                _ = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 2}})
         # Step a bit to allow env to evaluate the success condition
         _ = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 10}})
                         
