@@ -5,6 +5,7 @@ import glob
 
 def create_video_from_images(
     folder_path: str = 'images/trajectory', 
+    output_vide_folder_path: str = None,
     base_name: str = 'rgb_image',   # <--- New Parameter
     start_idx: int = 0, 
     end_idx: int = float('inf'), 
@@ -17,6 +18,7 @@ def create_video_from_images(
     
     Args:
         folder_path (str): Directory containing images.
+        output_vide_folder_path (str): Directory to write the video into - if None (default) --> folder_path.paret folder 
         base_name (str): The prefix of the files (e.g., 'rgb_image' for 'rgb_image_0.png'). 
                          If None, tries to auto-detect.
         start_idx (int): Start index.
@@ -67,7 +69,11 @@ def create_video_from_images(
     
     end_label = "inf" if end_idx == float('inf') else end_idx
     output_filename = f"{base_name}_{start_idx}_{end_label}.mp4"
-    output_path = os.path.join(folder_path, output_filename)
+    
+    if output_vide_folder_path is None:
+        output_vide_folder_path = os.path.join(folder_path, '..')
+        
+    output_path = os.path.join(output_vide_folder_path, output_filename)
     
     fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))

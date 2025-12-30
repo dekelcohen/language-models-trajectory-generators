@@ -187,6 +187,9 @@ if __name__ == "__main__":
     try:
         # User input
         command = input("Enter a command: ")
+        if not str(command).strip():
+            logger.info(PROGRESS + "No command entered. Exiting." + ENDC)
+            sys.exit(0)
         api.command = command
 
         # Main task execution loop
@@ -280,8 +283,11 @@ if __name__ == "__main__":
     
             logger.info(OK + "FINISHED TASK!" + ENDC)
     
-            new_prompt = input("Enter a command: ")
-    
+            new_prompt = input("Enter a command: ").strip()
+            if not new_prompt:
+                logger.info(PROGRESS + "No command entered. Exiting." + ENDC)
+                break
+
             logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
             messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
             logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
