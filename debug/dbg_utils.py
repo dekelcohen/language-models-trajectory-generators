@@ -3,9 +3,33 @@ import cv2
 import os
 import glob
 
+# Unified lookahead helper used at start and mid-sequence
+def find_available_frame(
+    folder_path: str,
+    base_name: str,
+    current_idx: int,
+    end_idx: int,
+    ext: str,
+    lookahead_max: int,
+    include_current: bool = True,
+):
+    """
+    Find first existing frame index in [current_idx, current_idx+lookahead_max]
+    (or (current_idx+1, ...) when include_current=False). Returns (path, idx) or (None, None).
+    """
+    start = int(current_idx) + (0 if include_current else 1)
+    stop = int(current_idx) + int(lookahead_max)
+    if end_idx != float('inf'):
+        stop = min(stop, int(end_idx))
+    for idx in range(start, stop + 1):
+        candidate = os.path.join(folder_path, f"{base_name}_{idx}.{ext}")
+        if os.path.exists(candidate):
+            return candidate, idx
+    return None, None
+
 def create_video_from_images(
     folder_path: str = 'images/trajectory', 
-    output_vide_folder_path: str = None,
+    output_video_folder_path: str = None,
     base_name: str = 'rgb_image',   # <--- New Parameter
     start_idx: int = 0, 
     end_idx: int = float('inf'), 
@@ -18,7 +42,7 @@ def create_video_from_images(
     
     Args:
         folder_path (str): Directory containing images.
-        output_vide_folder_path (str): Directory to write the video into - if None (default) --> folder_path.paret folder 
+        output_video_folder_path (str): Directory to write the video into - if None (default) --> folder_path.paret folder 
         base_name (str): The prefix of the files (e.g., 'rgb_image' for 'rgb_image_0.png'). 
                          If None, tries to auto-detect.
         start_idx (int): Start index.
@@ -46,18 +70,13 @@ def create_video_from_images(
         base_name = filename.rpartition('_')[0]
         print(f"[Info] Auto-detected base name: '{base_name}'")
 
-    # 2. Find first valid frame to set Video Dimensions
-    # We check start_idx, then start_idx + 1 (to handle the lookahead case)
-    first_file_path = os.path.join(folder_path, f"{base_name}_{start_idx}.{ext}")
-    
-    if not os.path.exists(first_file_path):
-        # check next frame
-        next_path = os.path.join(folder_path, f"{base_name}_{start_idx + 1}.{ext}")
-        if os.path.exists(next_path):
-            first_file_path = next_path
-        else:
-            print(f"[Error] Could not find start frame ({start_idx}) or lookahead ({start_idx+1}) for base '{base_name}'")
-            return
+    # 2. Find first valid frame to set Video Dimensions (use helper)
+    first_file_path, start_idx = find_available_frame(
+        folder_path, base_name, start_idx, end_idx, ext, lookahead_max, include_current=True
+    )
+    if first_file_path is None:
+        print(f"[Error] Could not find start frame ({start_idx}) or lookahead ({start_idx+1}) for base '{base_name}'")
+        return
 
     # 3. Setup Video Writer
     img = cv2.imread(first_file_path)
@@ -70,10 +89,10 @@ def create_video_from_images(
     end_label = "inf" if end_idx == float('inf') else end_idx
     output_filename = f"{base_name}_{start_idx}_{end_label}.mp4"
     
-    if output_vide_folder_path is None:
-        output_vide_folder_path = os.path.join(folder_path, '..')
+    if output_video_folder_path is None:
+        output_video_folder_path = os.path.join(folder_path, '..')
         
-    output_path = os.path.join(output_vide_folder_path, output_filename)
+    output_path = os.path.join(output_video_folder_path, output_filename)
     
     fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
@@ -92,21 +111,13 @@ def create_video_from_images(
             curr_path = os.path.join(folder_path, curr_file)
             
             if not os.path.exists(curr_path):
-                # --- Look Ahead Logic ---
-                # Allow jumping ahead up to `lookahead_max` frames to find the next available frame.
-                next_found = None
-                for delta in range(1, int(lookahead_max) + 1):
-                    next_idx = current_idx + delta
-                    if next_idx > end_idx:
-                        break
-                    next_path = os.path.join(folder_path, f"{base_name}_{next_idx}.{ext}")
-                    if os.path.exists(next_path):
-                        next_found = next_idx
-                        break
-                if next_found is not None:
-                    # remember a skip event; defer noisy printing to the end
+                # --- Look ahead using the same helper ---
+                next_path, next_idx = find_available_frame(
+                    folder_path, base_name, current_idx, end_idx, ext, lookahead_max, include_current=False
+                )
+                if next_path is not None:
                     skip_events += 1
-                    current_idx = next_found
+                    current_idx = next_idx
                     continue
                 # No further frames within lookahead window -> end sequence
                 if end_idx == float('inf'):
