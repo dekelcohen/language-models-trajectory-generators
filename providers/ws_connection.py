@@ -16,7 +16,7 @@ class WsJSONConnection:
     Requires the 'websockets' package.
     """
 
-    def __init__(self, url: str, timeout: float | None = 15.0):
+    def __init__(self, url: str, timeout: float = 15.0):
         try:
             import asyncio  # noqa: F401
             import websockets  # noqa: F401
@@ -31,21 +31,17 @@ class WsJSONConnection:
         self._loop = None
         self._ws = None
         # Single override applied to connect/send/close. None => defaults per op; <0 => infinite
-        self._timeout_override = timeout
+        # Single override applied to connect/send/close.
+        # Stored once; interpreted as "infinite" when <= 0.
+        self._timeout = float(timeout)
+        self._infinite = self._timeout <= 0
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
         # Wait for connection to establish
         start = time.time()
-        # Effective timeout for connect: default 15.0 unless overridden; negative => infinite
-        connect_to = None
-        if self._timeout_override is None:
-            connect_to = 15.0
-        elif isinstance(self._timeout_override, (int, float)) and self._timeout_override < 0:
-            connect_to = None
-        else:
-            connect_to = float(self._timeout_override)
-        deadline = None if connect_to is None else (start + connect_to)
+        # Compute a deadline once; None means wait forever
+        deadline = None if self._infinite else (start + self._timeout)
         while True:
             if self._ws is not None:
                 return
@@ -98,9 +94,31 @@ class WsJSONConnection:
     def send(self, payload_list):
         if not isinstance(payload_list, list) or len(payload_list) == 0:
             raise ValueError("Expected a non-empty list payload")
-        obj = {"cmd": payload_list[0]}
+        # Convert numpy/torch scalars and arrays to JSON-serializable types
+        def _to_jsonable(x):
+            try:
+                import numpy as np  # local import to avoid hard dep
+                if isinstance(x, np.ndarray):
+                    return x.tolist()
+                if isinstance(x, (np.floating, np.integer)):
+                    return x.item()
+            except Exception:
+                pass
+            try:
+                import torch  # optional
+                if isinstance(x, torch.Tensor):
+                    return _to_jsonable(x.detach().cpu().numpy())
+            except Exception:
+                pass
+            if isinstance(x, dict):
+                return {k: _to_jsonable(v) for k, v in x.items()}
+            if isinstance(x, (list, tuple)):
+                return [_to_jsonable(v) for v in x]
+            return x
+
+        obj = {"cmd": _to_jsonable(payload_list[0])}
         if len(payload_list) > 1:
-            obj["args"] = payload_list[1]
+            obj["args"] = _to_jsonable(payload_list[1])
 
         # Schedule the send on the loop thread
         import asyncio
@@ -112,19 +130,20 @@ class WsJSONConnection:
             raise RuntimeError("WebSocket not connected")
         data = json.dumps(obj)
         fut = asyncio.run_coroutine_threadsafe(_send(self._ws, data), self._loop)
-        # Effective timeout for send: default 10.0 unless overridden; negative => infinite
-        if self._timeout_override is None:
-            send_to = 10.0
-        elif isinstance(self._timeout_override, (int, float)) and self._timeout_override < 0:
-            send_to = None
-        else:
-            send_to = float(self._timeout_override)
+        # Use configured timeout; None (infinite) when _infinite
+        send_to = None if self._infinite else self._timeout
         # Wait for send to complete to preserve ordering semantics
         fut.result(timeout=send_to)
 
     def recv(self, timeout=None):
+        # Interpret per-call timeout (<=0 => infinite). None => use configured value.
+        if timeout is None:
+            to = None if self._infinite else self._timeout
+        else:
+            t = float(timeout)
+            to = None if t <= 0 else t
         try:
-            msg = self._rx_queue.get(block=True, timeout=timeout)
+            msg = self._rx_queue.get(block=True, timeout=to)
         except Empty:
             raise TimeoutError("Timed out waiting for WebSocket message")
         # Treat None as closed connection
@@ -153,13 +172,8 @@ class WsJSONConnection:
             if self._ws and self._loop:
                 fut = asyncio.run_coroutine_threadsafe(_close(self._ws), self._loop)
                 try:
-                    # Effective timeout for close: default 5.0 unless overridden; negative => infinite
-                    if self._timeout_override is None:
-                        close_to = 5.0
-                    elif isinstance(self._timeout_override, (int, float)) and self._timeout_override < 0:
-                        close_to = None
-                    else:
-                        close_to = float(self._timeout_override)
+                    # Use configured timeout for close
+                    close_to = None if self._infinite else self._timeout
                     fut.result(timeout=close_to)
                 except Exception:
                     pass

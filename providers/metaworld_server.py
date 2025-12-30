@@ -274,11 +274,7 @@ def main():
     )
     parser.add_argument("--ws-host", type=str, default=os.environ.get("METAWORLD_WS_HOST", "127.0.0.1"), help="WebSocket host to bind")
     parser.add_argument("--ws-port", type=int, default=int(os.environ.get("METAWORLD_WS_PORT", "8765")), help="WebSocket port to bind")
-    parser.add_argument("--timeout", default=None, help="Client timeout hint (0/-1/None = no timeout).")
     args = parser.parse_args()
-    # If provided, propagate to this process for any helpers that consult env
-    if args.timeout is not None:
-        os.environ["MW_TIMEOUT"] = str(args.timeout)
     install_debug_reminder()
     # Load metaworld from an external env path if provided
     # Expect env var METAWORLD_REPO or fallback to current sys.path

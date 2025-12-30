@@ -35,7 +35,7 @@ def _probe_metaworld_ws(server_url, logger, connect_timeout=2.0, ready_timeout=2
     """
     try:
         from providers.ws_connection import WsJSONConnection
-        conn = WsJSONConnection(server_url, connect_timeout=connect_timeout)
+        conn = WsJSONConnection(server_url, timeout=connect_timeout)
         ready = conn.recv(timeout=ready_timeout)
         if isinstance(ready, dict) and ready.get("status") == "ready":
             # Send a short probe to confirm responsiveness
@@ -72,7 +72,7 @@ def _setup_metaworld_ws(args, logger):
 
     # Connect to spawned server
     from providers.ws_connection import WsJSONConnection
-    conn = WsJSONConnection(default_url, connect_timeout=15.0)
+    conn = WsJSONConnection(default_url, timeout=getattr(args, 'timeout', 15.0))
     try:
         _ready = conn.recv(timeout=15)
         if isinstance(_ready, dict) and _ready.get("status") == "ready":
@@ -123,6 +123,7 @@ if __name__ == "__main__":
     parser.add_argument("--task", type=str, default="sawyer_door_v3", help="task/environment name (metaworld only)")
     parser.add_argument("--seg-provider", choices=["langsam", "sam3"], default="langsam", help="select segmentation provider (LangSAM or RoboFlow SAM3)")
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
+    parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
     parser.add_argument("--track-provider", choices=["xmem", "none"], default="xmem", help="tracking provider for success verification; set to 'none' to disable XMem usage")
     args = parser.parse_args()
