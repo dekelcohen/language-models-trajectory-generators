@@ -209,25 +209,70 @@ traj_step = 1
 frame_counter = 0
 perception_logged = 0
 
+# Trajectory pre-processing helpers 
+# Motivation: Avoid calling env.step more than allowed max_path_length --> Exception You must reset the env manually once truncate==True 
+def _filter_nearby_points(points, eps=2e-3):
+    """Remove successive points closer than eps (meters)."""
+    filtered = []
+    prev = None
+    for pt in list(points or []):
+        pos = np.array(pt[:3], dtype=np.float64)
+        if prev is None or float(np.linalg.norm(pos - prev)) >= float(eps):
+            filtered.append(pt)
+            prev = pos
+    return filtered
+
+def _estimate_path_length(env, points, start_eef=None):
+    """Sum Euclidean distances from start EEF through points."""
+    try:
+        cur = np.array((start_eef if start_eef is not None else env.get_endeff_pos()), dtype=np.float64)
+    except Exception:
+        cur = np.zeros(3, dtype=np.float64)
+    path = 0.0
+    for pt in list(points or []):
+        nxt = np.array(pt[:3], dtype=np.float64)
+        path += float(np.linalg.norm(nxt - cur))
+        cur = nxt
+    return path
+
+def _compute_iters_budget(path_len, n_points, user_iters_per_point):
+    """Effective per-point iteration budget based on path length and count."""
+    small_path = float(path_len) < 0.06  # 6 cm
+    total_budget = 120 if small_path else 450
+    n_pts = max(1, int(n_points))
+    user = max(1, int(user_iters_per_point))
+    return max(5, min(user, int(total_budget // n_pts)))
+
 
 # Shared trajectory executor for both EXECUTE_TRAJECTORY and MOVE_EEF_ABS
-async def _exec_traj(env, points, iters_per_point=30, open_override=None, cam_for_logging = None):
+async def _exec_traj(env, points, iters_per_point=15, open_override=None, cam_for_logging = None):
     global gripper_open, traj_step
     last_target = None
     if open_override is not None:
         gripper_open = bool(open_override)
-    # Conservative max per-step move in meters to avoid overshoot
-    max_step = 0.01  # 1 cm per sim step
-    for pt in points or []:
+    # Slightly larger per-step move to reduce total steps
+    max_step = 0.03  # 3 cm per sim step
+    # Pre-process points, estimate path length, and compute effective per-point iterations
+    pts_in = list(points or [])
+    filtered = _filter_nearby_points(pts_in, eps=2e-3)
+    try:
+        eef0 = env.get_endeff_pos().copy()
+    except Exception:
+        eef0 = None
+    path_len = _estimate_path_length(env, filtered, start_eef=eef0)
+    iters_eff = _compute_iters_budget(path_len, len(filtered), iters_per_point)
+    print(f"[traj] points_in={len(pts_in)} points_used={len(filtered)} path_len={path_len:.3f}m iters_per_point={iters_eff} max_step={max_step}", flush=True)
+    for pt in filtered:
         target = np.array(pt[:3], dtype=np.float64)
         last_target = target
         last_dist = None
         worse = 0
-        for _ in range(max(int(iters_per_point), 1)):
+        for _ in range(max(int(iters_eff), 1)):
             ee = env.get_endeff_pos().copy()
             delta = target - ee
             dist = float(np.linalg.norm(delta))
-            if dist < 1e-3:
+            # Looser convergence threshold to avoid excess micro-steps
+            if dist < 2e-3:
                 break
             # Adaptive step: move toward target but clamp step length
             step_len = min(dist, max_step)
@@ -238,7 +283,19 @@ async def _exec_traj(env, points, iters_per_point=30, open_override=None, cam_fo
             action = np.zeros(4, dtype=np.float32)
             action[:3] = np.clip(move_vec / float(getattr(env, 'action_scale', 1.0)), -1.0, 1.0)
             action[3] = 1.0 if gripper_open else -1.0
-            env.step(action)
+            # Step the environment; if truncated==True occurs, stop early without reset
+            try:
+                env.step(action)
+            except Exception as e:
+                msg = str(e)
+                if "truncate==True" in msg or "truncated" in msg:
+                    # Log concise note and return current state without resetting
+                    print("[traj] Error: !!!!!!! truncated early; returning without reset", flush=True)
+                    ee_now = env.get_endeff_pos().copy()
+                    pos_err = float(np.linalg.norm((last_target if last_target is not None else ee_now) - ee_now))
+                    return ee_now.tolist(), pos_err
+                # Propagate other exceptions
+                raise
             # Log trajectory RGB at configured interval per sim step
             try:
                 if traj_step % int(config.trajectory_log_every) == 0:                    
@@ -249,11 +306,11 @@ async def _exec_traj(env, points, iters_per_point=30, open_override=None, cam_fo
                 print(f'++++ Failed to write env-cam traj rgb images', flush=True)
                 
             traj_step += 1
-            # If getting worse repeatedly, shrink step to stabilize
+            # If getting worse repeatedly, gently shrink step to stabilize
             if last_dist is not None and dist > last_dist + 1e-4:
                 worse += 1
-                if worse >= 2:
-                    max_step *= 0.5
+                if worse >= 3:
+                    max_step *= 0.7
                     worse = 0
             else:
                 worse = 0
@@ -490,12 +547,12 @@ def main():
                 elif cmd == config.EXECUTE_TRAJECTORY:
                     if isinstance(req_args, dict):
                         pts = req_args.get("points", [])
-                        iters = int(req_args.get("iters_per_point", 30))
+                        iters = int(req_args.get("iters_per_point", 15))
                         reply = bool(req_args.get("reply", False))
                         open_override = req_args.get("open_gripper")
                     else:
                         pts = req_args or []
-                        iters = 30
+                        iters = 15
                         reply = False
                         open_override = None
                     # Use first selected camera (head by default) for logging frames
@@ -568,7 +625,7 @@ def main():
                     print(f'MOVE_EEF_ABS args={req_args}', flush=True)
                     
                     target = np.array(req_args.get("pos", [0, 0, 0]), dtype=np.float64)
-                    iters = int(req_args.get("iters", 30))
+                    iters = int(req_args.get("iters", 15))
                     open_override = req_args.get("open_gripper")                   
                     selected = _resolve_selected_cameras()
                     cam_for_logging = selected[0][1] if selected else head_id
@@ -607,35 +664,7 @@ def main():
                             result = attr() if callable(attr) else attr
                     except Exception:
                         result = None
-                    await websocket.send(json.dumps({"name": name, "value": result}))
-                elif cmd == config.MAKE_TRAJECTORY_VIDEO:
-                    try:
-                        from debug.dbg_utils import create_video_from_images
-                        import glob
-                                                                        
-                        folder = req_args.get("folder", config.trajectory_folder) if req_args else config.trajectory_folder
-                        base = req_args.get("base", config.trajectory_image_base) if req_args else config.trajectory_image_base
-                        fps = int(req_args.get("fps", config.trajectory_video_fps)) if req_args else config.trajectory_video_fps
-                        pattern = os.path.join(folder, f"{base}_*.png")
-                        files = glob.glob(pattern)
-                        if not files:
-                            await websocket.send(json.dumps({"ok": False, "error": f"No frames found in {folder} with base '{base}'"}))
-                            continue
-                        def _idx_from_name(p):
-                            try:
-                                stem = os.path.basename(p)
-                                return int(stem.rsplit("_", 1)[1].split(".")[0])
-                            except Exception:
-                                return None
-                        indices = sorted([i for i in (_idx_from_name(p) for p in files) if i is not None])
-                        start = int(req_args.get("start", indices[0])) if req_args else indices[0]
-                        end = int(req_args.get("end", indices[-1])) if req_args else indices[-1]
-                        create_video_from_images(folder_path=folder, base_name=base, start_idx=start, end_idx=end, ext="png", fps=fps)
-                        out_path = os.path.join(folder, f"{base}_{start}_{end}.mp4")
-                        ok = os.path.exists(out_path)
-                        await websocket.send(json.dumps({"ok": bool(ok), "video": out_path}))
-                    except Exception as e:
-                        await websocket.send(json.dumps({"ok": False, "error": str(e)}))
+                    await websocket.send(json.dumps({"name": name, "value": result}))                
                 else:
                     await websocket.send(json.dumps({"error": "unknown_cmd", "cmd": cmd}))
             except Exception as e:

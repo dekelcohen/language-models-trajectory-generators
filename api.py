@@ -2,6 +2,7 @@ import numpy as np
 import sys
 import torch
 import math
+import os
 import config
 import models
 from segmentation_adapter import get_segmentation_output
@@ -43,13 +44,25 @@ class API:
         self.logger.info(PROGRESS + "Capturing head and wrist camera images..." + ENDC)
         self.main_connection.send([CAPTURE_IMAGES])
         recv_payload = self.main_connection.recv()
-        # Support both backends: PyBullet returns 5 elements; Metaworld server adds calib as 6th
-        if isinstance(recv_payload, list) and len(recv_payload) >= 5:
-            head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload[:5]
-            self.calibration = recv_payload[5] if len(recv_payload) > 5 else None
+        # Robustly parse payload from either PyBullet Pipe or Metaworld WS
+        head_camera_position = head_camera_orientation_q = None
+        wrist_camera_position = wrist_camera_orientation_q = None
+        env_connection_message = None
+        self.calibration = None
+        if isinstance(recv_payload, list):
+            if len(recv_payload) >= 6:
+                head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload[:5]
+                self.calibration = recv_payload[5]
+            elif len(recv_payload) == 5:
+                head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload
+            elif len(recv_payload) == 1:
+                # Only a status line; proceed with saved images but no poses/calibration
+                env_connection_message = recv_payload[0]
+            else:
+                raise ValueError(f"Unexpected CAPTURE_IMAGES payload length: {len(recv_payload)}")
         else:
-            head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload
-            self.calibration = None
+            # Single non-list message; treat as status string
+            env_connection_message = recv_payload
         self.logger.info(env_connection_message)
 
         self.head_camera_position = head_camera_position
@@ -92,6 +105,20 @@ class API:
             provider=getattr(self.args, "seg_provider", "langsam"),
         )
         self.logger.info(OK + "Finished segmenting head camera image!" + ENDC)
+
+        # Save a segmentation overlay image for observability across all providers
+        try:
+            from models import visualize_segmentation_overlay
+            prov = getattr(self.args, "seg_provider", "langsam")
+            out_path = config.seg_overlay_image_path.format(provider=str(prov), object=self.segmentation_count)
+            status = visualize_segmentation_overlay(rgb_image_head, model_predictions, boxes, segmentation_texts, out_path)
+            fname = os.path.join(os.path.dirname(out_path), os.path.basename(out_path))
+            if status.get("had_masks") or status.get("had_boxes"):
+                self.logger.info(OK + f"Saved segmentation overlay to {fname}" + ENDC)
+            else:
+                self.logger.info(PROGRESS + f"Saved empty segmentation overlay to {fname} (no masks/bboxes)" + ENDC)
+        except Exception as e:
+            self.logger.info(PROGRESS + f"Warning: failed to save segmentation overlay: {e}" + ENDC)
 
         masks = utils.get_segmentation_mask(model_predictions, config.segmentation_threshold)
 

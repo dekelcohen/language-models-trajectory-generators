@@ -129,6 +129,9 @@ langsam_image_path = "./images/langsam_image_{object}.png"
 xmem_input_path = "./images/xmem_input.png"
 xmem_output_path = "./images/xmem_output_{step}.png"
 
+# Segmentation overlay output for any provider
+seg_overlay_image_path = "./images/seg_overlay_{provider}_{object}.png"
+
 # Output
 OK = "\033[92m"
 PROGRESS = "\033[93m"

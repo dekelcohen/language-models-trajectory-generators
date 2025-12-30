@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import sys
 import torch
 import config
+import utils
 from PIL import Image
 from torchvision import transforms
 from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
@@ -34,36 +35,70 @@ def get_langsam_output(image, model, segmentation_texts, segmentation_count):
     masks = torch.from_numpy(masks_np).bool()        # (N, H, W)
     boxes = torch.from_numpy(boxes_np).float()       # (N, 4)
 
-    # --- Visualization identical to your old code ---
-    _, ax = plt.subplots(1, 1 + len(masks), figsize=(5 + 5 * len(masks), 5))
-    [a.axis("off") for a in ax.flatten()]
-    ax[0].imshow(image)
+    # Return predictions for downstream use; visualization handled elsewhere
+    return masks.float(), boxes, phrases
+
+
+def visualize_segmentation_overlay(image, masks_any, boxes_any, labels, out_path):
+    """
+    Overlay segmentation masks and bounding boxes on an RGB image and save.
+    - Accepts masks/boxes as either numpy arrays or torch tensors.
+    - Uses repo's thresholding via utils.get_segmentation_mask for consistency.
+    - Always saves an image; if no masks/bboxes, saves the original image.
+    Returns a dict with keys: saved, had_masks, had_boxes, filename.
+    """
+    # Normalize masks to binary list using existing thresholding utility
+    bin_masks = utils.get_segmentation_mask(masks_any, getattr(config, 'segmentation_threshold', 0.2))
 
     to_tensor = transforms.PILToTensor()
     to_pil = transforms.ToPILImage()
+    image_tensor = to_tensor(image)
 
-    for i, (mask, box, phrase) in enumerate(zip(masks, boxes, phrases)):
-        image_tensor = to_tensor(image)
-        box = box.unsqueeze(0)
+    # Convert boxes to torch tensor if provided
+    boxes_t = None
+    try:
+        if boxes_any is not None:
+            if isinstance(boxes_any, np.ndarray):
+                boxes_t = torch.from_numpy(boxes_any).float()
+            elif isinstance(boxes_any, torch.Tensor):
+                boxes_t = boxes_any.float()
+    except Exception:
+        boxes_t = None
 
-        image_tensor = draw_bounding_boxes(image_tensor, box, colors=["red"], width=3)
-        image_tensor = draw_segmentation_masks(image_tensor, mask, alpha=0.5, colors=["cyan"])
-        image_pil = to_pil(image_tensor)
+    # Determine presence
+    had_masks = False
+    for m in bin_masks or []:
+        arr = None
+        if hasattr(m, 'detach'):
+            arr = m.detach().cpu().numpy()
+        else:
+            try:
+                arr = np.asarray(m)
+            except Exception:
+                arr = None
+        if arr is not None and np.any(arr):
+            had_masks = True
+            break
 
-        ax[1 + i].imshow(image_pil)
-        ax[1 + i].text(
-            box[0][0].item(),
-            box[0][1].item() - 15,
-            phrase,
-            color="red",
-            bbox={"facecolor": "white", "edgecolor": "red", "boxstyle": "square"}
-        )
+    had_boxes = False
+    if boxes_t is not None and boxes_t.numel() > 0 and boxes_t.shape[0] > 0:
+        had_boxes = True
 
-    plt.savefig(config.langsam_image_path.format(object=segmentation_count))
-    plt.show()
+    # Draw masks (semi-transparent) and all boxes if present
+    if had_masks:
+        for m in bin_masks:
+            if hasattr(m, 'detach'):
+                mask_t = m.detach().cpu().bool()
+            else:
+                mask_t = torch.from_numpy(np.asarray(m)).bool()
+            image_tensor = draw_segmentation_masks(image_tensor, mask_t, alpha=0.5, colors=["cyan"])  # type: ignore
+    if had_boxes:
+        image_tensor = draw_bounding_boxes(image_tensor, boxes_t, colors=["red"], width=2)
 
-    # Return exactly what your downstream code expects
-    return masks.float(), boxes, phrases
+    # Save overlay (or original if nothing to draw)
+    out_image = to_pil(image_tensor) if (had_masks or had_boxes) else image
+    out_image.save(out_path)
+    return {"saved": True, "had_masks": had_masks, "had_boxes": had_boxes, "filename": out_path}
 
 
 
