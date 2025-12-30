@@ -30,11 +30,9 @@ def _sam3_predict(
     # Local import of provider factory (PYTHONPATH includes robotic_perception)
     from features_markers.segmentation_providers.segmentation_provider_factory import get_segmentation_provider
 
-    # Save image to a temp path for the provider (expects file path)
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as tf:
-        image_pil.save(tf.name)
-        prov = get_segmentation_provider("sam3")
-        results = prov.segment(tf.name, prompts or [])
+    # Pass in-memory image directly to provider (supports path or image)
+    prov = get_segmentation_provider("sam3")
+    results = prov.segment(image_pil, prompts or [])
 
     # Parse provider response
     # Expected shape: List[ {"sam": {"predictions": [ { np_mask, x,y,width,height, class } ] } } ]
