@@ -176,10 +176,21 @@ class API:
     def task_completed(self):
 
         if self.attempted_task:
-
             self.completed_task = True
-
         else:
+            # Create a trajectory video at the beginning for easier debugging
+            try:
+                from debug.dbg_utils import create_video_from_images
+                create_video_from_images(
+                    folder_path=config.trajectory_folder,
+                    base_name=config.trajectory_image_base,
+                    start_idx=0,
+                    end_idx=float('inf'),
+                    fps=config.trajectory_video_fps,
+                )
+                self.logger.info(OK + "Saved trajectory video from captured frames." + ENDC)
+            except Exception as e:
+                self.logger.info(PROGRESS + f"Warning: could not create trajectory video: {e}" + ENDC)
 
             self.logger.info(PROGRESS + "Waiting to execute all generated trajectories..." + ENDC)
             self.main_connection.send([TASK_COMPLETED])

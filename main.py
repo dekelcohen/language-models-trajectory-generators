@@ -123,12 +123,17 @@ if __name__ == "__main__":
     parser.add_argument("--task", type=str, default="sawyer_door_v3", help="task/environment name (metaworld only)")
     parser.add_argument("--seg-provider", choices=["langsam", "sam3"], default="langsam", help="select segmentation provider (LangSAM or RoboFlow SAM3)")
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
+    parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
     parser.add_argument("--track-provider", choices=["xmem", "none"], default="xmem", help="tracking provider for success verification; set to 'none' to disable XMem usage")
     args = parser.parse_args()
 
     # Logging
     logger = multiprocessing.log_to_stderr()
     logger.setLevel(logging.INFO)
+
+    # Ensure image output directories exist (optionally clean before)
+    from common_utils import ensure_image_dirs_exist
+    ensure_image_dirs_exist(delete=args.delete_images)
 
     # Device
     if torch.cuda.is_available():

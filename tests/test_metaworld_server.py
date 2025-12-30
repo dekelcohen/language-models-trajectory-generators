@@ -20,9 +20,12 @@ TEST_TIMEOUT_SECS = 15.0
 class TestMetaworldServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Ensure images dirs exist and are clean
-        for p in ['./images', './images/trajectory', './images/overlay']:
-            os.makedirs(p, exist_ok=True)
+        # Ensure images dirs exist and are clean (reuse util)
+        _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+        if _REPO_ROOT not in sys.path:
+            sys.path.insert(0, _REPO_ROOT)
+        from common_utils import ensure_image_dirs_exist
+        ensure_image_dirs_exist(delete=True)
         # Use the same interpreter/environment used to run tests
         cls.python = sys.executable
         env = os.environ.copy()
@@ -156,15 +159,17 @@ class TestMetaworldServer(unittest.TestCase):
         _ = self._rpc({"cmd": config.STEP_N, "args": {"action": [0,0,0,0], "n": 10}})
                         
         # Export a trajectory video for visual inspection BEFORE assertion
-        vid_resp = self._rpc({
-            "cmd": config.MAKE_TRAJECTORY_VIDEO,
-            "args": {"folder": config.trajectory_folder, "base": config.trajectory_image_base, "fps": config.trajectory_video_fps}
-        })
-        if not vid_resp.get('ok', False):
-            print("MAKE_TRAJECTORY_VIDEO response:", vid_resp)
-            self.fail(f"Video creation failed: {vid_resp}")
-        if 'video' in vid_resp and isinstance(vid_resp['video'], str):
-            self.assertTrue(os.path.exists(vid_resp['video']))
+        # Create video directly (no WS RPC)
+        from debug.dbg_utils import create_video_from_images
+        create_video_from_images(
+            folder_path=config.trajectory_folder,
+            base_name=config.trajectory_image_base,
+            start_idx=0,
+            end_idx=float('inf'),
+            fps=config.trajectory_video_fps,
+        )
+        expected_video = os.path.join(config.trajectory_folder, f"{config.trajectory_image_base}_0_inf.mp4")
+        self.assertTrue(os.path.exists(expected_video))
 
         # Now query env success flag
         res = self._rpc({"cmd": config.QUERY_ENV_ATTR, "args": {"name": "reachCompleted"}})
@@ -183,15 +188,16 @@ class TestMetaworldServer(unittest.TestCase):
             tgt = [start[0] + 0.01 * (i + 1), start[1], start[2]]
             _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": tgt, "iters": 20, "open_gripper": True}})
         # Create the video from saved frames
-        vid_resp = self._rpc({
-            "cmd": config.MAKE_TRAJECTORY_VIDEO,
-            "args": {"folder": config.trajectory_folder, "base": config.trajectory_image_base, "fps": config.trajectory_video_fps}
-        })
-        if not vid_resp.get('ok', False):
-            print("MAKE_TRAJECTORY_VIDEO response:", vid_resp)
-            self.fail(f"Video creation failed: {vid_resp}")
-        if 'video' in vid_resp and isinstance(vid_resp['video'], str):
-            self.assertTrue(os.path.exists(vid_resp['video']))
+        from debug.dbg_utils import create_video_from_images
+        create_video_from_images(
+            folder_path=config.trajectory_folder,
+            base_name=config.trajectory_image_base,
+            start_idx=0,
+            end_idx=float('inf'),
+            fps=config.trajectory_video_fps,
+        )
+        expected_video = os.path.join(config.trajectory_folder, f"{config.trajectory_image_base}_0_inf.mp4")
+        self.assertTrue(os.path.exists(expected_video))
 
 
 if __name__ == '__main__':
