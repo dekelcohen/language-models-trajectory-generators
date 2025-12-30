@@ -173,21 +173,49 @@ class Robot:
         up_vector = rotation_matrix.dot(init_up_vector)
         view_matrix = p.computeViewMatrix(camera_position, camera_position + camera_vector, up_vector)
 
-        image = p.getCameraImage(config.image_width, config.image_height, viewMatrix=view_matrix, projectionMatrix=projection_matrix, renderer=p.ER_BULLET_HARDWARE_OPENGL)
+        image = p.getCameraImage(
+            config.image_width,
+            config.image_height,
+            viewMatrix=view_matrix,
+            projectionMatrix=projection_matrix,
+            renderer=p.ER_BULLET_HARDWARE_OPENGL,
+        )
 
+        img_w, img_h = image[0], image[1]
         rgb_buffer = image[2]
         depth_buffer = image[3]
 
+        # Ensure numpy arrays with correct shape
+          # Q: How come is was working in main branch (azure linux) ? reviewed metaworld branch new changes and none explains it. A: Not sure 
+          #- PyBullet’s getCameraImage returns a tuple where the color buffer is a flat sequence (or a buffer with alpha) rather than a ready-to-use NumPy array.
+          #- robot.get_camera_image passed that tuple element directly into PIL: Image.fromarray(rgb_buffer). Since it wasn’t a NumPy array (nor an array-like with a valid array_interface), PIL raised AttributeError: 'tuple' object has no attribute 'array_interface'.
+                  
+        try:
+            rgb_array = np.array(rgb_buffer, dtype=np.uint8).reshape(img_h, img_w, 4)
+        except Exception:
+            # Fallback if already shaped but not ndarray
+            rgb_array = np.asarray(rgb_buffer, dtype=np.uint8)
+            if rgb_array.ndim == 1:
+                rgb_array = rgb_array.reshape(img_h, img_w, 4)
+
+        # Explanation: PyBullet may return a flattened tuple/list (W*H*4 RGBA) or an already-shaped array.
+        # The conversion below reshapes to (H, W, 4) and drops alpha so PIL consistently gets (H, W, 3) uint8.
+        rgb_array = rgb_array[:, :, :3]
+
+        depth_array = np.array(depth_buffer, dtype=np.float32).reshape(img_h, img_w)
+
         if save_camera_image:
-            rgb_image = Image.fromarray(rgb_buffer)
+            rgb_image = Image.fromarray(rgb_array, mode="RGB")
             rgb_image.save(rgb_image_path)
 
             n = config.near_plane
             f = config.far_plane
-            depth_array = 2 * n * f / (f + n - (2 * depth_buffer - 1.0) * (f - n))
-
-            depth_array = np.clip(depth_array, 0, 1)
-            depth_image = Image.fromarray(depth_array * 255)
-            depth_image.convert("L").save(depth_image_path)
+            # Convert OpenGL depth to linear depth in [0,1]
+            z = depth_array
+            linear_depth = (2.0 * n * f) / (f + n - (2.0 * z - 1.0) * (f - n))
+            linear_depth = np.clip(linear_depth, 0.0, 1.0)
+            depth_u8 = (linear_depth * 255.0).astype(np.uint8)
+            depth_image = Image.fromarray(depth_u8, mode="L")
+            depth_image.save(depth_image_path)
 
         return camera_position, camera_orientation_q
