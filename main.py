@@ -121,7 +121,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
     parser.add_argument("--transport", choices=["auto", "pipe", "ws"], default="auto", help="connection transport override; auto: pipe for pybullet, ws for metaworld")
     parser.add_argument("--task", type=str, default="sawyer_door_v3", help="task/environment name (metaworld only)")
-    parser.add_argument("--seg-provider", choices=["langsam", "sam3"], default="langsam", help="select segmentation provider (LangSAM or RoboFlow SAM3)")
+    parser.add_argument("--seg-provider", choices=["langsam", "sam3", "moondream"], default="langsam", help="select segmentation provider (LangSAM, RoboFlow SAM3, or Moondream)")
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
     parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")

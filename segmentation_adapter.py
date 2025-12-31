@@ -89,6 +89,52 @@ def _sam3_predict(
     return masks_np_stacked, boxes_np_arr, labels
 
 
+def _moondream_predict(image_pil, prompts: List[str]):
+    """
+    Call Moondream segmentation provider via robotic_perception and convert
+    results to (masks, boxes, text_labels).
+    - Masks: binary rectangles derived from provider bbox (no SVG rasterization).
+    - Boxes: [x1,y1,x2,y2] in pixel coordinates.
+    - Labels: prompt strings aligned with predictions.
+    """
+    from features_markers.segmentation_providers.segmentation_provider_factory import get_segmentation_provider
+
+    prov = get_segmentation_provider("moondream")
+    result = prov.segment(image_pil, prompts or [])
+
+    preds = (result or {}).get("predictions", []) if isinstance(result, dict) else []
+    if not preds:
+        empty_masks_np = np.empty((0, image_pil.height, image_pil.width), dtype=np.uint8)
+        empty_boxes_np = np.empty((0, 4), dtype=np.float32)
+        return empty_masks_np, empty_boxes_np, []
+
+    H, W = image_pil.height, image_pil.width
+    masks_np = []
+    boxes_np = []
+    labels: List[str] = []
+
+    for p in preds:
+        bbox_px = p.get("bbox_pixels") or []
+        if len(bbox_px) != 4:
+            continue
+        x1, y1, x2, y2 = [int(v) for v in bbox_px]
+        x1 = max(0, min(W, x1)); x2 = max(0, min(W, x2))
+        y1 = max(0, min(H, y1)); y2 = max(0, min(H, y2))
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        # Rectangle mask
+        m = np.zeros((H, W), dtype=np.uint8)
+        m[y1:y2, x1:x2] = 1
+        masks_np.append(m)
+        boxes_np.append([float(x1), float(y1), float(x2), float(y2)])
+        labels.append(str(p.get("class", "")))
+
+    masks_np_stacked = np.stack(masks_np, axis=0) if masks_np else np.empty((0, H, W), dtype=np.uint8)
+    boxes_np_arr = np.array(boxes_np, dtype=np.float32) if boxes_np else np.empty((0, 4), dtype=np.float32)
+    return masks_np_stacked, boxes_np_arr, labels
+
+
 def get_segmentation_output(
     image,
     langsam_model,
@@ -110,5 +156,7 @@ def get_segmentation_output(
         return models.get_langsam_output(image, langsam_model, segmentation_texts, segmentation_count)
     elif provider in ("sam3", "roboflow-sam3", "sam"):
         return _sam3_predict(image, segmentation_texts)
+    elif provider in ("moondream", "md", "moondreamvl"):
+        return _moondream_predict(image, segmentation_texts)
     else:
         raise ValueError(f"Unknown segmentation provider: {provider}")
