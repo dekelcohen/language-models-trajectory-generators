@@ -117,7 +117,8 @@ def _moondream_predict(image_pil, prompts: List[str]):
         bbox_px = p.get("bbox_pixels") or []
         if len(bbox_px) != 4:
             continue
-        x1, y1, x2, y2 = [int(v) for v in bbox_px]
+        # Ensure integer pixel coords for downstream drawing
+        x1, y1, x2, y2 = [int(round(float(v))) for v in bbox_px]
         x1 = max(0, min(W, x1)); x2 = max(0, min(W, x2))
         y1 = max(0, min(H, y1)); y2 = max(0, min(H, y2))
         if x2 <= x1 or y2 <= y1:
@@ -127,7 +128,7 @@ def _moondream_predict(image_pil, prompts: List[str]):
         m = np.zeros((H, W), dtype=np.uint8)
         m[y1:y2, x1:x2] = 1
         masks_np.append(m)
-        boxes_np.append([float(x1), float(y1), float(x2), float(y2)])
+        boxes_np.append([x1, y1, x2, y2])
         labels.append(str(p.get("class", "")))
 
     masks_np_stacked = np.stack(masks_np, axis=0) if masks_np else np.empty((0, H, W), dtype=np.uint8)
