@@ -54,14 +54,14 @@ def visualize_segmentation_overlay(image, masks_any, boxes_any, labels, out_path
     to_pil = transforms.ToPILImage()
     image_tensor = to_tensor(image)
 
-    # Convert boxes to torch tensor if provided
+    # Convert boxes to torch tensor if provided (use int for robust drawing)
     boxes_t = None
     try:
         if boxes_any is not None:
             if isinstance(boxes_any, np.ndarray):
-                boxes_t = torch.from_numpy(boxes_any).float()
+                boxes_t = torch.from_numpy(boxes_any).to(dtype=torch.int64)
             elif isinstance(boxes_any, torch.Tensor):
-                boxes_t = boxes_any.float()
+                boxes_t = boxes_any.to(dtype=torch.int64)
     except Exception:
         boxes_t = None
 
@@ -91,9 +91,9 @@ def visualize_segmentation_overlay(image, masks_any, boxes_any, labels, out_path
                 mask_t = m.detach().cpu().bool()
             else:
                 mask_t = torch.from_numpy(np.asarray(m)).bool()
-            image_tensor = draw_segmentation_masks(image_tensor, mask_t, alpha=0.5, colors=["cyan"])  # type: ignore
+            image_tensor = draw_segmentation_masks(image_tensor, mask_t, alpha=0.5, colors="cyan")  # type: ignore
     if had_boxes:
-        image_tensor = draw_bounding_boxes(image_tensor, boxes_t, colors=["red"], width=2)
+        image_tensor = draw_bounding_boxes(image_tensor, boxes_t, colors=["red"], width=3)
 
     # Save overlay (or original if nothing to draw)
     out_image = to_pil(image_tensor) if (had_masks or had_boxes) else image
