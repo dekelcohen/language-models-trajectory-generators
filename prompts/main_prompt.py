@@ -30,13 +30,13 @@ If the task requires interaction with multiple objects:
 2. It may help to generate additional trajectories and add specific waypoints (calculated from the given object information) to clear objects and the tabletop and avoid collisions, if necessary.
 
 VELOCITY CONTROL:
-1. The default speed of the robot arm end-effector is 100 points per trajectory.
+1. The default speed of the robot arm end-effector is 20 points per trajectory. If the total distance covered is small, keep the number of points low, as the task in sim-env has max-number-of-steps (~500-700) and each point is translated to several steps.
 2. If you need to make the end-effector follow a particular trajectory more quickly, then generate fewer points for the trajectory, and vice versa.
 
 CODE GENERATION:
 When generating the code for the trajectory, do the following:
 1. Describe briefly the shape of the motion trajectory required to complete the task.
-2. The trajectory could be broken down into multiple steps. In that case, each trajectory step (at default speed) should contain at least 100 points. Define general functions which can be reused for the different trajectory steps whenever possible, but make sure to define new functions whenever a new motion is required. Output a step-by-step reasoning before generating the code.
+2. The trajectory could be broken down into multiple steps. In that case, each trajectory step (at default speed) should contain at least 5 points. Define general functions which can be reused for the different trajectory steps whenever possible, but make sure to define new functions whenever a new motion is required. Output a step-by-step reasoning before generating the code.
 3. If the trajectory is broken down into multiple steps, make sure to chain them such that the start point of trajectory_2 is the same as the end point of trajectory_1 and so on, to ensure a smooth overall trajectory. Call the execute_trajectory function after each trajectory step.
 4. When defining the functions, specify the required parameters, and document them clearly in the code. Make sure to include the orientation parameter in both definition and calls (use). make sure all dimensions of caller arguments match the function definition and body
 5. If you want to print the calculated value of a variable to use later, make sure to use the print function to three decimal places, instead of simply writing the variable name. Do not print any of the trajectory variables, since the output will be too long.
