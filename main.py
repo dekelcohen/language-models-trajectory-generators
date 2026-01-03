@@ -29,6 +29,31 @@ from config import OK, PROGRESS, FAIL, ENDC
 print = functools.partial(print, flush=True)
 
 
+# --- Diagnostics helper -------------------------------------------------
+def query_sim_objects_state(conn, logger):
+    """Query and log all objects/geoms states from the simulator (WS only).
+    Prints EEF pose, door joint angle, and every object entry with pos/dims.
+    """
+    try:
+        conn.send([config.GET_STATE, {"objects": []}])  # empty → all geoms
+        gt = conn.recv()
+        if not isinstance(gt, dict):
+            return
+        eef = gt.get("eef_pos")
+        door_ang = gt.get("doorjoint_angle")
+        objs = gt.get("objects", {}) or {}
+        logger.info(PROGRESS + f"GT eef_pos={eef} doorjoint_angle={door_ang}" + ENDC)
+        logger.info(PROGRESS + f"GT objects: count={len(objs)}" + ENDC)
+        for name in sorted(objs.keys()):
+            o = objs[name]
+            pos = o.get("pos")
+            dims = o.get("dims")
+            kind = o.get("kind")
+            logger.info(PROGRESS + f" - {name} ({kind}): pos={pos} dims={dims}" + ENDC)
+    except Exception:
+        pass
+
+
 def _probe_metaworld_ws(server_url, logger, connect_timeout=2.0, ready_timeout=2.0, probe_timeout=3.0):
     """Try connecting to an already-running Metaworld WS server.
     Returns a connected WsJSONConnection if responsive; otherwise None.
@@ -186,6 +211,10 @@ if __name__ == "__main__":
     task_completed = api.task_completed
 
     try:
+        # Query ground-truth state (all objects/geoms) for cross-check
+        if args.sim == "metaworld" and hasattr(main_connection, 'send'):
+            query_sim_objects_state(main_connection, logger)
+
         # User input
         command = input("Enter a command: ")
         if not str(command).strip():
