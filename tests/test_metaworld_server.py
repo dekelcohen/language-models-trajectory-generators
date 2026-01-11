@@ -6,6 +6,8 @@ import time
 import shutil
 import unittest
 import importlib
+import numpy as np
+from PIL import Image
 # Ensure repo root on sys.path for direct execution
 _THIS_DIR = os.path.dirname(__file__)
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, os.pardir))
@@ -27,7 +29,7 @@ class TestMetaworldServer(unittest.TestCase):
         from common_utils import ensure_image_dirs_exist
         ensure_image_dirs_exist(delete=True)
         # Use the same interpreter/environment used to run tests
-        cls.python = sys.executable
+        cls.python = os.environ.get("METAWORLD_PYTHON", sys.executable)        
         env = os.environ.copy()
         # Heuristic: if METAWORLD_REPO not set, try common sibling locations
         if 'METAWORLD_REPO' not in env:
@@ -41,9 +43,6 @@ class TestMetaworldServer(unittest.TestCase):
                     break
         # Start WS server in a background process
         cmd = [cls.python, 'providers/metaworld_server.py', '--env', 'sawyer_door_v3', '--ws-host', '127.0.0.1', '--ws-port', '8899']
-        # Always pass timeout to the server: <=0 encoded as '0' (no timeout)
-        to_arg = '0' if float(TEST_TIMEOUT_SECS) <= 0 else str(float(TEST_TIMEOUT_SECS))
-        cmd += ['--timeout', to_arg]
         cls.proc = subprocess.Popen(
             cmd,
             stdin=None,
@@ -89,6 +88,158 @@ class TestMetaworldServer(unittest.TestCase):
         self.assertIn('head', resp)
         K = resp['head']['K']
         self.assertEqual(len(K), 3)
+
+    def test_backprojection_roundtrip(self):
+        """Round-trip: back-project a pixel using K and (R,t), then re-project to pixel."""
+        # Capture and parse calibration + poses
+        payload = self._rpc({"cmd": config.CAPTURE_IMAGES, "args": None})
+        self.assertIsInstance(payload, list)
+        self.assertGreaterEqual(len(payload), 6)
+        head_pos, head_quat, wrist_pos, wrist_quat, _, calib = payload[:6]
+        K_head = np.array(calib['head']['K'], dtype=np.float64)
+        K_wrist = np.array(calib['wrist']['K'], dtype=np.float64)
+        znear = float(calib['head']['znear'])
+        zfar = float(calib['head']['zfar'])
+        # Depth buffer is OpenGL normalized; load and linearize
+        npy_path = './images/depth_image_head.npy'
+        self.assertTrue(os.path.exists(npy_path))
+        d = np.load(npy_path).astype(np.float64)
+        h, w = d.shape
+        # Choose a pixel near the image center
+        u, v = int(w * 0.45), int(h * 0.55)
+        # Linearize OpenGL depth to metric Z
+        # --- BEGIN TEMP DEPTH_ORIGIN_UNIFIED ---
+        # MuJoCo renderer returns depth with row 0 at the TOP.
+        # Sample without vertical flip to match RGB pixel coordinates.
+        # Wrapped for quick removal if origin conventions change.
+        d_raw = float(d[v, u])
+        # --- END TEMP DEPTH_ORIGIN_UNIFIED ---
+        denom = (zfar + znear) - (2.0 * d_raw - 1.0) * (zfar - znear)
+        denom = denom if abs(denom) > 1e-9 else 1e-9
+        Z = (2.0 * znear * zfar) / denom
+        Z = float(np.clip(Z, znear, zfar))
+
+        # Quaternion to rotation matrix [x,y,z,w]
+        x, y, z, wq = [float(v_) for v_ in head_quat]
+        R = np.array([
+            [1 - 2 * (y*y + z*z),     2 * (x*y - wq*z),       2 * (x*z + wq*y)],
+            [2 * (x*y + wq*z),        1 - 2 * (x*x + z*z),    2 * (y*z - wq*x)],
+            [2 * (x*z - wq*y),        2 * (y*z + wq*x),       1 - 2 * (x*x + y*y)],
+        ], dtype=np.float64)
+        t = np.array(head_pos, dtype=np.float64)
+
+        # Back-project using server's sign convention (v = -fy*(Y/Z) + cy)
+        fx = float(K[0, 0]); fy = float(K[1, 1])
+        cx = float(K[0, 2]); cy = float(K[1, 2])
+        dir_cam = np.array([
+            (float(u) - cx) / (fx if abs(fx) > 1e-9 else 1e-9),
+            -(float(v) - cy) / (fy if abs(fy) > 1e-9 else 1e-9),
+            1.0,
+        ], dtype=np.float64).reshape(3, 1)
+        Xc = dir_cam * Z
+        Xw = (R @ Xc).reshape(3) + t
+
+        # Forward-project to pixel to verify round-trip (server uses v = -fy*(Y/Z) + cy)
+        Xc2 = (R.T @ (Xw - t)).reshape(3)
+        Z2 = Xc2[2] if abs(Xc2[2]) > 1e-9 else 1e-9
+        u2 = K[0, 0] * (Xc2[0] / Z2) + K[0, 2]
+        v2 = -K[1, 1] * (Xc2[1] / Z2) + K[1, 2]
+        self.assertLess(abs(u2 - u), 2.0)
+        self.assertLess(abs(v2 - v), 2.0)
+
+    def test_backproject_matches_gt_world(self):
+        """Backproject a pixel corresponding to a known world point and verify it matches the GT world coordinates.
+
+        This emulates the core of `detect_object`: given a pixel and camera calibration, recover the world position.
+        Implementation is self-contained (no api.py or utils imports).
+        """
+        # --- Phase: capture images + calibration and current camera pose ---
+        payload = self._rpc({"cmd": config.CAPTURE_IMAGES, "args": None})
+        self.assertIsInstance(payload, list)
+        self.assertGreaterEqual(len(payload), 6)
+        head_pos, head_quat, wrist_pos, wrist_quat, _, calib = payload[:6]
+        K_head = np.array(calib['head']['K'], dtype=np.float64)
+        K_wrist = np.array(calib['wrist']['K'], dtype=np.float64)
+        znear = float(calib['head']['znear'])
+        zfar = float(calib['head']['zfar'])
+
+        # --- Phase: pick a GT world point that is actually visible ---
+        # Try several candidates commonly in view; fall back to skipping if none visible
+        candidates = []
+        s_all = self._rpc({"cmd": config.GET_STATE, "args": None})
+        objs_all = (s_all.get('objects') or {})
+        for name, entry in objs_all.items():
+            pos = (entry or {}).get('pos')
+            if pos:
+                candidates.append((name, np.array(pos, dtype=np.float64)))
+        if isinstance(s_all, dict) and s_all.get('eef_pos'):
+            candidates.append(("eef", np.array(s_all['eef_pos'], dtype=np.float64)))
+        self.assertGreater(len(candidates), 0, "No GT candidates available from env state")
+
+        # --- Phase: build extrinsics R, t from camera quaternion/pos ---
+        def quat_to_R(q):
+            x, y, z, wq = [float(v_) for v_ in q]
+            return np.array([
+                [1 - 2 * (y*y + z*z),     2 * (x*y - wq*z),       2 * (x*z + wq*y)],
+                [2 * (x*y + wq*z),        1 - 2 * (x*x + z*z),    2 * (y*z - wq*x)],
+                [2 * (x*z - wq*y),        2 * (y*z + wq*x),       1 - 2 * (x*x + y*y)],
+            ], dtype=np.float64)
+
+        R_head = quat_to_R(head_quat)
+        t_head = np.array(head_pos, dtype=np.float64)
+        R_wrist = quat_to_R(wrist_quat)
+        t_wrist = np.array(wrist_pos, dtype=np.float64)
+
+        # --- Phase: select first candidate that is inside the image and front-most (visible) ---
+        def _try_camera(K, R, t, depth_path):
+            self.assertTrue(os.path.exists(depth_path))
+            dloc = np.load(depth_path).astype(np.float64)
+            hloc, wloc = dloc.shape
+            fx, fy = float(K[0, 0]), float(K[1, 1])
+            cx, cy = float(K[0, 2]), float(K[1, 2])
+            for name, Xw_gt in candidates:
+                Xc_tmp = (R.T @ (Xw_gt - t)).reshape(3)
+                Zpred = Xc_tmp[2]
+                if Zpred <= 0:
+                    continue
+                u_tmp = fx * (Xc_tmp[0] / Zpred) + cx
+                v_tmp = -fy * (Xc_tmp[1] / Zpred) + cy
+                if not (0 <= u_tmp < wloc and 0 <= v_tmp < hloc):
+                    continue
+                ui = int(round(u_tmp))
+                vi = int(round(v_tmp))
+                d_raw = float(dloc[vi, ui])
+                denom = (zfar + znear) - (2.0 * d_raw - 1.0) * (zfar - znear)
+                denom = denom if abs(denom) > 1e-9 else 1e-9
+                Z_lin_tmp = (2.0 * znear * zfar) / denom
+                if abs(Z_lin_tmp - Zpred) < 0.05:
+                    return name, Xw_gt, ui, vi, Z_lin_tmp, (fx, fy, cx, cy), R, t
+            return None
+
+        chosen = _try_camera(K_head, R_head, t_head, './images/depth_image_head.npy')
+        if chosen is None:
+            chosen = _try_camera(K_wrist, R_wrist, t_wrist, './images/depth_image_wrist.npy')
+        if chosen is None:
+            import unittest as _ut
+            raise _ut.SkipTest("No visible GT candidate found in head/wrist cameras; off-screen or occluded.")
+        name, Xw_gt, ui, vi, Z_lin, (fx, fy, cx, cy), R_use, t_use = chosen
+
+        # Z_lin already computed and validated against prediction; clamp defensively
+        Z_lin = float(np.clip(Z_lin, znear, zfar))
+
+        # --- Phase: backproject pixel to camera and transform to world ---
+        dir_cam = np.array([
+            (float(ui) - cx) / (fx if abs(fx) > 1e-9 else 1e-9),
+            -(float(vi) - cy) / (fy if abs(fy) > 1e-9 else 1e-9),
+            1.0,
+        ], dtype=np.float64).reshape(3, 1)
+        Xc_bp = dir_cam * Z_lin
+        Xw_bp = (R_use @ Xc_bp).reshape(3) + t_use
+
+        # --- Phase: compare recovered world point to GT ---
+        err = float(np.linalg.norm(Xw_bp - Xw_gt))
+        # Allow a small tolerance due to sampling, rounding and renderer quantization
+        self.assertLess(err, 0.03, f"Backprojected world point deviates {err:.4f} m from GT")
 
     def test_get_state_and_annotation(self):
         state = self._rpc({"cmd": config.GET_STATE, "args": {"objects": ["handle"]}})

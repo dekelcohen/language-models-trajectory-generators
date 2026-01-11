@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 import argparse
 import config
+from providers.env_sim_util import _get_objects_pose
 from debug.dbg_utils import install_debug_reminder
 
 # GUI Viewer 
@@ -157,47 +158,21 @@ def _draw_overlay(env, cam_id, points_world, path):
         draw.ellipse((u - 3, v - 3, u + 3, v + 3), outline=(255, 0, 0), width=2)
     im.save(path)
 
-def _get_objects_pose(env, names):
-    out = {}
-    for name in (names or []):
-        pos = None
-        quat = None
-        try:
-            pos = env.data.geom(name).xpos.copy()
-            R = env.data.geom(name).xmat.reshape(3, 3)
-            quat = _rotmat_to_quat_xyzw(R)
-        except Exception:
-            try:
-                pos = env.data.site(name).xpos.copy()
-                R = env.data.site(name).xmat.reshape(3, 3)
-                quat = _rotmat_to_quat_xyzw(R)
-            except Exception:
-                try:
-                    pos = env.data.body(name).xpos.copy()
-                    R = env.data.body(name).xmat.reshape(3, 3)
-                    quat = _rotmat_to_quat_xyzw(R)
-                except Exception:
-                    pass
-        if pos is not None and quat is not None:
-            out[name] = {"pos": pos.tolist(), "quat": quat.tolist()}
-    return out
+# _get_objects_pose now imported from providers.env_sim_util for reuse
 
 def _render_and_save(env, cam_id, rgb_path, depth_path):
     _set_active_camera(env, cam_id)
     rgb = env.mujoco_renderer.render(render_mode="rgb_array")
     depth_raw = env.mujoco_renderer.render(render_mode="depth_array")
     Image.fromarray(rgb).save(rgb_path)
+    # Save a visualization PNG clamped to [0,1] for quick viewing
+    d_vis = np.clip(depth_raw, 0.0, 1.0)
+    Image.fromarray((d_vis * 255).astype(np.uint8)).save(depth_path)
+    # Save the exact metric depth as float32 .npy next to the PNG
     try:
-        K, zn, zf, _, _ = _get_intrinsics(env, cam_id)
-        z_ndc = depth_raw * 2.0 - 1.0
-        z_eye = (2.0 * zn * zf) / (zf + zn - z_ndc * (zf - zn))
-        vis_far = min(zf, zn + 2.0)
-        d_norm = np.clip((z_eye - zn) / (vis_far - zn + 1e-6), 0.0, 1.0)
-        d_vis = (1.0 - d_norm)
-        Image.fromarray((d_vis * 255).astype(np.uint8)).save(depth_path)
+        np.save(os.path.splitext(depth_path)[0] + ".npy", depth_raw.astype(np.float32))
     except Exception:
-        d = np.clip(depth_raw, 0.0, 1.0)
-        Image.fromarray((d * 255).astype(np.uint8)).save(depth_path)
+        pass
 
 def _render_and_save_rgb(env, cam_id, rgb_path):
     _set_active_camera(env, cam_id)
@@ -532,9 +507,11 @@ def main():
                         fy_w = height / (2.0 * np.tan(np.deg2rad(fovy_w) / 2.0))
                         fx_w = fy_w * (width / float(height))
                         K_wrist = [[fx_w, 0.0, width / 2.0], [0.0, fy_w, height / 2.0], [0.0, 0.0, 1.0]]
+                        # TEMP: depth sidecar is currently raw OpenGL normalized from MuJoCo; mark encoding accordingly
                         calib = {
                             "head": {"K": K_head, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_h},
                             "wrist": {"K": K_wrist, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_w},
+                            # MuJoCo renderer depth is OpenGL-normalized buffer; client will linearize to metric Z
                             "depth_encoding": "opengl",
                         }
                     except Exception:
