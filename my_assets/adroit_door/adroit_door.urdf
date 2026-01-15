@@ -1,0 +1,154 @@
+<robot name="adroit_door">
+  <link name="frame_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="7.85398"/>
+      <inertia ixx="0.923301" ixy="0" ixz="0" iyy="0.764585" iyz="0" izz="0.168533"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.6 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.5"/>
+      </geometry>
+      <material name="wood">
+        <color rgba="0.76 0.6 0.42 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="-0.02 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.5"/>
+      </geometry>
+      <material name="wood">
+        <color rgba="0.76 0.6 0.42 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.6 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.5"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.02 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.5"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="door_hinge" type="revolute">
+    <parent link="frame_link"/>
+    <child link="door_link"/>
+    <origin xyz="0.31 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0" upper="1.57" effort="50" velocity="2"/>
+    <dynamics damping="1" friction="2"/>
+  </joint>
+
+  <link name="door_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="2.43455"/>
+      <inertia ixx="0.0913751" ixy="0" ixz="0" iyy="0.0521615" iyz="0" izz="0.043714"/>
+    </inertial>
+    <!-- Door panel box: size 0.4 x 0.1 x 0.5 (MuJoCo half-sizes 0.2 0.05 0.25) -->
+    <visual>
+      <origin xyz="-0.02 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.1 0.5"/>
+      </geometry>
+      <material name="wood">
+        <color rgba="0.76 0.6 0.42 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.18 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.5"/>
+      </geometry>
+      <material name="wood">
+        <color rgba="0.76 0.6 0.42 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="-0.22 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.5"/>
+      </geometry>
+      <material name="wood">
+        <color rgba="0.76 0.6 0.42 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.02 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.1 0.5"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.18 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.5"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.22 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.5"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="latch_joint" type="revolute">
+    <parent link="door_link"/>
+    <child link="latch_link"/>
+    <origin xyz="-0.15 0 -0.025" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="1.8" effort="30" velocity="5"/>
+    <dynamics damping="0.5" friction="5"/>
+  </joint>
+
+  <link name="latch_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="3.53743"/>
+      <inertia ixx="0.0483771" ixy="0" ixz="0" iyy="0.0410001" iyz="0" izz="0.0111013"/>
+    </inertial>
+    <!-- Approximate latch with a cylinder along x and small rods -->
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5707963 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.3"/>
+      </geometry>
+      <material name="metal">
+        <color rgba="0.8 0.8 0.8 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0.1 -0.15 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.02" length="0.2"/>
+      </geometry>
+      <material name="metal">
+        <color rgba="0.8 0.8 0.8 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="-0.1 0.1 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.04" length="0.14"/>
+      </geometry>
+      <material name="metal">
+        <color rgba="0.8 0.8 0.8 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 1.5707963 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.3"/>
+      </geometry>
+    </collision>
+  </link>
+
+</robot>
