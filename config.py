@@ -100,6 +100,8 @@ SET_SEED = 14
 SET_TASK_FROM_RAND_VEC = 15
 QUERY_ENV_ATTR = 16
 MAKE_TRAJECTORY_VIDEO = 17
+SET_DOOR_STATE = 18
+CAPTURE_TRAJECTORY_FRAME = 19
 
 # Paths
 rgb_image_wrist_path = "./images/rgb_image_wrist.png"
