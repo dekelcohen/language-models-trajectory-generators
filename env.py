@@ -25,9 +25,9 @@ class Environment:
         object_model = p.loadURDF("ycb_assets/003_cracker_box.urdf", object_start_position, object_start_orientation_q, useFixedBase=False, globalScaling=config.global_scaling)
 
         # Load Adroit door URDF (fixed frame with hinge and latch)
-        try:
-            door_start_position = [-0.11, 0.04, 0.45]
-            door_start_orientation_q = p.getQuaternionFromEuler([0.0, 0.0, 0.0])
+        try:            
+            door_start_position = [-0.11, 0.04, 0.25]
+            door_start_orientation_q = p.getQuaternionFromEuler([0.0, 0.0, 4.0]) 
             self.door_id = p.loadURDF("my_assets/adroit_door/adroit_door.urdf", door_start_position, door_start_orientation_q, useFixedBase=True)
 
             # Cache joint indices by name for control convenience
@@ -35,10 +35,11 @@ class Environment:
             self.latch_index = self._get_joint_index_by_name(self.door_id, "latch_joint")
 
             # Initialize motors to hold at zero (closed door and latch)
+            # Slightly stronger forces to prevent accidental opening by arm contact at startup.
             if self.door_hinge_index is not None:
-                p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=50)
+                p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
             if self.latch_index is not None:
-                p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=30)
+                p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
         except Exception as e:
             print("[Env] Failed to load or initialize adroit_door URDF:", e)
             traceback.print_exc()
@@ -258,7 +259,10 @@ def run_simulation_environment(args, env_connection, logger):
 
         env.update()
 # --- Minimal GUI demo to interactively test door kinematics ---
-def run_gui_demo(disable_forces : bool = False):
+def run_gui_demo(disable_forces: bool = False,
+                 ee_offset_from_base=(0.0, 0.08, 0.45),
+                 ee_orientation_e_override=None,
+                 strengthen_door=True):
     """
     Launch a minimal PyBullet GUI session that loads the environment with the door.
     - Uses p.GUI so the debug visualizer opens.
@@ -280,6 +284,53 @@ def run_gui_demo(disable_forces : bool = False):
 
         env = Environment(_Args)
         env.load()
+        
+        # Start the Franka at the same position but yaw flipped 180°
+        config.base_start_position_franka=[0.0, 0.15, 0.0]
+        # Euler angles [roll, pitch, yaw]; yaw = -pi/2 faces the door
+        config.base_start_orientation_e_franka=[0.0, 0.0, -1.5707963267948966]
+    
+        # Tucked joint configuration to avoid initial collision with the door
+        config.joint_start_positions_franka = [0.0, 0.0, 0.0, -1.5708, 0.0, 1.8675, 0.0, 0.04, 0.04]
+        
+        config.ee_start_orientation_e = [0.0, 0.08, 0.45]
+
+        # Hold the door closed at startup with stronger motor forces (optional)
+        if strengthen_door:
+            try:
+                if getattr(env, "door_id", None) is not None:
+                    if getattr(env, "door_hinge_index", None) is not None:
+                        p.resetJointState(env.door_id, env.door_hinge_index, targetValue=0.0)
+                        p.setJointMotorControl2(env.door_id, env.door_hinge_index, p.POSITION_CONTROL,
+                                                targetPosition=0.0, force=200)
+                    if getattr(env, "latch_index", None) is not None:
+                        p.resetJointState(env.door_id, env.latch_index, targetValue=0.0)
+                        p.setJointMotorControl2(env.door_id, env.latch_index, p.POSITION_CONTROL,
+                                                targetPosition=0.0, force=200)
+            except Exception as e:
+                # Default forces from load() remain if this fails
+                print("[Env GUI] Warning: could not strengthen door motors:", e)
+
+        robot = Robot(_Args)
+        # Compute a safe EE pose near and above the robot base to avoid falling into the door
+        base_x, base_y, base_z = config.base_start_position_franka
+        safe_ee_pos = [
+            base_x + ee_offset_from_base[0],
+            base_y + ee_offset_from_base[1],
+            base_z + ee_offset_from_base[2],
+        ]
+        safe_ee_ori = ee_orientation_e_override if ee_orientation_e_override is not None else config.ee_start_orientation_e
+
+        # Place the gripper above base immediately; do not let gravity + IK swing it into the door
+        try:
+            robot.move(env, safe_ee_pos, safe_ee_ori, gripper_open=True, is_trajectory=False)
+        except Exception as e:
+            print("[Env GUI] Warning: initial EE placement failed:", e)
+
+        print(f'config.base_start_position_franka={config.base_start_position_franka}')
+        print(f'config.base_start_orientation_e_franka={config.base_start_orientation_e_franka}')
+        print(f'config.joint_start_positions_franka={config.joint_start_positions_franka}')
+        print(f'safe_ee_pos={safe_ee_pos}')
 
         if disable_forces:
             # Disable motors so user drag isn't resisted
