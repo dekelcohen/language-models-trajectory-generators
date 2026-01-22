@@ -10,42 +10,169 @@ from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT
 from config import SET_DOOR_STATE, CAPTURE_TRAJECTORY_FRAME
 
-class Environment:
+# --- Task Profiles ------------------------------------------------------
+# --- Simulation Environment Profiles -----------------------------------
+class SimEnvBase:
+    """Base environment profile. Applies hard-coded runtime overrides and
+    loads any required assets. No global config edits elsewhere."""
 
-    def __init__(self, args):
+    def __init__(self):
+        # Base class does not change defaults
+        pass
 
-        self.mode = args.mode
+    def apply(self, env):
+        # Default: leave config values as-is
+        return
 
-    def load(self):
+    def load_assets(self, env):
+        # Default: no additional assets
+        return
 
-        p.resetDebugVisualizerCamera(config.camera_distance, config.camera_yaw, config.camera_pitch, config.camera_target_position)
 
-        object_start_position = config.object_start_position
-        object_start_orientation_q = p.getQuaternionFromEuler(config.object_start_orientation_e)
-        object_model = p.loadURDF("ycb_assets/003_cracker_box.urdf", object_start_position, object_start_orientation_q, useFixedBase=False, globalScaling=config.global_scaling)
+class SimEnvGrasp(SimEnvBase):
+    """Grasp task: keep existing camera/robot poses and load a YCB object."""
 
-        # Load Adroit door URDF (fixed frame with hinge and latch)
-        try:            
+    def __init__(self):
+        # Keep defaults from config for cameras and robot
+        pass
+
+    def apply(self, env):
+        # Nothing additional to set for grasp
+        return
+
+    def load_assets(self, env):
+        try:
+            object_start_position = config.object_start_position
+            object_start_orientation_q = p.getQuaternionFromEuler(config.object_start_orientation_e)
+            _ = p.loadURDF(
+                "ycb_assets/003_cracker_box.urdf",
+                object_start_position,
+                object_start_orientation_q,
+                useFixedBase=False,
+                globalScaling=config.global_scaling,
+            )
+        except Exception as e:
+            print("[Env] Warning: failed to load grasp object:", e)
+            traceback.print_exc()
+
+
+class SimEnvDoor(SimEnvBase):
+    """Door task: face robot toward door, set cameras, and load the door.
+
+    Head camera pose is set to match the GUI debug visualizer camera.
+    URDF loading and controller force setup occur here.
+    """
+
+    def __init__(self):
+        # Debug visualizer camera (GUI) used in run_gui_demo
+        config.camera_distance = 0.8
+        config.camera_yaw = 225.0
+        config.camera_pitch = -30.0
+        config.camera_target_position = [0.0, 0.6, 0.3]
+
+        # Compute head camera to match debug visualizer view
+        pos, ori_e = self._head_from_debug(
+            config.camera_distance,
+            config.camera_yaw,
+            config.camera_pitch,
+            config.camera_target_position,
+        )
+        config.head_camera_position = pos
+        config.head_camera_orientation_e = ori_e
+        # Make head camera render exactly the same view as the debug visualizer
+        config.head_camera_use_debug_view = True
+
+        # Franka base pose faces the door; EE starts near/above base
+        config.base_start_position_franka = [0.0, 0.15, 0.0]
+        config.base_start_orientation_e_franka = [0.0, 0.0, -np.pi / 2]
+        bx, by, bz = config.base_start_position_franka
+        ox, oy, oz = (0.0, 0.08, 0.45)
+        config.ee_start_position = [bx + ox, by + oy, bz + oz]
+
+    def _head_from_debug(self, distance, yaw_deg, pitch_deg, target):
+        # Copy debug visualizer camera to head camera pose.
+        # Compute camera world position from spherical params and target:
+        # cam_pos = target - distance * forward(yaw, pitch)
+        yaw = np.deg2rad(float(yaw_deg))
+        pitch = np.deg2rad(float(pitch_deg))
+        tx, ty, tz = list(map(float, target))
+        fx = np.cos(pitch) * np.cos(yaw)
+        fy = np.cos(pitch) * np.sin(yaw)
+        fz = np.sin(pitch)
+        cx = tx - distance * fx
+        cy = ty - distance * fy
+        cz = tz - distance * fz
+        # Orientation: roll=0, pitch/yaw match debug
+        return [float(cx), float(cy), float(cz)], [0.0, float(pitch), float(yaw)]
+
+    def apply(self, env):
+        # Nothing else; assignments performed in __init__ as requested
+        return
+
+    def load_assets(self, env):
+        # Load Adroit door and set strong hold forces
+        try:
             door_start_position = [-0.11, 0.04, 0.25]
-            door_start_orientation_q = p.getQuaternionFromEuler([0.0, 0.0, 4.0]) 
-            self.door_id = p.loadURDF("my_assets/adroit_door/adroit_door.urdf", door_start_position, door_start_orientation_q, useFixedBase=True)
-
-            # Cache joint indices by name for control convenience
-            self.door_hinge_index = self._get_joint_index_by_name(self.door_id, "door_hinge")
-            self.latch_index = self._get_joint_index_by_name(self.door_id, "latch_joint")
-
-            # Initialize motors to hold at zero (closed door and latch)
-            # Slightly stronger forces to prevent accidental opening by arm contact at startup.
-            if self.door_hinge_index is not None:
-                p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
-            if self.latch_index is not None:
-                p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
+            door_start_orientation_q = p.getQuaternionFromEuler([0.0, 0.0, 4.0])
+            env.door_id = p.loadURDF(
+                "my_assets/adroit_door/adroit_door.urdf",
+                door_start_position,
+                door_start_orientation_q,
+                useFixedBase=True,
+            )
+            env.door_hinge_index = env._get_joint_index_by_name(env.door_id, "door_hinge")
+            env.latch_index = env._get_joint_index_by_name(env.door_id, "latch_joint")
+            if env.door_hinge_index is not None:
+                p.setJointMotorControl2(env.door_id, env.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
+            if env.latch_index is not None:
+                p.setJointMotorControl2(env.door_id, env.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
         except Exception as e:
             print("[Env] Failed to load or initialize adroit_door URDF:", e)
             traceback.print_exc()
 
-        if self.mode == "default":
 
+def _get_simenv(task_name):
+    t = (task_name or "").lower()
+    if any(k in t for k in ["door", "open_door", "opendoor", "sawyer_door_v3", "franka_door"]):
+        return SimEnvDoor()
+    return SimEnvGrasp()
+
+class Environment:
+
+    def __init__(self, args):
+        self.mode = args.mode
+        # Make pybullet honor --task similarly to Metaworld
+        self.task = getattr(args, "task", None)
+        self.simenv = _get_simenv(self.task)
+
+    def load(self):
+        # Apply per-task overrides and load assets via the selected SimEnv
+        try:
+            self.simenv.apply(self)
+        except Exception as e:
+            print("[Env] Warning: failed to apply SimEnv overrides:", e)
+            traceback.print_exc()
+
+        # Debug visualizer camera
+        p.resetDebugVisualizerCamera(
+            config.camera_distance,
+            config.camera_yaw,
+            config.camera_pitch,
+            config.camera_target_position,
+        )
+
+        # Load task-specific assets
+        try:
+            # Initialize door-related attributes to safe defaults
+            self.door_id = None
+            self.door_hinge_index = None
+            self.latch_index = None
+            self.simenv.load_assets(self)
+        except Exception as e:
+            print("[Env] Warning: failed to load SimEnv assets:", e)
+            traceback.print_exc()
+
+        if self.mode == "default":
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
             p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 0)
 
@@ -70,6 +197,8 @@ class Environment:
     def set_door_state(self, door_angle=None, latch_angle=None):
         # Position-control door hinge and latch if provided
         try:
+            if getattr(self, "door_id", None) is None:
+                return
             if door_angle is not None and self.door_hinge_index is not None:
                 p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=float(door_angle), force=50)
             if latch_angle is not None and self.latch_index is not None:
@@ -81,6 +210,8 @@ class Environment:
     def set_door_state_array(self, door_angle, latch_angle):
         # Control both joints in a single array call
         try:
+            if getattr(self, "door_id", None) is None:
+                return
             indices = []
             targets = []
             forces = []
@@ -281,10 +412,25 @@ def run_gui_demo(disable_forces: bool = False,
         class _Args:
             mode = "default"
             robot = "franka"
+            task="door"
 
         env = Environment(_Args)
         env.load()
         
+        # Print camera poses for debugging
+        try:
+            dbg = p.getDebugVisualizerCamera()
+            print("[Env GUI] Debug camera params:")
+            print(f"  distance={config.camera_distance} yaw={config.camera_yaw} pitch={config.camera_pitch}")
+            print(f"  target={config.camera_target_position}")
+            print(f"  getDebugVisualizerCamera() returned tuple of len={len(dbg)}")
+        except Exception as e:
+            print("[Env GUI] Warning: getDebugVisualizerCamera() failed:", e)
+
+        print("[Env GUI] Head camera params:")
+        print(f"  position={config.head_camera_position}")
+        print(f"  orientation_e={config.head_camera_orientation_e}")
+
         # Start the Franka at the same position but yaw flipped 180°
         config.base_start_position_franka=[0.0, 0.15, 0.0]
         # Euler angles [roll, pitch, yaw]; yaw = -pi/2 faces the door
