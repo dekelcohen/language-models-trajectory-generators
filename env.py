@@ -65,10 +65,10 @@ class SimEnvDoor(SimEnvBase):
 
     def __init__(self):
         # Debug visualizer camera (GUI) used in run_gui_demo
-        config.camera_distance = 0.8
+        config.camera_distance = 1.0
         config.camera_yaw = 190.0
-        config.camera_pitch = -10.0
-        config.camera_target_position = [0.0, 0.6, 0.3]
+        config.camera_pitch = -40.0
+        config.camera_target_position = [0.0, 0.64, 0.70]
 
         # Compute head camera pose identical to GUI spherical camera
         # and use it statically in DIRECT (no dynamic debug mirroring).
