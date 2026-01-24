@@ -48,6 +48,12 @@ image_height = 256
 head_camera_position = [0.0, 1.2, 0.6]
 head_camera_orientation_e = [0.0, 3 / 4.5 * math.pi, -math.pi / 2]
 
+# Head camera control flags
+# - head_camera_use_debug_view: mirror the GUI debug visualizer view (GUI only)
+# - head_camera_use_spherical_view: in DIRECT/headless, build view from spherical params
+head_camera_use_debug_view = False
+head_camera_use_spherical_view = False
+
 camera_distance = 0.8
 camera_yaw = 225.0
 camera_pitch = -30.0
