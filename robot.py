@@ -160,18 +160,33 @@ class Robot:
             camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
 
         projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
-        rotation_matrix = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
+    
+        
+        # Special handling: head camera per-task behavior
+        if camera == "head" and getattr(config, "head_camera_use_debug_view", False):
+            # GUI: copy view/projection from debug visualizer
+            view_matrix, projection_matrix, camera_position = self._debug_view_matrices_and_pos()
+        elif camera == "head" and getattr(config, "head_camera_use_spherical_view", False):
+            # DIRECT: build view from spherical params (identical to GUI angle)
+            view_matrix, camera_position = self._view_and_pos_from_spherical(
+                target=config.camera_target_position,
+                distance=config.camera_distance,
+                yaw_deg=config.camera_yaw,
+                pitch_deg=config.camera_pitch,
+            )
+            projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
+        else:
+            rotation_matrix = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
+            if camera == "wrist":
+                init_camera_vector = [0, 0, 1]
+                init_up_vector = [1, 0, 0]
+            elif camera == "head":
+                init_camera_vector = [0, 0, 1]
+                init_up_vector = [-1, 0, 0]
 
-        if camera == "wrist":
-            init_camera_vector = [0, 0, 1]
-            init_up_vector = [1, 0, 0]
-        elif camera == "head":
-            init_camera_vector = [0, 0, 1]
-            init_up_vector = [-1, 0, 0]
-
-        camera_vector = rotation_matrix.dot(init_camera_vector)
-        up_vector = rotation_matrix.dot(init_up_vector)
-        view_matrix = p.computeViewMatrix(camera_position, camera_position + camera_vector, up_vector)
+            camera_vector = rotation_matrix.dot(init_camera_vector)
+            up_vector = rotation_matrix.dot(init_up_vector)
+            view_matrix = p.computeViewMatrix(camera_position, camera_position + camera_vector, up_vector)
 
         image = p.getCameraImage(
             config.image_width,
@@ -219,3 +234,73 @@ class Robot:
             depth_image.save(depth_image_path)
 
         return camera_position, camera_orientation_q
+
+    def _debug_view_matrices_and_pos(self):
+        """Return (view, projection, camera_pos) mirroring the GUI debug view.
+        Falls back to spherical params from config if the debug camera tuple
+        is unavailable (e.g., in DIRECT mode).
+        """
+        try:
+            dbg = p.getDebugVisualizerCamera()
+            # Validate tuple structure
+            if not isinstance(dbg, (list, tuple)) or len(dbg) != 12:
+                raise RuntimeError("debug camera unavailable")
+
+            view_matrix = dbg[2]
+            projection_matrix = dbg[3]
+            yaw_deg = float(dbg[8])
+            pitch_deg = float(dbg[9])
+            dist = float(dbg[10])
+            target = dbg[11] if isinstance(dbg[11], (list, tuple)) else [0.0, 0.0, 0.0]
+            tx, ty, tz = list(map(float, target))
+
+            # Treat zero/degenerate values as invalid in DIRECT mode
+            if dist <= 1e-6 or (abs(yaw_deg) <= 1e-6 and abs(pitch_deg) <= 1e-6 and abs(tx) <= 1e-6 and abs(ty) <= 1e-6 and abs(tz) <= 1e-6):
+                raise RuntimeError("debug camera invalid (degenerate)")
+
+            yaw = np.deg2rad(yaw_deg)
+            pitch = np.deg2rad(pitch_deg)
+            fx = np.cos(pitch) * np.cos(yaw)
+            fy = np.cos(pitch) * np.sin(yaw)
+            fz = np.sin(pitch)
+            camera_pos = [tx - dist * fx, ty - dist * fy, tz - dist * fz]
+            return view_matrix, projection_matrix, camera_pos
+        except Exception:
+            # Fallback: compute view + position from spherical params
+            view_matrix, camera_pos = self._view_and_pos_from_spherical(
+                target=config.camera_target_position,
+                distance=config.camera_distance,
+                yaw_deg=config.camera_yaw,
+                pitch_deg=config.camera_pitch,
+            )
+            projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
+            return view_matrix, projection_matrix, camera_pos
+
+    def _view_and_pos_from_spherical(self, target, distance, yaw_deg, pitch_deg):
+        """Compute a view matrix and world camera position from spherical
+        parameters (target, distance, yaw, pitch) with Z-up. Keeps logic
+        small and reusable for head-camera debug mirroring fallback.
+        """
+        # Use positional args; some PyBullet builds require 'upAxisIndex' positional
+        view_matrix = p.computeViewMatrixFromYawPitchRoll(
+            target,
+            distance,
+            yaw_deg,
+            pitch_deg,
+            0.0,
+            2,
+        )
+        yaw = np.deg2rad(float(yaw_deg))
+        pitch = np.deg2rad(float(pitch_deg))
+        tx, ty, tz = list(map(float, target))
+        fx = np.cos(pitch) * np.cos(yaw)
+        fy = np.cos(pitch) * np.sin(yaw)
+        fz = np.sin(pitch)
+        camera_position = [
+            tx - distance * fx,
+            ty - distance * fy,
+            tz - distance * fz,
+        ]
+        return view_matrix, camera_position
+
+

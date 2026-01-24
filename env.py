@@ -66,11 +66,12 @@ class SimEnvDoor(SimEnvBase):
     def __init__(self):
         # Debug visualizer camera (GUI) used in run_gui_demo
         config.camera_distance = 0.8
-        config.camera_yaw = 225.0
-        config.camera_pitch = -30.0
+        config.camera_yaw = 190.0
+        config.camera_pitch = -10.0
         config.camera_target_position = [0.0, 0.6, 0.3]
 
-        # Compute head camera to match debug visualizer view
+        # Compute head camera pose identical to GUI spherical camera
+        # and use it statically in DIRECT (no dynamic debug mirroring).
         pos, ori_e = self._head_from_debug(
             config.camera_distance,
             config.camera_yaw,
@@ -79,20 +80,22 @@ class SimEnvDoor(SimEnvBase):
         )
         config.head_camera_position = pos
         config.head_camera_orientation_e = ori_e
-        # Make head camera render exactly the same view as the debug visualizer
-        config.head_camera_use_debug_view = True
+        # Decide camera behavior by connection type
+        # In GUI: mirror the debug visualizer; in DIRECT: use spherical view
+        try:
+            _is_gui = p.isConnected() and p.getConnectionInfo()[1] == p.GUI
+        except Exception:
+            _is_gui = False
+        config.head_camera_use_debug_view = bool(_is_gui)
+        config.head_camera_use_spherical_view = not bool(_is_gui)
 
         # Franka base pose faces the door; EE starts near/above base
         config.base_start_position_franka = [0.0, 0.15, 0.0]
         config.base_start_orientation_e_franka = [0.0, 0.0, -np.pi / 2]
-        bx, by, bz = config.base_start_position_franka
-        ox, oy, oz = (0.0, 0.08, 0.45)
-        config.ee_start_position = [bx + ox, by + oy, bz + oz]
+        
 
     def _head_from_debug(self, distance, yaw_deg, pitch_deg, target):
-        # Copy debug visualizer camera to head camera pose.
-        # Compute camera world position from spherical params and target:
-        # cam_pos = target - distance * forward(yaw, pitch)
+        # Keep this helper small and correct; used only to print params.
         yaw = np.deg2rad(float(yaw_deg))
         pitch = np.deg2rad(float(pitch_deg))
         tx, ty, tz = list(map(float, target))
@@ -102,7 +105,6 @@ class SimEnvDoor(SimEnvBase):
         cx = tx - distance * fx
         cy = ty - distance * fy
         cz = tz - distance * fz
-        # Orientation: roll=0, pitch/yaw match debug
         return [float(cx), float(cy), float(cz)], [0.0, float(pitch), float(yaw)]
 
     def apply(self, env):
@@ -247,7 +249,58 @@ def run_simulation_environment(args, env_connection, logger):
     robot = Robot(args)
     robot.move(env, robot.ee_start_position, robot.ee_start_orientation_e, gripper_open=True, is_trajectory=False)
 
-    env_connection_message = OK + "Finished setting up environment!" + ENDC
+    # Diagnostics: compare GUI debug camera vs config spherical params and head image stats
+    dbg_info = {
+        "available": False,
+        "yaw": None,
+        "pitch": None,
+        "dist": None,
+        "target": None,
+        "tuple_len": None,
+    }
+    try:
+        dbg = p.getDebugVisualizerCamera()
+        dbg_info["tuple_len"] = len(dbg) if isinstance(dbg, (list, tuple)) else None
+        if isinstance(dbg, (list, tuple)) and len(dbg) == 12:
+            dbg_info["available"] = True
+            dbg_info["yaw"] = float(dbg[8])
+            dbg_info["pitch"] = float(dbg[9])
+            dbg_info["dist"] = float(dbg[10])
+            dbg_info["target"] = list(map(float, dbg[11]))
+    except Exception:
+        pass
+
+    # Capture a quick head image to compute simple stats (mean/var) so we can detect blank frames
+    head_stats = {
+        "mean": None,
+        "var": None,
+        "size": None,
+    }
+    try:
+        # Save head image to the standard path
+        _ = robot.get_camera_image("head", env, save_camera_image=True,
+                                   rgb_image_path=config.rgb_image_head_path,
+                                   depth_image_path=config.depth_image_head_path)
+        img = Image.open(config.rgb_image_head_path)
+        arr = np.array(img, dtype=np.uint8)
+        head_stats["size"] = list(arr.shape)
+        head_stats["mean"] = float(arr.mean())
+        head_stats["var"] = float(arr.var())
+    except Exception:
+        pass
+
+    env_connection_message = (
+        OK
+        + (
+            f"Finished setting up environment! sim=pybullet conn={'p.DIRECT'} "
+            f"head_debug_view={getattr(config, 'head_camera_use_debug_view', False)} "
+            f"dbg_cam_available={dbg_info['available']} dbg_tuple_len={dbg_info['tuple_len']} "
+            f"dbg(yaw={dbg_info['yaw']}, pitch={dbg_info['pitch']}, dist={dbg_info['dist']}, target={dbg_info['target']}) "
+            f"cfg(yaw={config.camera_yaw}, pitch={config.camera_pitch}, dist={config.camera_distance}, target={config.camera_target_position}) "
+            f"head_img(size={head_stats['size']}, mean={head_stats['mean']}, var={head_stats['var']})"
+        )
+        + ENDC
+    )
     env_connection.send([env_connection_message])
 
     while True:
@@ -478,6 +531,31 @@ def run_gui_demo(disable_forces: bool = False,
         print(f'config.joint_start_positions_franka={config.joint_start_positions_franka}')
         print(f'safe_ee_pos={safe_ee_pos}')
 
+        # Capture and save the head camera image using the debug view
+        head_stats = {"size": None, "mean": None, "var": None}
+        try:
+            head_pos, head_q = robot.get_camera_image(
+                "head",
+                env,
+                save_camera_image=True,
+                rgb_image_path=config.rgb_image_head_path,
+                depth_image_path=config.depth_image_head_path,
+            )
+            print("[Env GUI] Saved head camera image:", config.rgb_image_head_path)
+            print("[Env GUI] Head camera actual pose:")
+            print("  position=", head_pos)
+            print("  orientation_q=", head_q)
+            try:
+                img = Image.open(config.rgb_image_head_path)
+                arr = np.array(img, dtype=np.uint8)
+                head_stats["size"] = list(arr.shape)
+                head_stats["mean"] = float(arr.mean())
+                head_stats["var"] = float(arr.var())
+            except Exception:
+                pass
+        except Exception as e:
+            print("[Env GUI] Warning: failed to capture head camera image:", e)
+
         if disable_forces:
             # Disable motors so user drag isn't resisted
             try:
@@ -489,6 +567,35 @@ def run_gui_demo(disable_forces: bool = False,
             except Exception as e:
                 print("[Env GUI] Failed to disable door motors:", e)
                 traceback.print_exc()
+
+        # Diagnostic line mirroring DIRECT-mode setup
+        try:
+            dbg = p.getDebugVisualizerCamera()
+            dbg_tuple_len = len(dbg) if isinstance(dbg, (list, tuple)) else None
+            if isinstance(dbg, (list, tuple)) and dbg_tuple_len == 12:
+                dbg_available = True
+                dbg_yaw = float(dbg[8])
+                dbg_pitch = float(dbg[9])
+                dbg_dist = float(dbg[10])
+                dbg_target = list(map(float, dbg[11]))
+            else:
+                dbg_available = False
+                dbg_yaw = dbg_pitch = dbg_dist = None
+                dbg_target = None
+        except Exception:
+            dbg_available = False
+            dbg_tuple_len = None
+            dbg_yaw = dbg_pitch = dbg_dist = None
+            dbg_target = None
+
+        print(
+            f"[Env GUI] Setup: sim=pybullet conn={'p.GUI'} "
+            f"head_debug_view={getattr(config, 'head_camera_use_debug_view', False)} "
+            f"dbg_cam_available={dbg_available} dbg_tuple_len={dbg_tuple_len} "
+            f"dbg(yaw={dbg_yaw}, pitch={dbg_pitch}, dist={dbg_dist}, target={dbg_target}) "
+            f"cfg(yaw={config.camera_yaw}, pitch={config.camera_pitch}, dist={config.camera_distance}, target={config.camera_target_position}) "
+            f"head_img(size={head_stats['size']}, mean={head_stats['mean']}, var={head_stats['var']})"
+        )
 
         # Real-time simulation for natural interaction
         p.setRealTimeSimulation(1)
@@ -509,3 +616,4 @@ def run_gui_demo(disable_forces: bool = False,
 if __name__ == "__main__":
     # Entry point for quick, no-code door kinematics testing in GUI mode.
     run_gui_demo(disable_forces=False)
+
