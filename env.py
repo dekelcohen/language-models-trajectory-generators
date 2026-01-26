@@ -28,6 +28,18 @@ class SimEnvBase:
         # Default: no additional assets
         return
 
+    def configure_robot_pose(self):
+        """Per-task hook to set robot/base/joint starting pose.
+        Default is no-op (grasp task defaults).
+        """
+        return
+        
+    def move_to_start_pos(self):
+        """
+        Return True to move the robot to start ee position + orientation
+        """
+        return True    
+
 
 class SimEnvGrasp(SimEnvBase):
     """Grasp task: keep existing camera/robot poses and load a YCB object."""
@@ -89,9 +101,8 @@ class SimEnvDoor(SimEnvBase):
         config.head_camera_use_debug_view = bool(_is_gui)
         config.head_camera_use_spherical_view = not bool(_is_gui)
 
-        # Franka base pose faces the door; EE starts near/above base
-        config.base_start_position_franka = [0.0, 0.15, 0.0]
-        config.base_start_orientation_e_franka = [0.0, 0.0, -np.pi / 2]
+        # Do NOT change robot base orientation/pose here; we want grasp defaults
+        # so the robot stands upright and stable (not looking at the door).
         
 
     def _head_from_debug(self, distance, yaw_deg, pitch_deg, target):
@@ -108,7 +119,7 @@ class SimEnvDoor(SimEnvBase):
         return [float(cx), float(cy), float(cz)], [0.0, float(pitch), float(yaw)]
 
     def apply(self, env):
-        # Nothing else; assignments performed in __init__ as requested
+        # Camera and door assets handled here; robot pose remains grasp default
         return
 
     def load_assets(self, env):
@@ -131,6 +142,21 @@ class SimEnvDoor(SimEnvBase):
         except Exception as e:
             print("[Env] Failed to load or initialize adroit_door URDF:", e)
             traceback.print_exc()
+
+    def configure_robot_pose(self):
+        """
+        Override robot pose for door task to be identical to grasp defaults.
+        This keeps the robot upright and stable (not facing the door).
+        """        
+        config.base_start_position_franka = [0.0, 0.3, 0.0]
+        # Euler angles [roll, pitch, yaw]; yaw = -pi/2 faces the door
+        config.base_start_orientation_e_franka = [0.0, 0.0, -np.pi / 3]            
+                
+    def move_to_start_pos(self):
+        """
+        Return False, since if moved - it collides with the door and collapses 
+        """
+        return False
 
 
 def _get_simenv(task_name):
@@ -244,10 +270,14 @@ def run_simulation_environment(args, env_connection, logger):
     plane = p.loadURDF("plane.urdf")
 
     env = Environment(args)
+    # Let the task configure the robot/base pose before any URDFs are loaded
+    # so the default (grasp) posture is preserved for the door task.    
+    env.simenv.configure_robot_pose()
     env.load()
 
     robot = Robot(args)
-    robot.move(env, robot.ee_start_position, robot.ee_start_orientation_e, gripper_open=True, is_trajectory=False)
+    if env.simenv.move_to_start_pos():
+        robot.move(env, robot.ee_start_position, robot.ee_start_orientation_e, gripper_open=True, is_trajectory=False)
 
     # Diagnostics: compare GUI debug camera vs config spherical params and head image stats
     dbg_info = {
@@ -443,7 +473,7 @@ def run_simulation_environment(args, env_connection, logger):
 
         env.update()
 # --- Minimal GUI demo to interactively test door kinematics ---
-def run_gui_demo(disable_forces: bool = False,
+def run_gui_demo(task_p = 'door', disable_forces: bool = False,
                  ee_offset_from_base=(0.0, 0.08, 0.45),
                  ee_orientation_e_override=None,
                  strengthen_door=True):
@@ -465,7 +495,7 @@ def run_gui_demo(disable_forces: bool = False,
         class _Args:
             mode = "default"
             robot = "franka"
-            task="door"
+            task = task_p
 
         env = Environment(_Args)
         env.load()
@@ -483,17 +513,8 @@ def run_gui_demo(disable_forces: bool = False,
         print("[Env GUI] Head camera params:")
         print(f"  position={config.head_camera_position}")
         print(f"  orientation_e={config.head_camera_orientation_e}")
-
-        # Start the Franka at the same position but yaw flipped 180°
-        config.base_start_position_franka=[0.0, 0.15, 0.0]
-        # Euler angles [roll, pitch, yaw]; yaw = -pi/2 faces the door
-        config.base_start_orientation_e_franka=[0.0, 0.0, -1.5707963267948966]
-    
-        # Tucked joint configuration to avoid initial collision with the door
-        config.joint_start_positions_franka = [0.0, 0.0, 0.0, -1.5708, 0.0, 1.8675, 0.0, 0.04, 0.04]
         
-        config.ee_start_orientation_e = [0.0, 0.08, 0.45]
-
+        env.simenv.configure_robot_pose()    
         # Hold the door closed at startup with stronger motor forces (optional)
         if strengthen_door:
             try:
@@ -511,25 +532,26 @@ def run_gui_demo(disable_forces: bool = False,
                 print("[Env GUI] Warning: could not strengthen door motors:", e)
 
         robot = Robot(_Args)
-        # Compute a safe EE pose near and above the robot base to avoid falling into the door
-        base_x, base_y, base_z = config.base_start_position_franka
-        safe_ee_pos = [
-            base_x + ee_offset_from_base[0],
-            base_y + ee_offset_from_base[1],
-            base_z + ee_offset_from_base[2],
-        ]
-        safe_ee_ori = ee_orientation_e_override if ee_orientation_e_override is not None else config.ee_start_orientation_e
-
-        # Place the gripper above base immediately; do not let gravity + IK swing it into the door
-        try:
-            robot.move(env, safe_ee_pos, safe_ee_ori, gripper_open=True, is_trajectory=False)
-        except Exception as e:
-            print("[Env GUI] Warning: initial EE placement failed:", e)
+        if env.simenv.move_to_start_pos():
+            # Compute a safe EE pose near and above the robot base to avoid falling into the door
+            base_x, base_y, base_z = config.base_start_position_franka
+            safe_ee_pos = [
+                base_x + ee_offset_from_base[0],
+                base_y + ee_offset_from_base[1],
+                base_z + ee_offset_from_base[2],
+            ]
+            safe_ee_ori = ee_orientation_e_override if ee_orientation_e_override is not None else config.ee_start_orientation_e        
+            print(f'safe_ee_pos={safe_ee_pos}')
+            # Place the gripper above base immediately; do not let gravity + IK swing it into the door
+            try:
+                robot.move(env, safe_ee_pos, safe_ee_ori, gripper_open=True, is_trajectory=False)
+            except Exception as e:
+                print("[Env GUI] Warning: initial EE placement failed:", e)
 
         print(f'config.base_start_position_franka={config.base_start_position_franka}')
         print(f'config.base_start_orientation_e_franka={config.base_start_orientation_e_franka}')
         print(f'config.joint_start_positions_franka={config.joint_start_positions_franka}')
-        print(f'safe_ee_pos={safe_ee_pos}')
+        
 
         # Capture and save the head camera image using the debug view
         head_stats = {"size": None, "mean": None, "var": None}
@@ -616,4 +638,3 @@ def run_gui_demo(disable_forces: bool = False,
 if __name__ == "__main__":
     # Entry point for quick, no-code door kinematics testing in GUI mode.
     run_gui_demo(disable_forces=False)
-
