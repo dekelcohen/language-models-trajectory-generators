@@ -148,7 +148,7 @@ class SimEnvDoor(SimEnvBase):
         Override robot pose for door task to be identical to grasp defaults.
         This keeps the robot upright and stable (not facing the door).
         """        
-        config.base_start_position_franka = [0.0, 0.3, 0.0]
+        config.base_start_position_franka = [-0.3, 0.5, 0.0]
         # Euler angles [roll, pitch, yaw]; yaw = -pi/2 faces the door
         config.base_start_orientation_e_franka = [0.0, 0.0, -np.pi / 3]            
                 
@@ -319,6 +319,14 @@ def run_simulation_environment(args, env_connection, logger):
     except Exception:
         pass
 
+    # Compute the current end-effector position to report back to the caller
+    try:
+        _eef = p.getLinkState(robot.id, robot.ee_index, computeForwardKinematics=True)
+        eef_pos = list(map(float, _eef[0]))  # world position (x,y,z)
+    except Exception:
+        # Fallback to configured start position if link state is unavailable
+        eef_pos = list(map(float, config.ee_start_position))
+
     env_connection_message = (
         OK
         + (
@@ -331,7 +339,8 @@ def run_simulation_environment(args, env_connection, logger):
         )
         + ENDC
     )
-    env_connection.send([env_connection_message])
+    # Send both the EE position and the status message
+    env_connection.send([eef_pos, env_connection_message])
 
     while True:
 
@@ -500,6 +509,7 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
         env = Environment(_Args)
         env.load()
         
+        
         # Print camera poses for debugging
         try:
             dbg = p.getDebugVisualizerCamera()
@@ -515,6 +525,7 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
         print(f"  orientation_e={config.head_camera_orientation_e}")
         
         env.simenv.configure_robot_pose()    
+        #config.base_start_position_franka = [-0.3, 0.5, 0.2]
         # Hold the door closed at startup with stronger motor forces (optional)
         if strengthen_door:
             try:

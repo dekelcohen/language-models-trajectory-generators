@@ -190,13 +190,15 @@ if __name__ == "__main__":
 
     # Create connection to the chosen simulator, then build API with it
     server_proc = None
+    # Default EEF position for prompt if the environment does not report one
+    ee_pos_for_prompt = list(map(float, config.ee_start_position))
     if args.sim == "pybullet":
         main_connection, env_connection = Pipe()
         # Start process
         env_process = Process(target=run_simulation_environment, name="EnvProcess", args=[args, env_connection, logger])
         env_process.start()
-        [env_connection_message] = main_connection.recv()
-        logger.info(env_connection_message)
+        # Receive environment handshake and derive EE position for prompt
+        ee_pos_for_prompt, _msg = read_env_handshake(main_connection, logger, ee_pos_for_prompt)
     else:
         # Metaworld: WebSockets transport only
         main_connection, server_proc = _setup_metaworld_ws(args, logger)
@@ -229,7 +231,7 @@ if __name__ == "__main__":
     
         error = False
     
-        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
+        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)).replace("[INSERT TASK]", command)
     
         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
@@ -289,7 +291,8 @@ if __name__ == "__main__":
     
                         logger.info(PROGRESS + "RETRYING TASK..." + ENDC)
     
-                        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
+                        # On retry, use the latest known EE position rather than static config
+                        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)).replace("[INSERT TASK]", command)
                         new_prompt += "\n"
                         new_prompt += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", messages[-1]["content"])
     
@@ -333,3 +336,42 @@ if __name__ == "__main__":
         _safe_terminate(server_proc, logger)
 
         api.completed_task = False
+
+# --- Handshake helper ---------------------------------------------------
+def read_env_handshake(main_connection, logger, default_pos):
+    """Read the environment handshake and return (ee_pos_for_prompt, msg).
+    Logs all errors; re-raises on receive failure to avoid silent mismatch.
+    """
+    try:
+        payload = main_connection.recv()
+    except Exception as e:
+        logger.error(FAIL + f"Failed to receive env handshake: {e}" + ENDC)
+        raise
+
+    ee_pos = list(map(float, default_pos))
+    msg = None
+    try:
+        if isinstance(payload, (list, tuple)):
+            if len(payload) == 2:
+                eef_pos, msg = payload
+                try:
+                    ee_pos = list(map(float, eef_pos))
+                except Exception as e:
+                    logger.error(FAIL + f"Invalid ee_pos in handshake: {eef_pos} err={e}" + ENDC)
+            elif len(payload) == 1:
+                msg = payload[0]
+            else:
+                logger.error(FAIL + f"Unexpected handshake length={len(payload)} type={type(payload)}" + ENDC)
+        elif isinstance(payload, str):
+            msg = payload
+        else:
+            logger.error(FAIL + f"Unexpected handshake type: {type(payload)}" + ENDC)
+    except Exception as e:
+        logger.error(FAIL + f"Handshake parsing error: {e}" + ENDC)
+
+    if msg is not None:
+        try:
+            logger.info(msg)
+        except Exception as e:
+            logger.error(FAIL + f"Failed to log env message: {e}" + ENDC)
+    return ee_pos, msg
