@@ -40,6 +40,10 @@ class SimEnvBase:
         """
         return True    
 
+    def get_3d_coordinates_prompt_section(self):
+        """Return the 3D coordinate system prompt section (default)."""
+        return config.three_d_coordinates_prompt_section
+
 
 class SimEnvGrasp(SimEnvBase):
     """Grasp task: keep existing camera/robot poses and load a YCB object."""
@@ -66,6 +70,9 @@ class SimEnvGrasp(SimEnvBase):
         except Exception as e:
             print("[Env] Warning: failed to load grasp object:", e)
             traceback.print_exc()
+
+    def get_3d_coordinates_prompt_section(self):
+        return config.three_d_coordinates_prompt_section
 
 
 class SimEnvDoor(SimEnvBase):
@@ -157,6 +164,14 @@ class SimEnvDoor(SimEnvBase):
         Return False, since if moved - it collides with the door and collapses 
         """
         return False
+
+    def get_3d_coordinates_prompt_section(self):
+        return (
+            "The 3D coordinate system of the environment is as follows:\n"
+            "  1. The x-axis is in the horizontal direction, increasing to the left.\n"
+            "  2. The y-axis is in the depth direction, decreasing away from you.\n"
+            "  3. The z-axis is in the vertical direction, increasing upwards."
+        )
 
 
 def _get_simenv(task_name):
@@ -327,6 +342,12 @@ def run_simulation_environment(args, env_connection, logger):
         # Fallback to configured start position if link state is unavailable
         eef_pos = list(map(float, config.ee_start_position))
 
+    # Add per-task 3D coordinate prompt section to the first status message
+    try:
+        _coords_section = env.simenv.get_3d_coordinates_prompt_section()
+    except Exception:
+        _coords_section = config.three_d_coordinates_prompt_section
+
     env_connection_message = (
         OK
         + (
@@ -339,8 +360,8 @@ def run_simulation_environment(args, env_connection, logger):
         )
         + ENDC
     )
-    # Send both the EE position and the status message
-    env_connection.send([eef_pos, env_connection_message])
+    # Send EE position, coords prompt section, and the status message
+    env_connection.send([eef_pos, _coords_section, env_connection_message])
 
     while True:
 

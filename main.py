@@ -133,6 +133,53 @@ def _safe_terminate(proc, logger, name="Metaworld WS server"):
         # Best-effort only
         logger.info(PROGRESS + f"Warning: failed to terminate {name}." + ENDC)
 
+# --- Handshake helper ---------------------------------------------------
+def read_env_handshake(main_connection, logger, default_pos):
+    """Read the environment handshake and return (ee_pos_for_prompt, msg, coords_section).
+    Logs all errors; re-raises on receive failure to avoid silent mismatch.
+    """
+    try:
+        payload = main_connection.recv()
+    except Exception as e:
+        logger.error(FAIL + f"Failed to receive env handshake: {e}" + ENDC)
+        raise
+
+    ee_pos = list(map(float, default_pos))
+    msg = None
+    coords_section = None
+    try:
+        if isinstance(payload, (list, tuple)):
+            if len(payload) == 3:
+                eef_pos, coords_section, msg = payload
+                try:
+                    ee_pos = list(map(float, eef_pos))
+                except Exception as e:
+                    logger.error(FAIL + f"Invalid ee_pos in handshake: {eef_pos} err={e}" + ENDC)
+            elif len(payload) == 2:
+                eef_pos, msg = payload
+                try:
+                    ee_pos = list(map(float, eef_pos))
+                except Exception as e:
+                    logger.error(FAIL + f"Invalid ee_pos in handshake: {eef_pos} err={e}" + ENDC)
+            elif len(payload) == 1:
+                msg = payload[0]
+            else:
+                logger.error(FAIL + f"Unexpected handshake length={len(payload)} type={type(payload)}" + ENDC)
+        elif isinstance(payload, str):
+            msg = payload
+        else:
+            logger.error(FAIL + f"Unexpected handshake type: {type(payload)}" + ENDC)
+    except Exception as e:
+        logger.error(FAIL + f"Handshake parsing error: {e}" + ENDC)
+
+    if msg is not None:
+        try:
+            logger.info(msg)
+        except Exception as e:
+            logger.error(FAIL + f"Failed to log env message: {e}" + ENDC)
+    return ee_pos, msg, coords_section
+
+
 if __name__ == "__main__":
 
     openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -192,16 +239,22 @@ if __name__ == "__main__":
     server_proc = None
     # Default EEF position for prompt if the environment does not report one
     ee_pos_for_prompt = list(map(float, config.ee_start_position))
+    coords_section = None
     if args.sim == "pybullet":
         main_connection, env_connection = Pipe()
         # Start process
         env_process = Process(target=run_simulation_environment, name="EnvProcess", args=[args, env_connection, logger])
         env_process.start()
         # Receive environment handshake and derive EE position for prompt
-        ee_pos_for_prompt, _msg = read_env_handshake(main_connection, logger, ee_pos_for_prompt)
+        ee_pos_for_prompt, _msg, coords_section = read_env_handshake(main_connection, logger, ee_pos_for_prompt)
     else:
         # Metaworld: WebSockets transport only
         main_connection, server_proc = _setup_metaworld_ws(args, logger)
+
+    # Per-task 3D coordinate prompt section (PyBullet: handshake-provided; Metaworld: default)
+
+    if coords_section is None:
+        coords_section = config.three_d_coordinates_prompt_section
 
     # API set-up
     api = API(args, main_connection, logger, client, langsam_model, xmem_model, device)
@@ -231,8 +284,10 @@ if __name__ == "__main__":
     
         error = False
     
-        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)).replace("[INSERT TASK]", command)
-    
+        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)) \
+                                .replace("[INSERT TASK]", command) \
+                                .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
+
         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
@@ -292,10 +347,13 @@ if __name__ == "__main__":
                         logger.info(PROGRESS + "RETRYING TASK..." + ENDC)
     
                         # On retry, use the latest known EE position rather than static config
-                        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)).replace("[INSERT TASK]", command)
+                        new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)) \
+                                                .replace("[INSERT TASK]", command) \
+                                                .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
+
                         new_prompt += "\n"
                         new_prompt += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", messages[-1]["content"])
-    
+
                         messages = []
     
                         error = False
@@ -337,41 +395,3 @@ if __name__ == "__main__":
 
         api.completed_task = False
 
-# --- Handshake helper ---------------------------------------------------
-def read_env_handshake(main_connection, logger, default_pos):
-    """Read the environment handshake and return (ee_pos_for_prompt, msg).
-    Logs all errors; re-raises on receive failure to avoid silent mismatch.
-    """
-    try:
-        payload = main_connection.recv()
-    except Exception as e:
-        logger.error(FAIL + f"Failed to receive env handshake: {e}" + ENDC)
-        raise
-
-    ee_pos = list(map(float, default_pos))
-    msg = None
-    try:
-        if isinstance(payload, (list, tuple)):
-            if len(payload) == 2:
-                eef_pos, msg = payload
-                try:
-                    ee_pos = list(map(float, eef_pos))
-                except Exception as e:
-                    logger.error(FAIL + f"Invalid ee_pos in handshake: {eef_pos} err={e}" + ENDC)
-            elif len(payload) == 1:
-                msg = payload[0]
-            else:
-                logger.error(FAIL + f"Unexpected handshake length={len(payload)} type={type(payload)}" + ENDC)
-        elif isinstance(payload, str):
-            msg = payload
-        else:
-            logger.error(FAIL + f"Unexpected handshake type: {type(payload)}" + ENDC)
-    except Exception as e:
-        logger.error(FAIL + f"Handshake parsing error: {e}" + ENDC)
-
-    if msg is not None:
-        try:
-            logger.info(msg)
-        except Exception as e:
-            logger.error(FAIL + f"Failed to log env message: {e}" + ENDC)
-    return ee_pos, msg

@@ -145,3 +145,11 @@ OK = "\033[92m"
 PROGRESS = "\033[93m"
 FAIL = "\033[91m"
 ENDC = "\033[0m"
+
+# 3D coordinates prompt section (default: grasp/metaworld)
+three_d_coordinates_prompt_section = (
+    "The 3D coordinate system of the environment is as follows:\n"
+    "  1. The x-axis is in the horizontal direction, increasing to the right.\n"
+    "  2. The y-axis is in the depth direction, increasing away from you.\n"
+    "  3. The z-axis is in the vertical direction, increasing upwards."
+)
