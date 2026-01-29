@@ -135,7 +135,7 @@ def _safe_terminate(proc, logger, name="Metaworld WS server"):
 
 # --- Handshake helper ---------------------------------------------------
 def read_env_handshake(main_connection, logger, default_pos):
-    """Read the environment handshake and return (ee_pos_for_prompt, msg, coords_section).
+    """Read the environment handshake and return (ee_pos_for_prompt, msg, coords_section, sim_state).
     Logs all errors; re-raises on receive failure to avoid silent mismatch.
     """
     try:
@@ -147,9 +147,17 @@ def read_env_handshake(main_connection, logger, default_pos):
     ee_pos = list(map(float, default_pos))
     msg = None
     coords_section = None
+    sim_state = {}
     try:
         if isinstance(payload, (list, tuple)):
-            if len(payload) == 3:
+            if len(payload) == 4:
+                eef_pos, coords_section, sim_state, msg = payload
+                try:
+                    ee_pos = list(map(float, eef_pos))
+                except Exception as e:
+                    logger.error(FAIL + f"Invalid ee_pos in handshake: {eef_pos} err={e}" + ENDC)
+            elif len(payload) == 3:
+                # Backward compatible: (eef_pos, coords_section, msg)
                 eef_pos, coords_section, msg = payload
                 try:
                     ee_pos = list(map(float, eef_pos))
@@ -177,7 +185,13 @@ def read_env_handshake(main_connection, logger, default_pos):
             logger.info(msg)
         except Exception as e:
             logger.error(FAIL + f"Failed to log env message: {e}" + ENDC)
-    return ee_pos, msg, coords_section
+    # Print env-specific state immediately with the finish setup message
+    try:
+        _sim_state_str = json.dumps(sim_state)
+        logger.info(PROGRESS + f"Env state: {_sim_state_str}" + ENDC)
+    except Exception as e:
+        logger.error(FAIL + f"Failed to log env state: {e}" + ENDC)
+    return ee_pos, msg, coords_section, sim_state
 
 
 if __name__ == "__main__":
@@ -246,7 +260,7 @@ if __name__ == "__main__":
         env_process = Process(target=run_simulation_environment, name="EnvProcess", args=[args, env_connection, logger])
         env_process.start()
         # Receive environment handshake and derive EE position for prompt
-        ee_pos_for_prompt, _msg, coords_section = read_env_handshake(main_connection, logger, ee_pos_for_prompt)
+        ee_pos_for_prompt, _msg, coords_section, sim_state = read_env_handshake(main_connection, logger, ee_pos_for_prompt)
     else:
         # Metaworld: WebSockets transport only
         main_connection, server_proc = _setup_metaworld_ws(args, logger)
@@ -287,6 +301,12 @@ if __name__ == "__main__":
         new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)) \
                                 .replace("[INSERT TASK]", command) \
                                 .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
+        # Print env-specific state alongside the finish-setup message
+        try:
+            _sim_state_str = json.dumps(sim_state)
+            logger.info(PROGRESS + f"Env state: {_sim_state_str}" + ENDC)
+        except Exception:
+            pass
 
         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
@@ -350,6 +370,11 @@ if __name__ == "__main__":
                         new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)) \
                                                 .replace("[INSERT TASK]", command) \
                                                 .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
+                        try:
+                            _sim_state_str = json.dumps(sim_state)
+                            logger.info(PROGRESS + f"Env state: {_sim_state_str}" + ENDC)
+                        except Exception:
+                            pass
 
                         new_prompt += "\n"
                         new_prompt += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", messages[-1]["content"])
@@ -394,4 +419,3 @@ if __name__ == "__main__":
         _safe_terminate(server_proc, logger)
 
         api.completed_task = False
-

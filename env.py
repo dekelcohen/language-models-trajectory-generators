@@ -12,6 +12,17 @@ from config import SET_DOOR_STATE, CAPTURE_TRAJECTORY_FRAME
 
 # --- Task Profiles ------------------------------------------------------
 # --- Simulation Environment Profiles -----------------------------------
+def _get_joint_index_by_name(body_id, joint_name):
+    try:
+        for j in range(p.getNumJoints(body_id)):
+            info = p.getJointInfo(body_id, j)
+            if info[1].decode("utf-8") == joint_name:
+                return j
+    except Exception as e:
+        print(f"[Env] Error reading joints of body {body_id}:", e)
+        traceback.print_exc()
+    return None
+    
 class SimEnvBase:
     """Base environment profile. Applies hard-coded runtime overrides and
     loads any required assets. No global config edits elsewhere."""
@@ -27,6 +38,12 @@ class SimEnvBase:
     def load_assets(self, env):
         # Default: no additional assets
         return
+
+    def get_state(self):
+        """Return a dict with environment-specific state for diagnostics.
+        Base env has no special state.
+        """
+        return {}
 
     def configure_robot_pose(self):
         """Per-task hook to set robot/base/joint starting pose.
@@ -89,6 +106,12 @@ class SimEnvDoor(SimEnvBase):
         config.camera_pitch = -40.0
         config.camera_target_position = [0.0, 0.64, 0.70]
 
+        # Door members initialized for later direct access in get_state
+        self.door_id = None
+        self.door_hinge_index = None
+        self.latch_index = None
+        self.door_handle_latch = None
+
         # Compute head camera pose identical to GUI spherical camera
         # and use it statically in DIRECT (no dynamic debug mirroring).
         pos, ori_e = self._head_from_debug(
@@ -134,22 +157,50 @@ class SimEnvDoor(SimEnvBase):
         try:
             door_start_position = [-0.11, 0.04, 0.25]
             door_start_orientation_q = p.getQuaternionFromEuler([0.0, 0.0, 4.0])
-            env.door_id = p.loadURDF(
+            self.door_id = p.loadURDF(
                 "my_assets/adroit_door/adroit_door.urdf",
                 door_start_position,
                 door_start_orientation_q,
                 useFixedBase=True,
             )
-            env.door_hinge_index = env._get_joint_index_by_name(env.door_id, "door_hinge")
-            env.latch_index = env._get_joint_index_by_name(env.door_id, "latch_joint")
-            env.door_handle_latch = env._get_joint_index_by_name(env.door_id, "latch")
-            if env.door_hinge_index is not None:
-                p.setJointMotorControl2(env.door_id, env.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
-            if env.latch_index is not None:
-                p.setJointMotorControl2(env.door_id, env.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
+            # Resolve indices based on the newly loaded door
+            self.door_hinge_index = _get_joint_index_by_name(self.door_id, "door_hinge")
+            self.latch_index = _get_joint_index_by_name(self.door_id, "latch_joint")
+            self.door_handle_latch = _get_joint_index_by_name(self.door_id, "latch")            
+            if self.door_hinge_index is not None:
+                p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
+            if self.latch_index is not None:
+                p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
         except Exception as e:
             print("[Env] Failed to load or initialize adroit_door URDF:", e)
             traceback.print_exc()
+
+    def get_state(self):
+        """Return door-related indices and world positions for diagnostics."""
+        state = {
+            "door_id": self.door_id,
+            "door_hinge_index": self.door_hinge_index,
+            "latch_index": self.latch_index,
+            "door_handle_latch": self.door_handle_latch,
+            "door_handle_pos": None,
+            "latch_pos": None,
+            "hinge_pos": None,
+        }
+        try:
+            if self.door_id is not None:
+                if self.door_handle_latch is not None and self.door_handle_latch >= 0:
+                    _dhl = p.getLinkState(self.door_id, int(self.door_handle_latch), computeForwardKinematics=True)
+                    state["door_handle_pos"] = list(map(float, _dhl[0]))
+                if self.latch_index is not None and self.latch_index >= 0:
+                    _lat = p.getLinkState(self.door_id, int(self.latch_index), computeForwardKinematics=True)
+                    state["latch_pos"] = list(map(float, _lat[0]))
+                if self.door_hinge_index is not None and self.door_hinge_index >= 0:
+                    _hinge = p.getLinkState(self.door_id, int(self.door_hinge_index), computeForwardKinematics=True)
+                    state["hinge_pos"] = list(map(float, _hinge[0]))
+        except Exception as e:
+            print("[Env] Warning: SimEnvDoor.get_state failed to read positions:", e)
+            traceback.print_exc()
+        return state
 
     def configure_robot_pose(self):
         """
@@ -209,11 +260,7 @@ class Environment:
         )
 
         # Load task-specific assets
-        try:
-            # Initialize door-related attributes to safe defaults
-            self.door_id = None
-            self.door_hinge_index = None
-            self.latch_index = None
+        try:            
             self.simenv.load_assets(self)
         except Exception as e:
             print("[Env] Warning: failed to load SimEnv assets:", e)
@@ -229,53 +276,7 @@ class Environment:
 
         p.stepSimulation()
         time.sleep(config.control_dt)
-
-    def _get_joint_index_by_name(self, body_id, joint_name):
-        try:
-            for j in range(p.getNumJoints(body_id)):
-                info = p.getJointInfo(body_id, j)
-                if info[1].decode("utf-8") == joint_name:
-                    return j
-        except Exception as e:
-            print(f"[Env] Error reading joints of body {body_id}:", e)
-            traceback.print_exc()
-        return None
-
-    def set_door_state(self, door_angle=None, latch_angle=None):
-        # Position-control door hinge and latch if provided
-        try:
-            if getattr(self, "door_id", None) is None:
-                return
-            if door_angle is not None and self.door_hinge_index is not None:
-                p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=float(door_angle), force=50)
-            if latch_angle is not None and self.latch_index is not None:
-                p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=float(latch_angle), force=30)
-        except Exception as e:
-            print("[Env] Failed to set door state:", e)
-            traceback.print_exc()
-
-    def set_door_state_array(self, door_angle, latch_angle):
-        # Control both joints in a single array call
-        try:
-            if getattr(self, "door_id", None) is None:
-                return
-            indices = []
-            targets = []
-            forces = []
-            if self.door_hinge_index is not None:
-                indices.append(self.door_hinge_index)
-                targets.append(float(door_angle))
-                forces.append(50)
-            if self.latch_index is not None:
-                indices.append(self.latch_index)
-                targets.append(float(latch_angle))
-                forces.append(30)
-            if indices:
-                p.setJointMotorControlArray(self.door_id, indices, p.POSITION_CONTROL, targetPositions=targets, forces=forces)
-        except Exception as e:
-            print("[Env] Failed to set door state array:", e)
-            traceback.print_exc()
-
+    
 
 
 def run_simulation_environment(args, env_connection, logger):
@@ -351,7 +352,11 @@ def run_simulation_environment(args, env_connection, logger):
         _coords_section = env.simenv.get_3d_coordinates_prompt_section()
     except Exception:
         _coords_section = config.three_d_coordinates_prompt_section
-
+    # Query environment-specific state via polymorphic get_state    
+    sim_state = env.simenv.get_state()
+    
+    
+    
     env_connection_message = (
         OK
         + (
@@ -360,12 +365,12 @@ def run_simulation_environment(args, env_connection, logger):
             f"dbg_cam_available={dbg_info['available']} dbg_tuple_len={dbg_info['tuple_len']} "
             f"dbg(yaw={dbg_info['yaw']}, pitch={dbg_info['pitch']}, dist={dbg_info['dist']}, target={dbg_info['target']}) "
             f"cfg(yaw={config.camera_yaw}, pitch={config.camera_pitch}, dist={config.camera_distance}, target={config.camera_target_position}) "
-            f"head_img(size={head_stats['size']}, mean={head_stats['mean']}, var={head_stats['var']})"
+            f"head_img(size={head_stats['size']}, mean={head_stats['mean']}, var={head_stats['var']}) "
         )
         + ENDC
     )
-    # Send EE position, coords prompt section, and the status message
-    env_connection.send([eef_pos, _coords_section, env_connection_message])
+    # Send EE position, coords prompt section, env-specific state, and the status message
+    env_connection.send([eef_pos, _coords_section, sim_state, env_connection_message])
 
     while True:
 
