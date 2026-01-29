@@ -17,15 +17,15 @@ ENVIRONMENT SET-UP:
 [INSERT 3D COORDINATES PROMPT SECTION]
 
 The robot arm end-effector is currently positioned at [INSERT EE POSITION], with the rotation value at 0, and the gripper open.
-The robot arm is in a top-down set-up, with the end-effector facing down onto a tabletop. The end-effector is therefore able to rotate about the z-axis, from -pi to pi radians.
+The robot arm is in a top-down set-up, with the end-effector facing down onto a floor. The end-effector is therefore able to rotate about the z-axis, from -pi to pi radians.
 The end-effector gripper has two fingers, and they are currently parallel to the x-axis.
 The gripper can only grasp objects along sides which are shorter than 0.08.
 Negative rotation values represent clockwise rotation, and positive rotation values represent anticlockwise rotation. The rotation values should be in radians.
 
 COLLISION AVOIDANCE:
 If the task requires interaction with multiple objects:
-1. Make sure to consider the object widths, lengths, and heights so that an object does not collide with another object or with the tabletop, unless necessary.
-2. It may help to generate additional trajectories and add specific waypoints (calculated from the given object information) to clear objects and the tabletop and avoid collisions, if necessary.
+1. Make sure to consider the object widths, lengths, and heights so that an object does not collide with another object or with the floor, unless necessary.
+2. It may help to generate additional trajectories and add specific waypoints (calculated from the given object information) to clear objects and the floor and avoid collisions, if necessary.
 
 VELOCITY CONTROL:
 1. The default speed of the robot arm end-effector is 20 points per trajectory. If the total distance covered is small, keep the number of points low, as the task in sim-env has max-number-of-steps (~500-700) and each point is translated to several steps.
