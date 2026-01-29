@@ -142,6 +142,7 @@ class SimEnvDoor(SimEnvBase):
             )
             env.door_hinge_index = env._get_joint_index_by_name(env.door_id, "door_hinge")
             env.latch_index = env._get_joint_index_by_name(env.door_id, "latch_joint")
+            env.door_handle_latch = env._get_joint_index_by_name(env.door_id, "latch")
             if env.door_hinge_index is not None:
                 p.setJointMotorControl2(env.door_id, env.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
             if env.latch_index is not None:
@@ -158,6 +159,9 @@ class SimEnvDoor(SimEnvBase):
         config.base_start_position_franka = [-0.3, 0.5, 0.0]
         # Euler angles [roll, pitch, yaw]; yaw = -pi/2 faces the door
         config.base_start_orientation_e_franka = [0.0, 0.0, -np.pi / 3]            
+        # Problem: robot eef collapses into the door and hides the handled
+        # Solution: Make the robot 'lean back' by rotating the joint above the base (idx 1)
+        config.joint_start_positions_franka[1] = -1.5 
                 
     def move_to_start_pos(self):
         """

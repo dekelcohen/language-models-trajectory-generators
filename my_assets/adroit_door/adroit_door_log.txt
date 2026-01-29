@@ -1,0 +1,79 @@
+First prompt
+======================
+
+What I Added
+
+  - MJCF door converted to a PyBullet-ready URDF with frame, revolute hinge, and latch.
+  - Door is loaded and controllable from env.py with helper methods for setJointMotorControl2 and setJointMotorControlArray.
+
+  Files Touched
+
+  - my_assets/adroit_door/adroit_door.urdf — new URDF built from the MJCF geometry and joint limits.
+  - env.py:25 — loads the door URDF as a fixed base and caches joint indices.
+  - env.py:56 — _get_joint_index_by_name helper for robust joint lookup.
+  - env.py:67 — set_door_state(door_angle, latch_angle) for single-joint control via setJointMotorControl2.
+  - env.py:78 — set_door_state_array(door_angle, latch_angle) for batch control via setJointMotorControlArray.
+
+  URDF Details
+
+  - Hinge joint door_hinge with axis z, limits 0 → 1.57 rad (0–90°), damping=1, friction=2.
+  - Latch joint latch_joint with axis y, limits 0 → 1.8 rad, damping=0.5, friction=5.
+  - Inertias and masses copied from MJCF for frame, door, and latch.
+  - Visuals use primitive shapes (box/cylinders) with wood/metal colors; no external meshes required.
+
+  Integration Notes
+
+  - Load happens in Environment.load() with:
+      - p.loadURDF("my_assets/adroit_door/adroit_door.urdf", [-0.11, 0.04, 0.45], q=[0,0,0,1], useFixedBase=True)
+      - Joint names are matched to URDF: door_hinge and latch_joint.
+  - Motors initialized to hold at zero position (closed door and latch).
+
+  How To Drive The Door
+
+  - Single-joint control:
+      - env.set_door_state(door_angle=1.0)  opens the door to ~57°.
+      - env.set_door_state(latch_angle=1.0) rotates the latch.
+  - Batch control:
+      - env.set_door_state_array(door_angle=1.0, latch_angle=0.5)  controls both at once.
+
+  Example Usage
+
+  - In run_simulation_environment, after env.load():
+      - env.set_door_state(door_angle=0.8, latch_angle=0.4)
+      - Step a bit to settle: for _ in range(100): env.update()
+
+  Design Choices
+
+  - Geometry: faithfully mapped MJCF sizes (MuJoCo half-sizes converted to full box size; cylinder lengths preserved). Using primitives
+    keeps it simple and consistent with existing YCB URDF style when meshes aren’t available.
+  - Dynamics: MJCF damping/friction mapped to URDF <dynamics> tags; efforts/velocities set to reasonable values for PyBullet motors.
+  - Position: Door frame placed near MJCF frame body pose; hinge origin 0.31 0 0 matches MJCF.
+
+  Next Steps (Optional)
+
+  - If you prefer textured visuals, I can swap primitives for .obj meshes and add materials.
+  - Add small helper to query joint states for logging or scripted openings.
+  - Hook door controls to a command in main.py for quick demos.
+
+  If you want, I can wire a brief demo in run_simulation_environment to open/close the door and latch on a timer.
+  
+  
+  
+  =========================
+  3. Single test: use test_adroit_door_ipc.py
+
+  - I updated tests/test_adroit_door_ipc.py to:
+      - Clean images/* at start.
+      - Open the door via SET_DOOR_STATE IPC.
+      - Capture frames via CAPTURE_TRAJECTORY_FRAME (now calls robot.get_camera_image).
+      - Assemble the MP4 into images/ via dbg_utils.create_video_from_images.
+  - I attempted to delete tests/test_adroit_door_pybullet.py but hit a filesystem permission block. To prevent it from running, I marked it
+    as a skipped module so only the IPC test is active. See tests/test_adroit_door_pybullet.py:1 (module‑level pytest.skip(...)). If you
+    want it fully removed, I can reattempt deletion with escalated permissions.
+
+  Quick file references
+
+  - env.py:196 — CAPTURE_TRAJECTORY_FRAME now calls robot.get_camera_image("head", ...).
+  - robot.py:176 — renderer auto‑select (TinyRenderer on p.DIRECT, OpenGL on GUI).
+  - tests/test_adroit_door_ipc.py:19 — _clean_images_folder(); tests/test_adroit_door_ipc.py:54 — MP4 written to images/.
+  - tests/test_adroit_door_pybullet.py:1 — module skipped so it won’t run.
