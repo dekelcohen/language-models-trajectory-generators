@@ -22,6 +22,25 @@ def _get_joint_index_by_name(body_id, joint_name):
         print(f"[Env] Error reading joints of body {body_id}:", e)
         traceback.print_exc()
     return None
+
+def _get_link_index_by_name(body_id, link_name):
+    """Return the link index (same as the joint index in PyBullet)
+    by matching the child link name from getJointInfo(...)[12].
+
+    Example: for a URDF joint named 'latch_joint' with child link 'latch',
+    this helper returns the index to use with p.getLinkState(...).
+    """
+    try:
+        for j in range(p.getNumJoints(body_id)):
+            info = p.getJointInfo(body_id, j)
+            # info[12] is the child link name (bytes)
+            child_link_name = info[12].decode("utf-8") if isinstance(info[12], (bytes, bytearray)) else str(info[12])
+            if child_link_name == link_name:
+                return j
+    except Exception as e:
+        print(f"[Env] Error reading links of body {body_id}:", e)
+        traceback.print_exc()
+    return None
     
 class SimEnvBase:
     """Base environment profile. Applies hard-coded runtime overrides and
@@ -67,7 +86,7 @@ class SimEnvGrasp(SimEnvBase):
 
     def __init__(self):
         # Keep defaults from config for cameras and robot
-        pass
+        self.object_id = None
 
     def apply(self, env):
         # Nothing additional to set for grasp
@@ -77,19 +96,35 @@ class SimEnvGrasp(SimEnvBase):
         try:
             object_start_position = config.object_start_position
             object_start_orientation_q = p.getQuaternionFromEuler(config.object_start_orientation_e)
-            _ = p.loadURDF(
+            self.object_id = p.loadURDF(
                 "ycb_assets/003_cracker_box.urdf",
                 object_start_position,
                 object_start_orientation_q,
                 useFixedBase=False,
                 globalScaling=config.global_scaling,
             )
+            
         except Exception as e:
             print("[Env] Warning: failed to load grasp object:", e)
             traceback.print_exc()
 
     def get_3d_coordinates_prompt_section(self):
         return config.three_d_coordinates_prompt_section
+
+    def get_state(self):
+        """Return pos + dims of the grasp object (self.object_id)."""
+        state = {"object_id": self.object_id, "object_pos": None, "object_dims": None}
+        try:
+            if self.object_id is not None:
+                pos, _ori = p.getBasePositionAndOrientation(self.object_id)
+                aabb_min, aabb_max = p.getAABB(self.object_id, -1)
+                dims = [float(aabb_max[0] - aabb_min[0]), float(aabb_max[1] - aabb_min[1]), float(aabb_max[2] - aabb_min[2])]
+                state["object_pos"] = list(map(float, pos))
+                state["object_dims"] = dims
+        except Exception as e:
+            print("[Env] Warning: SimEnvGrasp.get_state failed:", e)
+            traceback.print_exc()
+        return state
 
 
 class SimEnvDoor(SimEnvBase):
@@ -166,7 +201,8 @@ class SimEnvDoor(SimEnvBase):
             # Resolve indices based on the newly loaded door
             self.door_hinge_index = _get_joint_index_by_name(self.door_id, "door_hinge")
             self.latch_index = _get_joint_index_by_name(self.door_id, "latch_joint")
-            self.door_handle_latch = _get_joint_index_by_name(self.door_id, "latch")            
+            # Door handle is the child link named 'latch' in URDF; look it up by link name
+            self.door_handle_latch = _get_link_index_by_name(self.door_id, "latch")            
             if self.door_hinge_index is not None:
                 p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
             if self.latch_index is not None:
@@ -176,7 +212,8 @@ class SimEnvDoor(SimEnvBase):
             traceback.print_exc()
 
     def get_state(self):
-        """Return door-related indices and world positions for diagnostics."""
+        """Return door-related indices and world positions for diagnostics.       
+        """
         state = {
             "door_id": self.door_id,
             "door_hinge_index": self.door_hinge_index,
@@ -184,7 +221,7 @@ class SimEnvDoor(SimEnvBase):
             "door_handle_latch": self.door_handle_latch,
             "door_handle_pos": None,
             "latch_pos": None,
-            "hinge_pos": None,
+            "hinge_pos": None,           
         }
         try:
             if self.door_id is not None:
@@ -197,6 +234,7 @@ class SimEnvDoor(SimEnvBase):
                 if self.door_hinge_index is not None and self.door_hinge_index >= 0:
                     _hinge = p.getLinkState(self.door_id, int(self.door_hinge_index), computeForwardKinematics=True)
                     state["hinge_pos"] = list(map(float, _hinge[0]))
+           
         except Exception as e:
             print("[Env] Warning: SimEnvDoor.get_state failed to read positions:", e)
             traceback.print_exc()
@@ -555,18 +593,19 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
         print(f"  orientation_e={config.head_camera_orientation_e}")
         
         env.simenv.configure_robot_pose()    
+        
         #config.base_start_position_franka = [-0.3, 0.5, 0.2]
         # Hold the door closed at startup with stronger motor forces (optional)
         if strengthen_door:
             try:
-                if getattr(env, "door_id", None) is not None:
-                    if getattr(env, "door_hinge_index", None) is not None:
-                        p.resetJointState(env.door_id, env.door_hinge_index, targetValue=0.0)
-                        p.setJointMotorControl2(env.door_id, env.door_hinge_index, p.POSITION_CONTROL,
+                if getattr(env.simenv, "door_id", None) is not None:
+                    if getattr(env.simenv, "door_hinge_index", None) is not None:
+                        p.resetJointState(env.simenv.door_id, env.simenv.door_hinge_index, targetValue=0.0)
+                        p.setJointMotorControl2(env.simenv.door_id, env.simenv.door_hinge_index, p.POSITION_CONTROL,
                                                 targetPosition=0.0, force=200)
-                    if getattr(env, "latch_index", None) is not None:
-                        p.resetJointState(env.door_id, env.latch_index, targetValue=0.0)
-                        p.setJointMotorControl2(env.door_id, env.latch_index, p.POSITION_CONTROL,
+                    if getattr(env.simenv, "latch_index", None) is not None:
+                        p.resetJointState(env.simenv.door_id, env.simenv.latch_index, targetValue=0.0)
+                        p.setJointMotorControl2(env.simenv.door_id, env.simenv.latch_index, p.POSITION_CONTROL,
                                                 targetPosition=0.0, force=200)
             except Exception as e:
                 # Default forces from load() remain if this fails
