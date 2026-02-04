@@ -577,7 +577,18 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
         env = Environment(_Args)
         env.load()
         
-        
+        OVERLAY_COORD_TEST = False
+        if OVERLAY_COORD_TEST:
+            # Temp coordinates check 
+            door_handle_pos = [-0.07745519744833454, -0.00880230021590278, 0.672376]
+            object_start_orientation_q = p.getQuaternionFromEuler(config.object_start_orientation_e)
+            p.loadURDF(
+                "ycb_assets/002_master_chef_can.urdf",
+                door_handle_pos,
+                object_start_orientation_q,
+                useFixedBase=False,
+                globalScaling=config.global_scaling)
+    
         # Print camera poses for debugging
         try:
             dbg = p.getDebugVisualizerCamera()

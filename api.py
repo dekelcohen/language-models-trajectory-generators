@@ -1,9 +1,10 @@
-import numpy as np
+﻿import numpy as np
 import sys
 import torch
 import math
 import os
 import config
+import json
 import models
 from segmentation_adapter import get_segmentation_output
 import utils
@@ -19,6 +20,7 @@ class API:
         self.args = args
         self.main_connection = main_connection
         self.logger = logger
+        utils.logger = self.logger # injects logger into utils global scope 
         self.client = client
         self.langsam_model = langsam_model
         self.xmem_model = xmem_model
@@ -129,7 +131,8 @@ class API:
             if head_cal and head_cal.get("K"):
                 K_head = head_cal.get("K")
 
-        bounding_cubes_world_coordinates, bounding_cubes_orientations = utils.get_bounding_cube_from_point_cloud(
+        self.logger.info(PROGRESS + f"************************ Before bounding_cubes_world_coordinates len(masks)={len(masks)}" + ENDC)
+        bounding_cubes_world_coordinates, bounding_cubes_orientations = utils.get_bounding_cube_from_point_cloud(            
             rgb_image_head,
             masks,
             depth_array,

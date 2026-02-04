@@ -1,12 +1,14 @@
-import numpy as np
+﻿import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
 import math
 import os
 import config
+from config import OK, PROGRESS, FAIL, ENDC
 from PIL import Image
 from shapely.geometry import MultiPoint, Polygon, polygon
 
+logger = None 
 def get_segmentation_mask(model_predictions, segmentation_threshold):
 
     masks = []
@@ -92,11 +94,19 @@ def get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_
             R_pb = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
             diff = np.abs(R_pb - R_np).max()
             if diff > 1e-6:
-                print(f"[DEBUG_DIFF] Rotation matrix diff max: {diff}")
+                logger.info(PROGRESS + f"------------------ [DEBUG_DIFF] Rotation matrix diff max: {diff}" + ENDC)
+                
         except Exception as e:
             print(f"[DEBUG_DIFF] PyBullet compare failed: {e}")
 
     Rt = np.hstack((R_np, np.array(camera_position).reshape(3, 1)))
+    # Optional: lightweight intrinsics/extrinsics dump for debugging    
+    if os.environ.get("DEBUG_INTRINSICS", "0") == "1":
+        try:            
+            logger.info(PROGRESS + "[Intrinsics] K=" + np.array2string(K, precision=3) + ENDC)
+            logger.info(PROGRESS + "[Extrinsics] R=" + np.array2string(R_np, precision=3) + " t=" + str(list(map(float, camera_position))) + ENDC)
+        except Exception:
+            pass
     Rt = np.vstack((Rt, np.array([0, 0, 0, 1])))
 
     return K, Rt
@@ -128,18 +138,29 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
 
     bounding_cubes = []
     bounding_cubes_orientations = []
-
+    logger.info(PROGRESS + f"------------------ Enter get_bounding_cube_from_point_cloud(...)" + ENDC)
+    
     for i, mask in enumerate(masks):
 
         save_mask_image(mask, config.bounding_cube_mask_image_path.format(object=segmentation_count, mask=i))
         mask_np = cv.imread(config.bounding_cube_mask_image_path.format(object=segmentation_count, mask=i), cv.IMREAD_GRAYSCALE)
 
         contour = get_max_contour(mask_np, image_width, image_height)
-
+        logger.info(PROGRESS + f"++++++++++++++++ Before get_world_point_world_frame::if contour is not None" + ENDC)
         if contour is not None:
-
+            
             contour_pixel_points = [(c, r, depth_array[r][c]) for r in range(image_height) for c in range(image_width) if cv.pointPolygonTest(contour, (c, r), measureDist=False) == 1]
+            logger.info(PROGRESS + f"++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)={len(contour_pixel_points)}" + ENDC)            
             contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, pixel_point, K_override=K_override) for pixel_point in contour_pixel_points]
+            # Optional depth statistics within the mask to probe Z handling
+            if os.environ.get("DEBUG_DEPTH", "0") == "1":
+                try:
+                    _d = np.array([pt[2] for pt in contour_pixel_points], dtype=np.float32)
+                    if _d.size > 0:
+                        self_mean = float(_d.mean()); self_min = float(_d.min()); self_max = float(_d.max())
+                        print(f"[Depth] mask idx={i} min={self_min:.3f} max={self_max:.3f} mean={self_mean:.3f}")
+                except Exception:
+                    pass
             max_z_coordinate = np.max(np.array(contour_world_points)[:, 2])
             min_z_coordinate = np.min(np.array(contour_world_points)[:, 2])
             top_surface_world_points = [world_point for world_point in contour_world_points if world_point[2] > max_z_coordinate - config.point_cloud_top_surface_filter]
