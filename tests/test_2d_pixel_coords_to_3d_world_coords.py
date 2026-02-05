@@ -24,14 +24,14 @@ class TestCameraUnprojection(unittest.TestCase):
         # Note: This geometric center is often inside the mesh, not on the surface.
         
         # To change object and world pos in sim: enter it here and in run_sim_demo in OVERLAY_COORD_TEST = True
-        known_world_pos = np.array([-0.07745519744833454, -0.00880230021590278, 0.672376]) # np.array([0, 0, 0])        
+        known_world_pos = np.array([-0.07745519744833454, -0.00880230021590278, 0.672376])  # door handle 
+        # known_world_pos = np.array([0, 0, 0])        
 
         # --- 3. Optimize Camera Frustum for Depth Precision ---
         # The default far_plane=100.0 compresses depth values significantly.
         # For an object ~1.3m away, this results in poor float precision.
         # We tighten the range [0.5, 2.5] to ensure valid depth differentiation.
-        near_plane = 0.5
-        far_plane = 2.5
+        
         
         # --- 4. Compute Camera Matrices ---
         # View Matrix: Transforms World Space -> Camera Space
@@ -48,8 +48,8 @@ class TestCameraUnprojection(unittest.TestCase):
         proj_matrix = np.array(p.computeProjectionMatrixFOV(
             fov=config.fov,
             aspect=config.aspect,
-            nearVal=near_plane,
-            farVal=far_plane
+            nearVal=config.near_plane,
+            farVal=config.far_plane
         )).reshape(4, 4, order='F')
         
         # Combined Model-View-Projection (MVP) Matrix
