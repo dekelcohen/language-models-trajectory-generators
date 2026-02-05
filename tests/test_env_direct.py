@@ -1,8 +1,11 @@
 import unittest
 import io
 import contextlib
+import numpy as np
+from PIL import Image
 import pybullet as p
 import env
+import config
 
 
 class TestEnvDirect(unittest.TestCase):
@@ -18,6 +21,7 @@ class TestEnvDirect(unittest.TestCase):
         # Run the GUI demo in headless DIRECT mode; it should not block
         # and should avoid accessing the DebugVisualizer camera.        
         env.run_sim_demo(task_p='door', disable_forces=False, connection_mode=p.DIRECT)        
+        
         
         # Disconnect at test end and assert
         p.disconnect()

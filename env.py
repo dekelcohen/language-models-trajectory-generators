@@ -584,10 +584,12 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
         if OVERLAY_COORD_TEST:
             # Temp coordinates check 
             door_handle_pos = [-0.07745519744833454, -0.00880230021590278, 0.672376]
+            object_pos = door_handle_pos
+            # object_pos = [0,0,0] 
             object_start_orientation_q = p.getQuaternionFromEuler(config.object_start_orientation_e)
             p.loadURDF(
                 "ycb_assets/002_master_chef_can.urdf",
-                door_handle_pos,
+                object_pos,
                 object_start_orientation_q,
                 useFixedBase=False,
                 globalScaling=config.global_scaling)
