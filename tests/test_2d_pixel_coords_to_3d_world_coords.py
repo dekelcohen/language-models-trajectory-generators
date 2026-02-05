@@ -1,5 +1,7 @@
 import unittest
 import numpy as np
+import os
+from PIL import Image
 import pybullet as p
 import env
 import config
@@ -74,15 +76,41 @@ class TestCameraUnprojection(unittest.TestCase):
         print(f"Known Center Pos: {known_world_pos}")
         print(f"Projected Pixel:  ({pixel_x}, {pixel_y})")
 
-        # --- 6. Get High-Precision Depth from Simulation ---
-        # Use TinyRenderer in DIRECT mode to get the float depth buffer (0.0 - 1.0)
-        _, _, _, depth_buffer, _ = p.getCameraImage(
-            width, height, 
-            viewMatrix=view_matrix.flatten(order='F'),
-            projectionMatrix=proj_matrix.flatten(order='F'),
-            renderer=p.ER_TINY_RENDERER
-        )
-        depth_data = np.array(depth_buffer).reshape(height, width)
+        # --- 5. Acquire Depth Data (Switch Implementation) ---
+        depth_data = None
+
+        USE_SAVED_DEPTH_IMAGE = False
+        if USE_SAVED_DEPTH_IMAGE:
+            # --- Implementation B: Load from Disk (16-bit) ---
+            if not os.path.exists(config.depth_image_head_path):
+                self.fail(f"Depth image not found at {config.depth_image_head_path}.")
+            
+            # Open image (PIL automatically detects I;16 or I mode for 16-bit PNGs)
+            depth_img = Image.open(config.depth_image_head_path)
+            
+            # Ensure dimensions match
+            if depth_img.width != width or depth_img.height != height:
+                depth_img = depth_img.resize((width, height))
+
+            # Convert to Numpy
+            depth_data_u16 = np.array(depth_img)
+
+            # --- CRITICAL: Normalize 16-bit back to Float [0.0 - 1.0] ---
+            # We divide by 65535.0 because we scaled by that amount during saving.
+            depth_data = depth_data_u16.astype(np.float32) / 65535.0
+
+        else:
+            # --- Implementation A: Live Simulation ---
+            # Use TinyRenderer in DIRECT mode to get the float depth buffer (0.0 - 1.0)
+            _, _, _, depth_buffer, _ = p.getCameraImage(
+                width, height, 
+                viewMatrix=view_matrix.flatten(order='F'),
+                projectionMatrix=proj_matrix.flatten(order='F'),
+                renderer=p.ER_TINY_RENDERER
+            )
+            depth_data = np.array(depth_buffer).reshape(height, width)
+            
+        
 
         # --- 7. Sample Depth at the Projected Pixel ---
         # We use a 3x3 search window here strictly for robustness in this single-point test,

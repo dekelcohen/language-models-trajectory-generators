@@ -224,15 +224,25 @@ class Robot:
         if save_camera_image:
             rgb_image = Image.fromarray(rgb_array, mode="RGB")
             rgb_image.save(rgb_image_path)
-
-            n = config.near_plane
-            f = config.far_plane
-            # Convert OpenGL depth to linear depth in [0,1]
-            z = depth_array
-            linear_depth = (2.0 * n * f) / (f + n - (2.0 * z - 1.0) * (f - n))
-            linear_depth = np.clip(linear_depth, 0.0, 1.0)
-            depth_u8 = (linear_depth * 255.0).astype(np.uint8)
-            depth_image = Image.fromarray(depth_u8, mode="L")
+            GEMINI_TEST_DEPTH_IMAGE = False 
+            if GEMINI_TEST_DEPTH_IMAGE:
+                raw_depth = depth_array     
+                # 2. Scale to 16-bit integer range [0, 65535]
+                depth_u16 = (raw_depth * 65535.0).astype(np.uint16)
+                
+                # 3. Save as 16-bit PNG
+                #    'I;16' is the PIL mode for 16-bit unsigned integers
+                depth_image = Image.fromarray(depth_u16, mode='I;16')
+            else:
+                n = config.near_plane
+                f = config.far_plane
+                # Convert OpenGL depth to linear depth in [0,1]
+                z = depth_array
+                linear_depth = (2.0 * n * f) / (f + n - (2.0 * z - 1.0) * (f - n))
+                linear_depth = np.clip(linear_depth, 0.0, 1.0)
+                depth_u8 = (linear_depth * 255.0).astype(np.uint8)
+                depth_image = Image.fromarray(depth_u8, mode="L")
+                
             depth_image.save(depth_image_path)
 
         return camera_position, camera_orientation_q
