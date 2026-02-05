@@ -551,7 +551,7 @@ def run_simulation_environment(args, env_connection, logger):
         env.update()
 
 # --- Minimal GUI demo to interactively test door kinematics ---
-def run_gui_demo(task_p='door', disable_forces: bool = False,
+def run_sim_demo(task_p='door', disable_forces: bool = False,
                  connection_mode=p.GUI,
                  ee_offset_from_base=(0.0, 0.08, 0.45),
                  ee_orientation_e_override=None,
@@ -730,14 +730,11 @@ def run_gui_demo(task_p='door', disable_forces: bool = False,
         print(tag + " Exception:", e)
         traceback.print_exc()
     finally:
-        try:
-            if p.isConnected():
-                p.disconnect()
-        except Exception:
-            pass
+        pass
 
 
 if __name__ == "__main__":
     # Entry point for quick, no-code door kinematics testing in GUI mode.
-    run_gui_demo(disable_forces=False, connection_mode=p.GUI)
+    run_sim_demo(disable_forces=False, connection_mode=p.GUI)
+
 

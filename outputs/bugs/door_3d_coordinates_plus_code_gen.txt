@@ -1,3 +1,28 @@
+
+New Trace extra logging 
+=======================================
+```python
+detect_object("door handle")
+```
+[INFO/MainProcess] Finished generating ChatGPT output!
+[INFO/MainProcess] Capturing head and wrist camera images...
+[INFO/EnvProcess] _view_and_pos_from_spherical camera_position [0.7544065067354889, 0.7730222215594891, 1.3427876096865392]. config.head_camera_position [0.7544065067354889, 0.7730222215594891, 1.3427876096865392]
+[INFO/EnvProcess] _view_and_pos_from_spherical camera_position [0.7544065067354889, 0.7730222215594891, 1.3427876096865392]. config.head_camera_position [0.7544065067354889, 0.7730222215594891, 1.3427876096865392]
+[INFO/MainProcess] Finished capturing head camera image!
+[INFO/MainProcess] Segmenting head camera image...
+[INFO/MainProcess] Finished segmenting head camera image!
+[INFO/MainProcess] Saved segmentation overlay to ./images\seg_overlay_moondream_0.png
+[INFO/MainProcess] ************************ Before bounding_cubes_world_coordinates len(masks)=1
+[INFO/MainProcess] ------------------ Enter get_bounding_cube_from_point_cloud(...)
+[INFO/MainProcess] [Contour] mean pixel_point (u,v,depth)=[179.0, 75.5, 1.0]
+[INFO/MainProcess] ++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)=666
+[INFO/MainProcess] ########### |(np.linalg.inv(K) @ pixel_point)| =1.0477880036156328
+[INFO/MainProcess] ########### |(np.linalg.inv(K) @ pixel_point)| =1.0484382762043825
+[INFO/MainProcess] ########### |(np.linalg.inv(K) @ pixel_point)| =1.0491075386270783
+
+3D Coordinates pybullet bug in door (and not in grasp)
+=========================================================================
+
   Analyze carefully and explain the following + suggest logging code or experiments to better understand and probe the
   root cause. speculate of possible causes but do not suggest a code fix unless you are very sure.
   Problem: The 3D coords calc by the api.object

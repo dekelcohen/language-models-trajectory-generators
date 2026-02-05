@@ -14,14 +14,17 @@ class TestEnvDirect(unittest.TestCase):
         except Exception:
             pass
 
-    def test_run_gui_demo_direct(self):
+    def test_2d_pixel_coords_to_3d_world_coords(self):
         # Run the GUI demo in headless DIRECT mode; it should not block
         # and should avoid accessing the DebugVisualizer camera.        
-        env.run_gui_demo(task_p='door', disable_forces=False, connection_mode=p.DIRECT)        
+        env.run_sim_demo(task_p='door', disable_forces=False, connection_mode=p.DIRECT)        
         
-        # Ensure PyBullet disconnected
+        # Disconnect at test end and assert
+        p.disconnect()
         self.assertFalse(p.isConnected())
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
