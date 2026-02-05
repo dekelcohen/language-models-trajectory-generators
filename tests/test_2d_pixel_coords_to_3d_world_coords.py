@@ -22,7 +22,9 @@ class TestCameraUnprojection(unittest.TestCase):
         # --- 2. Define Known World Point ---
         # The Link Origin / Joint Center from PyBullet's getLinkState.
         # Note: This geometric center is often inside the mesh, not on the surface.
-        known_world_pos = np.array([-0.07745519744833454, -0.00880230021590278, 0.672376])
+        
+        # To change object and world pos in sim: enter it here and in run_sim_demo in OVERLAY_COORD_TEST = True
+        known_world_pos = np.array([-0.07745519744833454, -0.00880230021590278, 0.672376]) # np.array([0, 0, 0])        
 
         # --- 3. Optimize Camera Frustum for Depth Precision ---
         # The default far_plane=100.0 compresses depth values significantly.
