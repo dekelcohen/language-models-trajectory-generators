@@ -2,13 +2,14 @@ import pybullet as p
 import numpy as np
 import math
 import config
+from config import OK, PROGRESS, FAIL, ENDC
 from PIL import Image
 from config import fov, aspect, near_plane, far_plane
 
 class Robot:
 
-    def __init__(self, args):
-
+    def __init__(self, args, logger):
+        self.logger = logger
         if args.robot == "sawyer":
             self.base_start_position = config.base_start_position_sawyer
             self.base_start_orientation_q = p.getQuaternionFromEuler(config.base_start_orientation_e_sawyer)
@@ -149,7 +150,9 @@ class Robot:
 
 
     def get_camera_image(self, camera, env, save_camera_image, rgb_image_path, depth_image_path):
-
+        """
+        
+        """
         if camera == "wrist":
             camera_position = list(p.getLinkState(self.id, self.ee_index, computeForwardKinematics=True)[0])
             if self.robot == "sawyer":
@@ -160,21 +163,20 @@ class Robot:
             camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
 
         projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
-    
-        
+            
         # Special handling: head camera per-task behavior
-        if camera == "head" and getattr(config, "head_camera_use_debug_view", False):
+        if camera == "head" and config.head_camera_use_debug_view:
             # GUI: copy view/projection from debug visualizer
             view_matrix, projection_matrix, camera_position = self._debug_view_matrices_and_pos()
-        elif camera == "head" and getattr(config, "head_camera_use_spherical_view", False):
+        elif camera == "head" and config.head_camera_use_spherical_view:
             # DIRECT: build view from spherical params (identical to GUI angle)
             view_matrix, camera_position = self._view_and_pos_from_spherical(
                 target=config.camera_target_position,
                 distance=config.camera_distance,
                 yaw_deg=config.camera_yaw,
                 pitch_deg=config.camera_pitch,
-            )
-            projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
+            )            
+            self.logger.info(PROGRESS + f"_view_and_pos_from_spherical camera_position {camera_position}. config.head_camera_position {config.head_camera_position}" + ENDC)
         else:
             rotation_matrix = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
             if camera == "wrist":
@@ -281,7 +283,7 @@ class Robot:
         parameters (target, distance, yaw, pitch) with Z-up. Keeps logic
         small and reusable for head-camera debug mirroring fallback.
         """
-        # Use positional args; some PyBullet builds require 'upAxisIndex' positional
+        # Use positional args; some PyBullet builds require 'upAxisIndex' p ositional
         view_matrix = p.computeViewMatrixFromYawPitchRoll(
             target,
             distance,

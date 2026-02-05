@@ -333,7 +333,7 @@ def run_simulation_environment(args, env_connection, logger):
     env.simenv.configure_robot_pose()
     env.load()
 
-    robot = Robot(args)
+    robot = Robot(args, logger)
     if env.simenv.move_to_start_pos():
         robot.move(env, robot.ee_start_position, robot.ee_start_orientation_e, gripper_open=True, is_trajectory=False)
 
@@ -591,10 +591,11 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
     
         # Print camera poses for debugging
         try:
-            dbg = p.getDebugVisualizerCamera()
+            
             print("[Env GUI] Debug camera params:")
             print(f"  distance={config.camera_distance} yaw={config.camera_yaw} pitch={config.camera_pitch}")
             print(f"  target={config.camera_target_position}")
+            dbg = p.getDebugVisualizerCamera()
             print(f"  getDebugVisualizerCamera() returned tuple of len={len(dbg)}")
         except Exception as e:
             print("[Env GUI] Warning: getDebugVisualizerCamera() failed:", e)
@@ -622,7 +623,7 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
                 # Default forces from load() remain if this fails
                 print("[Env GUI] Warning: could not strengthen door motors:", e)
 
-        robot = Robot(_Args)
+        robot = Robot(_Args, logger)
         if env.simenv.move_to_start_pos():
             # Compute a safe EE pose near and above the robot base to avoid falling into the door
             base_x, base_y, base_z = config.base_start_position_franka
