@@ -42,7 +42,33 @@ class API:
 
 
     def detect_object(self, segmentation_text):
-
+        """
+        segment in 2D --> transform to 3D world coordinates in Sim
+        Workflow:
+        ) Send to env CAPTURE_IMAGES message
+        ) env.py: robot.get_camera_image("head") 
+        ) def robot.py: get_camera_image
+            camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
+            if camera == "head" and config.head_camera_use_spherical_view: # Door task head camera
+              view_matrix, camera_position = self._view_and_pos_from_spherical(target pos, distance, yaw_deg, pitch_deg)
+              def _view_and_pos_from_spherical:
+                view_matrix = p.computeViewMatrixFromYawPitchRoll( ... )
+                  camera_position = <complex calc with target, distance, yaw_deg, pitch_deg>
+                  return view_matrix, camera_position
+            return camera_position, camera_orientation_q 
+            
+          ) env::CAPTURE_IMAGES respond with head_camera_position=camera_position, head_camera_orientation_q=camera_orientation_q
+          ) utils.get_bounding_cube_from_point_cloud(head_camera_position, head_camera_orientation_q, K_override=None -if pybullet)
+            ) contour_pixel_points = <countour of segmented object in 2d image>
+            ) get_world_point_world_frame(camera_position, camera_orientation_q, 'head', pixel_point for contour_pixel_points)
+                K, Rt = get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=K_use)
+                elif camera == "head":
+                  pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
+                world_point_camera_frame = (np.linalg.inv(K) @ pixel_point) * point[2]
+                world_point_world_frame = Rt @ np.vstack((world_point_camera_frame, np.array([1.0])))
+            
+        )   
+        """
         self.logger.info(PROGRESS + "Capturing head and wrist camera images..." + ENDC)
         self.main_connection.send([CAPTURE_IMAGES])
         recv_payload = self.main_connection.recv()

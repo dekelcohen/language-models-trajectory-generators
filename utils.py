@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
 import math
@@ -146,10 +146,14 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
         mask_np = cv.imread(config.bounding_cube_mask_image_path.format(object=segmentation_count, mask=i), cv.IMREAD_GRAYSCALE)
 
         contour = get_max_contour(mask_np, image_width, image_height)
-        logger.info(PROGRESS + f"++++++++++++++++ Before get_world_point_world_frame::if contour is not None" + ENDC)
         if contour is not None:
             
             contour_pixel_points = [(c, r, depth_array[r][c]) for r in range(image_height) for c in range(image_width) if cv.pointPolygonTest(contour, (c, r), measureDist=False) == 1]
+            if len(contour_pixel_points) > 0:
+                _mean_px = np.mean(np.array(contour_pixel_points, dtype=np.float64), axis=0)
+                logger.info(PROGRESS + f"[Contour] mean pixel_point (u,v,depth)={[_mean_px[0], _mean_px[1], _mean_px[2]]}" + ENDC)
+            else:
+                logger.info(PROGRESS + "[Contour] No pixels inside contour; mean undefined" + ENDC)
             logger.info(PROGRESS + f"++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)={len(contour_pixel_points)}" + ENDC)            
             contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, pixel_point, K_override=K_override) for pixel_point in contour_pixel_points]
             # Optional depth statistics within the mask to probe Z handling
@@ -210,6 +214,7 @@ def get_world_point_world_frame(camera_position, camera_orientation_q, camera, i
         elif camera == "head":
             pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
 
+    # logger.info(PROGRESS + f"########### |(np.linalg.inv(K) @ pixel_point)| ={np.linalg.norm(np.linalg.inv(K) @ pixel_point)}" + ENDC)
     world_point_camera_frame = (np.linalg.inv(K) @ pixel_point) * point[2]
     world_point_world_frame = Rt @ np.vstack((world_point_camera_frame, np.array([1.0])))
     world_point_world_frame = world_point_world_frame.squeeze()[:-1]
