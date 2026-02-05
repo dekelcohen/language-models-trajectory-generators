@@ -549,22 +549,25 @@ def run_simulation_environment(args, env_connection, logger):
                 env_connection.send([env_connection_message])
 
         env.update()
+
 # --- Minimal GUI demo to interactively test door kinematics ---
-def run_gui_demo(task_p = 'door', disable_forces: bool = False,
+def run_gui_demo(task_p='door', disable_forces: bool = False,
+                 connection_mode=p.GUI,
                  ee_offset_from_base=(0.0, 0.08, 0.45),
                  ee_orientation_e_override=None,
                  strengthen_door=True):
     """
-    Launch a minimal PyBullet GUI session that loads the environment with the door.
-    - Uses p.GUI so the debug visualizer opens.
-    - Disables door joint motor forces for easy mouse-pick/drag of the hinge/latch.
-    - Enables real-time simulation and idles, letting you click and drag the door.
+    Launch a minimal PyBullet session that loads the environment with the door.
+    - Uses p.GUI for interactive debug visualizer or p.DIRECT for headless.
+    - Disables door joint motor forces for easy mouse-pick/drag of the hinge/latch (GUI).
+    - In GUI, enables real-time simulation and idles; in DIRECT, exits after setup.
     """
     import logging
     logger = logging.getLogger("env_gui")
     logger.setLevel(logging.INFO)
     try:
-        physics_client = p.connect(p.GUI)
+        tag = "[Env GUI]" if connection_mode==p.GUI else "[Env Direct]"
+        physics_client = p.connect(connection_mode)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
         _ = p.loadURDF("plane.urdf")
@@ -592,21 +595,21 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
         # Print camera poses for debugging
         try:
             
-            print("[Env GUI] Debug camera params:")
+            print(tag + " Debug camera params:")
             print(f"  distance={config.camera_distance} yaw={config.camera_yaw} pitch={config.camera_pitch}")
             print(f"  target={config.camera_target_position}")
-            dbg = p.getDebugVisualizerCamera()
-            print(f"  getDebugVisualizerCamera() returned tuple of len={len(dbg)}")
+            if connection_mode == p.GUI:
+                dbg = p.getDebugVisualizerCamera()
+                print(f"  getDebugVisualizerCamera() returned tuple of len={len(dbg)}")
         except Exception as e:
-            print("[Env GUI] Warning: getDebugVisualizerCamera() failed:", e)
+            print(tag + " Warning: getDebugVisualizerCamera() failed:", e)
 
-        print("[Env GUI] Head camera params:")
+        print(tag + " Head camera params:")
         print(f"  position={config.head_camera_position}")
         print(f"  orientation_e={config.head_camera_orientation_e}")
         
         env.simenv.configure_robot_pose()    
         
-        #config.base_start_position_franka = [-0.3, 0.5, 0.2]
         # Hold the door closed at startup with stronger motor forces (optional)
         if strengthen_door:
             try:
@@ -621,7 +624,7 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
                                                 targetPosition=0.0, force=200)
             except Exception as e:
                 # Default forces from load() remain if this fails
-                print("[Env GUI] Warning: could not strengthen door motors:", e)
+                print(tag + " Warning: could not strengthen door motors:", e)
 
         robot = Robot(_Args, logger)
         if env.simenv.move_to_start_pos():
@@ -638,7 +641,7 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
             try:
                 robot.move(env, safe_ee_pos, safe_ee_ori, gripper_open=True, is_trajectory=False)
             except Exception as e:
-                print("[Env GUI] Warning: initial EE placement failed:", e)
+                print(tag + " Warning: initial EE placement failed:", e)
 
         print(f'config.base_start_position_franka={config.base_start_position_franka}')
         print(f'config.base_start_orientation_e_franka={config.base_start_orientation_e_franka}')
@@ -655,8 +658,8 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
                 rgb_image_path=config.rgb_image_head_path,
                 depth_image_path=config.depth_image_head_path,
             )
-            print("[Env GUI] Saved head camera image:", config.rgb_image_head_path)
-            print("[Env GUI] Head camera actual pose:")
+            print(tag + " Saved head camera image:", config.rgb_image_head_path)
+            print(tag + " Head camera actual pose:")
             print("  position=", head_pos)
             print("  orientation_q=", head_q)
             try:
@@ -668,7 +671,7 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
             except Exception:
                 pass
         except Exception as e:
-            print("[Env GUI] Warning: failed to capture head camera image:", e)
+            print(tag + " Warning: failed to capture head camera image:", e)
 
         if disable_forces:
             # Disable motors so user drag isn't resisted
@@ -679,21 +682,27 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
                     if getattr(env, "latch_index", None) is not None:
                         p.setJointMotorControl2(env.door_id, env.latch_index, p.POSITION_CONTROL, force=0)
             except Exception as e:
-                print("[Env GUI] Failed to disable door motors:", e)
+                print(tag + " Failed to disable door motors:", e)
                 traceback.print_exc()
 
         # Diagnostic line mirroring DIRECT-mode setup
         try:
-            dbg = p.getDebugVisualizerCamera()
-            dbg_tuple_len = len(dbg) if isinstance(dbg, (list, tuple)) else None
-            if isinstance(dbg, (list, tuple)) and dbg_tuple_len == 12:
-                dbg_available = True
-                dbg_yaw = float(dbg[8])
-                dbg_pitch = float(dbg[9])
-                dbg_dist = float(dbg[10])
-                dbg_target = list(map(float, dbg[11]))
+            if connection_mode == p.GUI:
+                dbg = p.getDebugVisualizerCamera()
+                dbg_tuple_len = len(dbg) if isinstance(dbg, (list, tuple)) else None
+                if isinstance(dbg, (list, tuple)) and dbg_tuple_len == 12:
+                    dbg_available = True
+                    dbg_yaw = float(dbg[8])
+                    dbg_pitch = float(dbg[9])
+                    dbg_dist = float(dbg[10])
+                    dbg_target = list(map(float, dbg[11]))
+                else:
+                    dbg_available = False
+                    dbg_yaw = dbg_pitch = dbg_dist = None
+                    dbg_target = None
             else:
                 dbg_available = False
+                dbg_tuple_len = None
                 dbg_yaw = dbg_pitch = dbg_dist = None
                 dbg_target = None
         except Exception:
@@ -703,7 +712,7 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
             dbg_target = None
 
         print(
-            f"[Env GUI] Setup: sim=pybullet conn={'p.GUI'} "
+            f"{tag} Setup: sim=pybullet conn={'p.GUI' if connection_mode==p.GUI else 'p.DIRECT'} "
             f"head_debug_view={getattr(config, 'head_camera_use_debug_view', False)} "
             f"dbg_cam_available={dbg_available} dbg_tuple_len={dbg_tuple_len} "
             f"dbg(yaw={dbg_yaw}, pitch={dbg_pitch}, dist={dbg_dist}, target={dbg_target}) "
@@ -711,13 +720,14 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
             f"head_img(size={head_stats['size']}, mean={head_stats['mean']}, var={head_stats['var']})"
         )
 
-        # Real-time simulation for natural interaction
-        p.setRealTimeSimulation(1)
-        print("[Env GUI] Running. Click-and-drag the door; press ESC to quit.")
-        while p.isConnected():
-            time.sleep(0.01)
+        # Real-time simulation for natural interaction (GUI only)
+        if connection_mode == p.GUI:
+            p.setRealTimeSimulation(1)
+            print(tag + " Running. Click-and-drag the door; press ESC to quit.")
+            while p.isConnected():
+                time.sleep(0.01)
     except Exception as e:
-        print("[Env GUI] Exception:", e)
+        print(tag + " Exception:", e)
         traceback.print_exc()
     finally:
         try:
@@ -729,4 +739,5 @@ def run_gui_demo(task_p = 'door', disable_forces: bool = False,
 
 if __name__ == "__main__":
     # Entry point for quick, no-code door kinematics testing in GUI mode.
-    run_gui_demo(disable_forces=False)
+    run_gui_demo(disable_forces=False, connection_mode=p.GUI)
+
