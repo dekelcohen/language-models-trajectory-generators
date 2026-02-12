@@ -1,0 +1,502 @@
+ api.py | 75 ++++++++++++++++++++++++------------------------------------------
+ 1 file changed, 27 insertions(+), 48 deletions(-)
+
+diff --git a/api.py b/api.py
+index 79d2535..4783970 100644
+--- a/api.py
++++ b/api.py
+@@ -1,4 +1,4 @@
+-﻿import numpy as np
++import numpy as np
+ import sys
+ import torch
+ import math
+@@ -46,21 +46,22 @@ class API:
+         segment in 2D --> transform to 3D world coordinates in Sim
+         Workflow:
+         ) Send to env CAPTURE_IMAGES message
+-        ) env.py: robot.get_camera_image("head") 
+-        ) def robot.py: get_camera_image
+-            camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
+-            if camera == "head" and config.head_camera_use_spherical_view: # Door task head camera
+-              view_matrix, camera_position = self._view_and_pos_from_spherical(target pos, distance, yaw_deg, pitch_deg)
+-              def _view_and_pos_from_spherical:
+-                view_matrix = p.computeViewMatrixFromYawPitchRoll( ... )
+-                  camera_position = <complex calc with target, distance, yaw_deg, pitch_deg>
+-                  return view_matrix, camera_position
+-            return camera_position, camera_orientation_q 
++          ) env.py: robot.get_camera_image("head") 
++          ) def robot.py: get_camera_image
++                camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
++                if camera == "head" and config.head_camera_use_spherical_view: # Door task head camera
++                  view_matrix, camera_position = self._view_and_pos_from_spherical(target pos, distance, yaw_deg, pitch_deg)
++                  def _view_and_pos_from_spherical:
++                    view_matrix = p.computeViewMatrixFromYawPitchRoll( ... )
++                      camera_position = <complex calc with target, distance, yaw_deg, pitch_deg>
++                      return view_matrix, camera_position
++                return camera_position, camera_orientation_q 
+             
+-          ) env::CAPTURE_IMAGES respond with head_camera_position=camera_position, head_camera_orientation_q=camera_orientation_q
++            ) env::CAPTURE_IMAGES respond with head_camera_position=camera_position, head_camera_orientation_q=camera_orientation_q
++              ) metaworld_server also returns: calib {K_head, K_wrist - intrinsic of head cam }
+           ) utils.get_bounding_cube_from_point_cloud(head_camera_position, head_camera_orientation_q, K_override=None -if pybullet)
+             ) contour_pixel_points = <countour of segmented object in 2d image>
+-            ) get_world_point_world_frame(camera_position, camera_orientation_q, 'head', pixel_point for contour_pixel_points)
++            ) get_world_point_world_frame(camera_position, camera_orientation_q, 'head', pixel_point for contour_pixel_points, K_override)
+                 K, Rt = get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=K_use)
+                 elif camera == "head":
+                   pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
+@@ -76,15 +77,15 @@ class API:
+         head_camera_position = head_camera_orientation_q = None
+         wrist_camera_position = wrist_camera_orientation_q = None
+         env_connection_message = None
+-        self.calibration = None
++        self.cam_info = None
+         if isinstance(recv_payload, list):
+             if len(recv_payload) >= 6:
+                 head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload[:5]
+-                self.calibration = recv_payload[5]
++                self.cam_info = recv_payload[5]
+             elif len(recv_payload) == 5:
+                 head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload
+             elif len(recv_payload) == 1:
+-                # Only a status line; proceed with saved images but no poses/calibration
++                # Only a status line; proceed with saved images but no poses/cam_info
+                 env_connection_message = recv_payload[0]
+             else:
+                 raise ValueError(f"Unexpected CAPTURE_IMAGES payload length: {len(recv_payload)}")
+@@ -99,24 +100,15 @@ class API:
+         self.wrist_camera_orientation_q = wrist_camera_orientation_q
+ 
+         rgb_image_head = Image.open(config.rgb_image_head_path).convert("RGB")
+-        depth_image_head = Image.open(config.depth_image_head_path).convert("L")
+-        # Handle depth according to depth_format and backend calibration
++        # Prefer raw depth from .npy if available; fall back to 8-bit image
++        depth_npy_path = os.path.splitext(config.depth_image_head_path)[0] + ".npy"
+         depth_format = getattr(self.args, "depth_format", "norm_1m")
+-        depth_array = np.array(depth_image_head) / 255.
+-        if getattr(self, "calibration", None) and isinstance(self.calibration, dict):
+-            head_cal = self.calibration.get("head")
+-            if head_cal and self.calibration.get("depth_encoding") == "opengl":
+-                znear = float(head_cal.get("znear", 0.01))
+-                zfar = float(head_cal.get("zfar", 100.0))
+-                d = depth_array.astype(np.float64)
+-                Z = (znear * zfar) / (zfar - d * (zfar - znear))
+-                if depth_format == "raw":
+-                    depth_array = np.clip(Z, znear, zfar)
+-                elif depth_format == "norm_zfar":
+-                    depth_array = np.clip(Z / zfar, 0.0, 1.0)
+-                else:  # norm_1m
+-                    depth_array = np.clip(Z, 0.0, 1.0)
+-
++        if os.path.exists(depth_npy_path):
++            depth_array = np.load(depth_npy_path).astype(np.float32)
++        else:
++            depth_image_head = Image.open(config.depth_image_head_path).convert("L")
++            depth_array = (np.array(depth_image_head).astype(np.float32)) / 255.0
++        
+         if self.segmentation_count == 0:
+             xmem_image = Image.fromarray(np.zeros_like(depth_array)).convert("L")
+             xmem_image.save(config.xmem_input_path)
+@@ -150,12 +142,6 @@ class API:
+ 
+         masks = utils.get_segmentation_mask(model_predictions, config.segmentation_threshold)
+ 
+-        # If calibration available from server, pass head K to utils for accurate projection
+-        K_head = None
+-        if getattr(self, "calibration", None) and isinstance(self.calibration, dict):
+-            head_cal = self.calibration.get("head")
+-            if head_cal and head_cal.get("K"):
+-                K_head = head_cal.get("K")
+ 
+         self.logger.info(PROGRESS + f"************************ Before bounding_cubes_world_coordinates len(masks)={len(masks)}" + ENDC)
+         bounding_cubes_world_coordinates, bounding_cubes_orientations = utils.get_bounding_cube_from_point_cloud(            
+@@ -165,7 +151,7 @@ class API:
+             self.head_camera_position,
+             self.head_camera_orientation_q,
+             self.segmentation_count,
+-            K_override=K_head,
++            cam_info=self.cam_info,
+         )
+ 
+         utils.save_xmem_image(masks)
+@@ -293,13 +279,6 @@ class API:
+                     object_mask[object_mask == object] = True
+                     object_mask = torch.Tensor(object_mask)
+ 
+-                    # Reuse head calibration if available
+-                    K_head = None
+-                    if getattr(self, "calibration", None) and isinstance(self.calibration, dict):
+-                        head_cal = self.calibration.get("head")
+-                        if head_cal and head_cal.get("K"):
+-                            K_head = head_cal.get("K")
+-
+                     bounding_cubes, orientations = utils.get_bounding_cube_from_point_cloud(
+                         rgb_image,
+                         [object_mask],
+@@ -307,7 +286,7 @@ class API:
+                         self.head_camera_position,
+                         self.head_camera_orientation_q,
+                         object - 1,
+-                        K_override=K_head,
++                        cam_info=head_cal,
+                     )
+ 
+                     if len(bounding_cubes) == 0:
+ env.py | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/env.py b/env.py
+index 4af2d17..a83d2b6 100644
+--- a/env.py
++++ b/env.py
+@@ -418,12 +418,17 @@ def run_simulation_environment(args, env_connection, logger):
+ 
+             if env_connection_received[0] == CAPTURE_IMAGES:
+ 
+-                _, _ = robot.get_camera_image("head", env, save_camera_image=True, rgb_image_path=config.rgb_image_trajectory_path.format(step=0), depth_image_path=config.depth_image_trajectory_path.format(step=0))
+-                head_camera_position, head_camera_orientation_q = robot.get_camera_image("head", env, save_camera_image=True, rgb_image_path=config.rgb_image_head_path, depth_image_path=config.depth_image_head_path)
+-                wrist_camera_position, wrist_camera_orientation_q = robot.get_camera_image("wrist", env, save_camera_image=True, rgb_image_path=config.rgb_image_wrist_path, depth_image_path=config.depth_image_wrist_path)
++                robot.get_camera_image("head", env, save_camera_image=True, rgb_image_path=config.rgb_image_trajectory_path.format(step=0), depth_image_path=config.depth_image_trajectory_path.format(step=0))
++                head_camera_position, head_camera_orientation_q, view_head, proj_head = robot.get_camera_image("head", env, save_camera_image=True, rgb_image_path=config.rgb_image_head_path, depth_image_path=config.depth_image_head_path)
++                wrist_camera_position, wrist_camera_orientation_q, view_wrist, proj_wrist = robot.get_camera_image("wrist", env, save_camera_image=True, rgb_image_path=config.rgb_image_wrist_path, depth_image_path=config.depth_image_wrist_path)
+ 
+                 env_connection_message = OK + "Finished capturing head camera image!" + ENDC
+-                env_connection.send([head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message])
++                                # Build cam_info with head intrinsics and view matrix                
++                cam_info = {
++                    "head": {"viewMatrix": view_head if "view_head" in locals() else None, "projectionMatrix": proj_head if "proj_head" in locals() else None, "znear": float(config.near_plane), "zfar": float(config.far_plane)},
++                    "depth_encoding": "opengl", "new_3d_proj" : False
++                }
++                env_connection.send([head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message, cam_info])
+ 
+             elif env_connection_received[0] == ADD_BOUNDING_CUBES:
+ 
+ providers/metaworld_server.py | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/providers/metaworld_server.py b/providers/metaworld_server.py
+index 9781639..e876be4 100644
+--- a/providers/metaworld_server.py
++++ b/providers/metaworld_server.py
+@@ -508,15 +508,15 @@ def main():
+                         fx_w = fy_w * (width / float(height))
+                         K_wrist = [[fx_w, 0.0, width / 2.0], [0.0, fy_w, height / 2.0], [0.0, 0.0, 1.0]]
+                         # TEMP: depth sidecar is currently raw OpenGL normalized from MuJoCo; mark encoding accordingly
+-                        calib = {
+-                            "head": {"K": K_head, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_h},
+-                            "wrist": {"K": K_wrist, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_w},
++                        cam_info = {
++                            "head": {"K": K_head, "projectionMatrix": None, "viewMatrix": None, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_h},
++                            "wrist": {"K": K_wrist, "projectionMatrix": None, "viewMatrix": None, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_w},
+                             # MuJoCo renderer depth is OpenGL-normalized buffer; client will linearize to metric Z
+                             "depth_encoding": "opengl",
+                         }
+                     except Exception:
+-                        calib = None
+-                    await websocket.send(json.dumps([head_pos, head_quat, wrist_pos, wrist_quat, "\u001b[92mFinished capturing head camera image!\u001b[0m", calib]))
++                        cam_info = None
++                    await websocket.send(json.dumps([head_pos, head_quat, wrist_pos, wrist_quat, "\u001b[92mFinished capturing head camera image!\u001b[0m", cam_info]))
+                 elif cmd == config.ADD_BOUNDING_CUBES:
+                     await websocket.send(json.dumps(["\u001b[92mFinished adding bounding cubes to the environment!\u001b[0m"]))
+                 elif cmd == config.ADD_TRAJECTORY_POINTS:
+@@ -668,3 +668,6 @@ def main():
+     
+ if __name__ == "__main__":
+     main()
++
++
++
+ robot.py | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/robot.py b/robot.py
+index 26d1c07..25106ff 100644
+--- a/robot.py
++++ b/robot.py
+@@ -1,5 +1,6 @@
+ import pybullet as p
+ import numpy as np
++import os
+ import math
+ import config
+ from config import OK, PROGRESS, FAIL, ENDC
+@@ -162,8 +163,7 @@ class Robot:
+             camera_position = config.head_camera_position
+             camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
+ 
+-        projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
+-            
++        projection_matrix = np.array(p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)).reshape(4, 4, order="F")        
+         # Special handling: head camera per-task behavior
+         if camera == "head" and config.head_camera_use_debug_view:
+             # GUI: copy view/projection from debug visualizer
+@@ -221,10 +221,13 @@ class Robot:
+ 
+         depth_array = np.array(depth_buffer, dtype=np.float32).reshape(img_h, img_w)
+ 
++        LEGACY_NORMALIZE_DEPTH = True # TODO:False when moving to test like projection matrix     
++        GEMINI_TEST_DEPTH_IMAGE = False # TODO: Remove code for 65535 resolution if npy file is used 
++        
+         if save_camera_image:
+             rgb_image = Image.fromarray(rgb_array, mode="RGB")
+             rgb_image.save(rgb_image_path)
+-            GEMINI_TEST_DEPTH_IMAGE = False 
++            
+             if GEMINI_TEST_DEPTH_IMAGE:
+                 raw_depth = depth_array     
+                 # 2. Scale to 16-bit integer range [0, 65535]
+@@ -244,8 +247,16 @@ class Robot:
+                 depth_image = Image.fromarray(depth_u8, mode="L")
+                 
+             depth_image.save(depth_image_path)
++            if LEGACY_NORMALIZE_DEPTH:
++                n = config.near_plane
++                f = config.far_plane
++                # Convert OpenGL depth to linear depth in [0,1]
++                z = depth_array
++                linear_depth = (2.0 * n * f) / (f + n - (2.0 * z - 1.0) * (f - n))
++                linear_depth = np.clip(linear_depth, 0.0, 1.0)
++                np.save(os.path.splitext(depth_image_path)[0] + ".npy", linear_depth.astype(np.float32))
+ 
+-        return camera_position, camera_orientation_q
++        return camera_position, camera_orientation_q, view_matrix, projection_matrix
+ 
+     def _debug_view_matrices_and_pos(self):
+         """Return (view, projection, camera_pos) mirroring the GUI debug view.
+ tests/test_metaworld_server.py | 27 ++++++++++++++-------------
+ 1 file changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/tests/test_metaworld_server.py b/tests/test_metaworld_server.py
+index 9890033..1842b04 100644
+--- a/tests/test_metaworld_server.py
++++ b/tests/test_metaworld_server.py
+@@ -1,4 +1,4 @@
+-﻿import os
++import os
+ import sys
+ import json
+ import subprocess
+@@ -91,15 +91,15 @@ class TestMetaworldServer(unittest.TestCase):
+ 
+     def test_backprojection_roundtrip(self):
+         """Round-trip: back-project a pixel using K and (R,t), then re-project to pixel."""
+-        # Capture and parse calibration + poses
++        # Capture and parse cam_inforation + poses
+         payload = self._rpc({"cmd": config.CAPTURE_IMAGES, "args": None})
+         self.assertIsInstance(payload, list)
+         self.assertGreaterEqual(len(payload), 6)
+-        head_pos, head_quat, wrist_pos, wrist_quat, _, calib = payload[:6]
+-        K_head = np.array(calib['head']['K'], dtype=np.float64)
+-        K_wrist = np.array(calib['wrist']['K'], dtype=np.float64)
+-        znear = float(calib['head']['znear'])
+-        zfar = float(calib['head']['zfar'])
++        head_pos, head_quat, wrist_pos, wrist_quat, _, cam_info = payload[:6]
++        K_head = np.array(cam_info['head']['K'], dtype=np.float64)
++        K_wrist = np.array(cam_info['wrist']['K'], dtype=np.float64)
++        znear = float(cam_info['head']['znear'])
++        zfar = float(cam_info['head']['zfar'])
+         # Depth buffer is OpenGL normalized; load and linearize
+         npy_path = './images/depth_image_head.npy'
+         self.assertTrue(os.path.exists(npy_path))
+@@ -164,14 +164,14 @@ class TestMetaworldServer(unittest.TestCase):
+         except Exception:
+             pass
+ 
+-        # --- Phase: capture images + calibration and HEAD camera pose ---
++        # --- Phase: capture images + cam_inforation and HEAD camera pose ---
+         payload = self._rpc({"cmd": config.CAPTURE_IMAGES, "args": None})
+         self.assertIsInstance(payload, list)
+         self.assertGreaterEqual(len(payload), 6)
+-        head_pos, head_quat, _, _, _, calib = payload[:6]
+-        K = np.array(calib['head']['K'], dtype=np.float64)
+-        znear = float(calib['head']['znear'])
+-        zfar = float(calib['head']['zfar'])
++        head_pos, head_quat, _, _, _, cam_info = payload[:6]
++        K = np.array(cam_info['head']['K'], dtype=np.float64)
++        znear = float(cam_info['head']['znear'])
++        zfar = float(cam_info['head']['zfar'])
+ 
+         # --- Phase: fetch GT world point strictly: 'handle' ---
+         st = self._rpc({"cmd": config.GET_STATE, "args": {"objects": ["handle"]}})
+@@ -345,7 +345,7 @@ class TestMetaworldServer(unittest.TestCase):
+             _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": contact, "iters": 80, "open_gripper": True}})
+             _ = self._rpc({"cmd": config.CLOSE_GRIPPER, "args": None})
+ 
+-            # Curved half‑circle style pull:
++            # Curved half?circle style pull:
+             # Phase A: pull inward toward robot base (negative X), keep Y almost constant
+             # Phase B: sweep left (negative Y) while continuing slight inward pull
+             import math
+@@ -430,3 +430,4 @@ if __name__ == '__main__':
+     # Rebuild argv for unittest, dropping our custom flag
+     sys.argv = [sys.argv[0]] + rest
+     unittest.main()
++
+ utils.py | 118 +++++++++++++++++++++++++++------------------------------------
+ 1 file changed, 51 insertions(+), 67 deletions(-)
+
+diff --git a/utils.py b/utils.py
+index b4bb238..1c390b0 100644
+--- a/utils.py
++++ b/utils.py
+@@ -71,45 +71,6 @@ def _quat_to_rotmat(q):
+     return R
+ 
+ 
+-def get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=None):
+-    """
+-    Returns intrinsics K and extrinsics Rt. If K_override is provided (from server), use it.
+-    When running under PyBullet, optionally compare PyBullet's getMatrixFromQuaternion with our pure-numpy
+-    version under DEBUG_DIFF flag for quick validation.
+-    """
+-    if K_override is not None:
+-        K = np.array(K_override, dtype=float)
+-    else:
+-        fov = (config.fov / 360) * 2 * math.pi
+-        f_x = f_y = image_height / (2 * math.tan(fov / 2))
+-        # Keep principal point at (0,0); caller subtracts image center, matching existing pipeline
+-        K = np.array([[f_x, 0, 0], [0, f_y, 0], [0, 0, 1]])
+-
+-    R_np = _quat_to_rotmat(camera_orientation_q)
+-
+-    # Optional: compare with PyBullet's quaternion->matrix if available and DEBUG_DIFF set
+-    if os.environ.get("DEBUG_DIFF", "0") == "1":
+-        try:
+-            import pybullet as p
+-            R_pb = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
+-            diff = np.abs(R_pb - R_np).max()
+-            if diff > 1e-6:
+-                logger.info(PROGRESS + f"------------------ [DEBUG_DIFF] Rotation matrix diff max: {diff}" + ENDC)
+-                
+-        except Exception as e:
+-            print(f"[DEBUG_DIFF] PyBullet compare failed: {e}")
+-
+-    Rt = np.hstack((R_np, np.array(camera_position).reshape(3, 1)))
+-    # Optional: lightweight intrinsics/extrinsics dump for debugging    
+-    if os.environ.get("DEBUG_INTRINSICS", "0") == "1":
+-        try:            
+-            logger.info(PROGRESS + "[Intrinsics] K=" + np.array2string(K, precision=3) + ENDC)
+-            logger.info(PROGRESS + "[Extrinsics] R=" + np.array2string(R_np, precision=3) + " t=" + str(list(map(float, camera_position))) + ENDC)
+-        except Exception:
+-            pass
+-    Rt = np.vstack((Rt, np.array([0, 0, 0, 1])))
+-
+-    return K, Rt
+ 
+ 
+ 
+@@ -132,7 +93,7 @@ def save_xmem_image(masks):
+ 
+ 
+ 
+-def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_position, camera_orientation_q, segmentation_count, K_override=None):
++def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_position, camera_orientation_q, segmentation_count, cam_info=None):
+ 
+     image_width, image_height = image.size
+ 
+@@ -155,7 +116,7 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
+             else:
+                 logger.info(PROGRESS + "[Contour] No pixels inside contour; mean undefined" + ENDC)
+             logger.info(PROGRESS + f"++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)={len(contour_pixel_points)}" + ENDC)            
+-            contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, pixel_point, K_override=K_override) for pixel_point in contour_pixel_points]
++            contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, pixel_point, cam_info=cam_info) for pixel_point in contour_pixel_points]
+             # Optional depth statistics within the mask to probe Z handling
+             if os.environ.get("DEBUG_DEPTH", "0") == "1":
+                 try:
+@@ -193,20 +154,59 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
+ 
+ 
+ 
+-def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image, point, K_override=None):
+ 
+-    image_width, image_height = image.size
+ 
+-    if K_override is not None:
+-        K_use = np.array(K_override, dtype=float)
++def save_mask_image(mask, path):
++    """
++    Save a binary or float mask to disk as a grayscale PNG, supporting both
++    torch.Tensor and numpy arrays. Avoids importing torchvision to keep
++    SAM3 runs torch-free.
++    """
++    if hasattr(mask, "detach"):
++        arr = mask.detach().cpu().numpy()
+     else:
+-        K_use = None
+-    K, Rt = get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=K_use)
++        arr = np.asarray(mask)
++    # Convert to binary 0/255 for robustness
++    arr = (arr > 0).astype(np.uint8) * 255
++    Image.fromarray(arr).save(path)
+ 
+-    if K_override is not None:
+-        # Use pixel coordinates directly (u, v, 1) and rely on provided K
+-        pixel_point = np.array([[point[0]], [point[1]], [1.0]])
++def get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=None):
++    """
++    Returns (K, Rt, view_matrix).
++    - K: 3x3 intrinsics. Uses cam_info['K'] when present, else computes from config.fov.
++    - Rt: 4x4 camera-to-world. If cam_info['viewMatrix'] exists, Rt = inv(viewMatrix) (column-major).
++    - view_matrix: 4x4 view matrix from cam_info when provided; otherwise None.
++    """
++    named_cam_info = cam_info.get(camera, None) if isinstance(cam_info, dict) else {}
++    if named_cam_info.get("K"):
++        K = np.array(named_cam_info.get("K"), dtype=float)
+     else:
++        fov = (config.fov / 360) * 2 * math.pi
++        f_x = f_y = image_height / (2 * math.tan(fov / 2))
++        # Keep principal point at (0,0); caller subtracts image center, matching existing pipeline
++        K = np.array([[f_x, 0, 0], [0, f_y, 0], [0, 0, 1]])
++
++    R_np = _quat_to_rotmat(camera_orientation_q)
++
++    view_matrix = None
++    if named_cam_info.get("viewMatrix", None):   
++        view_matrix = np.array(named_cam_info.get("viewMatrix"), dtype=float).reshape(4, 4, order='F')            
++            
++    Rt = np.hstack((R_np, np.array(camera_position).reshape(3, 1)))
++    Rt = np.vstack((Rt, np.array([0, 0, 0, 1])))
++
++    return K, Rt, view_matrix
++
++
++def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image, point, cam_info=None):
++    image_width, image_height = image.size
++
++    K, Rt, _view = get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=cam_info)
++
++    if isinstance(cam_info, dict) and cam_info.get("new_3d_proj",False):
++        pixel_point = np.array([[point[0]], [point[1]], [1.0]], dtype=np.float64)
++    else:
++        #logger.info(PROGRESS + f"------------------ get_world_point_world_frame: Legacy PyBullet path: recenter and apply axis flips" + ENDC)
+         # Legacy PyBullet path: recenter and apply axis flips
+         pixel_point = np.array([[point[0] - (image_width / 2)], [(image_height / 2) - point[1]], [1.0]])
+         if camera == "wrist":
+@@ -214,24 +214,8 @@ def get_world_point_world_frame(camera_position, camera_orientation_q, camera, i
+         elif camera == "head":
+             pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
+ 
+-    # logger.info(PROGRESS + f"########### |(np.linalg.inv(K) @ pixel_point)| ={np.linalg.norm(np.linalg.inv(K) @ pixel_point)}" + ENDC)
+     world_point_camera_frame = (np.linalg.inv(K) @ pixel_point) * point[2]
+     world_point_world_frame = Rt @ np.vstack((world_point_camera_frame, np.array([1.0])))
+     world_point_world_frame = world_point_world_frame.squeeze()[:-1]
+ 
+-    return world_point_world_frame
+-
+-
+-def save_mask_image(mask, path):
+-    """
+-    Save a binary or float mask to disk as a grayscale PNG, supporting both
+-    torch.Tensor and numpy arrays. Avoids importing torchvision to keep
+-    SAM3 runs torch-free.
+-    """
+-    if hasattr(mask, "detach"):
+-        arr = mask.detach().cpu().numpy()
+-    else:
+-        arr = np.asarray(mask)
+-    # Convert to binary 0/255 for robustness
+-    arr = (arr > 0).astype(np.uint8) * 255
+-    Image.fromarray(arr).save(path)
++    return world_point_world_frame
+\ No newline at end of file
