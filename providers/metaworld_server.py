@@ -508,15 +508,15 @@ def main():
                         fx_w = fy_w * (width / float(height))
                         K_wrist = [[fx_w, 0.0, width / 2.0], [0.0, fy_w, height / 2.0], [0.0, 0.0, 1.0]]
                         # TEMP: depth sidecar is currently raw OpenGL normalized from MuJoCo; mark encoding accordingly
-                        calib = {
-                            "head": {"K": K_head, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_h},
-                            "wrist": {"K": K_wrist, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_w},
+                        cam_info = {
+                            "head": {"K": K_head, "projectionMatrix": None, "viewMatrix": None, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_h},
+                            "wrist": {"K": K_wrist, "projectionMatrix": None, "viewMatrix": None, "znear": znear, "zfar": zfar, "width": width, "height": height, "fovy": fovy_w},
                             # MuJoCo renderer depth is OpenGL-normalized buffer; client will linearize to metric Z
                             "depth_encoding": "opengl",
                         }
                     except Exception:
-                        calib = None
-                    await websocket.send(json.dumps([head_pos, head_quat, wrist_pos, wrist_quat, "\u001b[92mFinished capturing head camera image!\u001b[0m", calib]))
+                        cam_info = None
+                    await websocket.send(json.dumps([head_pos, head_quat, wrist_pos, wrist_quat, "\u001b[92mFinished capturing head camera image!\u001b[0m", cam_info]))
                 elif cmd == config.ADD_BOUNDING_CUBES:
                     await websocket.send(json.dumps(["\u001b[92mFinished adding bounding cubes to the environment!\u001b[0m"]))
                 elif cmd == config.ADD_TRAJECTORY_POINTS:
@@ -668,3 +668,6 @@ def main():
     
 if __name__ == "__main__":
     main()
+
+
+

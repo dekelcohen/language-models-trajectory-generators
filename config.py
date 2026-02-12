@@ -35,8 +35,15 @@ joint_start_positions_franka = [0.0, 0.0, 0.0, -1.5708, 0.0, 1.8675, 0.0, 0.04, 
 ee_start_position = [0.0, 0.6, 0.55]
 ee_start_orientation_e = [0.0, math.pi, -math.pi / 2]
 
-object_start_position = [random.uniform(-0.2, 0.2), random.uniform(0.4, 0.8), 0.1]
-object_start_orientation_e = [0.0, 0.0, random.uniform(-math.pi, math.pi)]
+RANDOM_TARGET_GRASP_OBJ_POSE = True # Randomness for testing - but not for debugging
+if RANDOM_TARGET_GRASP_OBJ_POSE:
+    object_start_position = [random.uniform(-0.2, 0.2), random.uniform(0.4, 0.8), 0.1]
+    object_start_orientation_e = [0.0, 0.0, random.uniform(-math.pi, math.pi)]
+else:
+    # x=-0.5 - closet to viewer, 5 - very far into the image. y=1 closest (second axis), y=-3 far into the image
+    object_start_position = [-0.2, 0.4 , 0.1] # Good (Close to viewer - bottom of frame, large box): [0.0, 0.5, 0.1]
+    object_start_orientation_e = [0.0, 0.0, 0.0]
+
 
 global_scaling = 0.08
 

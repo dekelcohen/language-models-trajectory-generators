@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import json
 import subprocess
@@ -91,15 +91,15 @@ class TestMetaworldServer(unittest.TestCase):
 
     def test_backprojection_roundtrip(self):
         """Round-trip: back-project a pixel using K and (R,t), then re-project to pixel."""
-        # Capture and parse calibration + poses
+        # Capture and parse cam_inforation + poses
         payload = self._rpc({"cmd": config.CAPTURE_IMAGES, "args": None})
         self.assertIsInstance(payload, list)
         self.assertGreaterEqual(len(payload), 6)
-        head_pos, head_quat, wrist_pos, wrist_quat, _, calib = payload[:6]
-        K_head = np.array(calib['head']['K'], dtype=np.float64)
-        K_wrist = np.array(calib['wrist']['K'], dtype=np.float64)
-        znear = float(calib['head']['znear'])
-        zfar = float(calib['head']['zfar'])
+        head_pos, head_quat, wrist_pos, wrist_quat, _, cam_info = payload[:6]
+        K_head = np.array(cam_info['head']['K'], dtype=np.float64)
+        K_wrist = np.array(cam_info['wrist']['K'], dtype=np.float64)
+        znear = float(cam_info['head']['znear'])
+        zfar = float(cam_info['head']['zfar'])
         # Depth buffer is OpenGL normalized; load and linearize
         npy_path = './images/depth_image_head.npy'
         self.assertTrue(os.path.exists(npy_path))
@@ -164,14 +164,14 @@ class TestMetaworldServer(unittest.TestCase):
         except Exception:
             pass
 
-        # --- Phase: capture images + calibration and HEAD camera pose ---
+        # --- Phase: capture images + cam_inforation and HEAD camera pose ---
         payload = self._rpc({"cmd": config.CAPTURE_IMAGES, "args": None})
         self.assertIsInstance(payload, list)
         self.assertGreaterEqual(len(payload), 6)
-        head_pos, head_quat, _, _, _, calib = payload[:6]
-        K = np.array(calib['head']['K'], dtype=np.float64)
-        znear = float(calib['head']['znear'])
-        zfar = float(calib['head']['zfar'])
+        head_pos, head_quat, _, _, _, cam_info = payload[:6]
+        K = np.array(cam_info['head']['K'], dtype=np.float64)
+        znear = float(cam_info['head']['znear'])
+        zfar = float(cam_info['head']['zfar'])
 
         # --- Phase: fetch GT world point strictly: 'handle' ---
         st = self._rpc({"cmd": config.GET_STATE, "args": {"objects": ["handle"]}})
@@ -345,7 +345,7 @@ class TestMetaworldServer(unittest.TestCase):
             _ = self._rpc({"cmd": config.MOVE_EEF_ABS, "args": {"pos": contact, "iters": 80, "open_gripper": True}})
             _ = self._rpc({"cmd": config.CLOSE_GRIPPER, "args": None})
 
-            # Curved half‑circle style pull:
+            # Curved half?circle style pull:
             # Phase A: pull inward toward robot base (negative X), keep Y almost constant
             # Phase B: sweep left (negative Y) while continuing slight inward pull
             import math
@@ -430,3 +430,4 @@ if __name__ == '__main__':
     # Rebuild argv for unittest, dropping our custom flag
     sys.argv = [sys.argv[0]] + rest
     unittest.main()
+

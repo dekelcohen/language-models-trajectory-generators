@@ -71,45 +71,6 @@ def _quat_to_rotmat(q):
     return R
 
 
-def get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=None):
-    """
-    Returns intrinsics K and extrinsics Rt. If K_override is provided (from server), use it.
-    When running under PyBullet, optionally compare PyBullet's getMatrixFromQuaternion with our pure-numpy
-    version under DEBUG_DIFF flag for quick validation.
-    """
-    if K_override is not None:
-        K = np.array(K_override, dtype=float)
-    else:
-        fov = (config.fov / 360) * 2 * math.pi
-        f_x = f_y = image_height / (2 * math.tan(fov / 2))
-        # Keep principal point at (0,0); caller subtracts image center, matching existing pipeline
-        K = np.array([[f_x, 0, 0], [0, f_y, 0], [0, 0, 1]])
-
-    R_np = _quat_to_rotmat(camera_orientation_q)
-
-    # Optional: compare with PyBullet's quaternion->matrix if available and DEBUG_DIFF set
-    if os.environ.get("DEBUG_DIFF", "0") == "1":
-        try:
-            import pybullet as p
-            R_pb = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
-            diff = np.abs(R_pb - R_np).max()
-            if diff > 1e-6:
-                logger.info(PROGRESS + f"------------------ [DEBUG_DIFF] Rotation matrix diff max: {diff}" + ENDC)
-                
-        except Exception as e:
-            print(f"[DEBUG_DIFF] PyBullet compare failed: {e}")
-
-    Rt = np.hstack((R_np, np.array(camera_position).reshape(3, 1)))
-    # Optional: lightweight intrinsics/extrinsics dump for debugging    
-    if os.environ.get("DEBUG_INTRINSICS", "0") == "1":
-        try:            
-            logger.info(PROGRESS + "[Intrinsics] K=" + np.array2string(K, precision=3) + ENDC)
-            logger.info(PROGRESS + "[Extrinsics] R=" + np.array2string(R_np, precision=3) + " t=" + str(list(map(float, camera_position))) + ENDC)
-        except Exception:
-            pass
-    Rt = np.vstack((Rt, np.array([0, 0, 0, 1])))
-
-    return K, Rt
 
 
 
@@ -132,7 +93,7 @@ def save_xmem_image(masks):
 
 
 
-def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_position, camera_orientation_q, segmentation_count, K_override=None):
+def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_position, camera_orientation_q, segmentation_count, cam_info=None):
 
     image_width, image_height = image.size
 
@@ -155,7 +116,7 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
             else:
                 logger.info(PROGRESS + "[Contour] No pixels inside contour; mean undefined" + ENDC)
             logger.info(PROGRESS + f"++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)={len(contour_pixel_points)}" + ENDC)            
-            contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, pixel_point, K_override=K_override) for pixel_point in contour_pixel_points]
+            contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, pixel_point, cam_info=cam_info) for pixel_point in contour_pixel_points]
             # Optional depth statistics within the mask to probe Z handling
             if os.environ.get("DEBUG_DEPTH", "0") == "1":
                 try:
@@ -191,37 +152,6 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
 
     return bounding_cubes, bounding_cubes_orientations
 
-
-
-def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image, point, K_override=None):
-
-    image_width, image_height = image.size
-
-    if K_override is not None:
-        K_use = np.array(K_override, dtype=float)
-    else:
-        K_use = None
-    K, Rt = get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=K_use)
-
-    if K_override is not None:
-        # Use pixel coordinates directly (u, v, 1) and rely on provided K
-        pixel_point = np.array([[point[0]], [point[1]], [1.0]])
-    else:
-        # Legacy PyBullet path: recenter and apply axis flips
-        pixel_point = np.array([[point[0] - (image_width / 2)], [(image_height / 2) - point[1]], [1.0]])
-        if camera == "wrist":
-            pixel_point = [pixel_point[1], pixel_point[0], pixel_point[2]]
-        elif camera == "head":
-            pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
-
-    # logger.info(PROGRESS + f"########### |(np.linalg.inv(K) @ pixel_point)| ={np.linalg.norm(np.linalg.inv(K) @ pixel_point)}" + ENDC)
-    world_point_camera_frame = (np.linalg.inv(K) @ pixel_point) * point[2]
-    world_point_world_frame = Rt @ np.vstack((world_point_camera_frame, np.array([1.0])))
-    world_point_world_frame = world_point_world_frame.squeeze()[:-1]
-
-    return world_point_world_frame
-
-
 def save_mask_image(mask, path):
     """
     Save a binary or float mask to disk as a grayscale PNG, supporting both
@@ -235,3 +165,88 @@ def save_mask_image(mask, path):
     # Convert to binary 0/255 for robustness
     arr = (arr > 0).astype(np.uint8) * 255
     Image.fromarray(arr).save(path)
+
+def get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=None):
+    """
+    Returns (K, Rt, view_matrix).
+    - K: 3x3 intrinsics. Uses cam_info['K'] when present, else computes from config.fov.
+    - Rt: 4x4 camera-to-world. If cam_info['viewMatrix'] exists, Rt = inv(viewMatrix) (column-major).
+    - view_matrix: 4x4 view matrix from cam_info when provided; otherwise None.
+    """
+    named_cam_info = cam_info.get(camera, None) if isinstance(cam_info, dict) else {}
+    view_matrix = None
+    if not named_cam_info.get("viewMatrix", None) is None:   
+        view_matrix = np.array(named_cam_info.get("viewMatrix"), dtype=float).reshape(4, 4, order='F')
+        #logger.info(PROGRESS + f"########### view_matrix.shape= {view_matrix.shape} view_matrix={view_matrix}" + ENDC)
+    
+    projection_matrix = None    
+    K = None
+    if not named_cam_info.get("projectionMatrix", None) is None:
+        projection_matrix = np.array(named_cam_info.get("projectionMatrix"), dtype=float).reshape(4, 4, order='F')
+        #logger.info(PROGRESS + f"########### projection_matrix.shape= {projection_matrix.shape} projection_matrix={projection_matrix}" + ENDC)
+    else:
+        fov = (config.fov / 360) * 2 * math.pi
+        f_x = f_y = image_height / (2 * math.tan(fov / 2))
+        # Keep principal point at (0,0); caller subtracts image center, matching existing pipeline
+        K = np.array([[f_x, 0, 0], [0, f_y, 0], [0, 0, 1]])
+
+    # TODO:Delete: Legacy inv_view matrix 
+    R_np = _quat_to_rotmat(camera_orientation_q)         
+    Rt = np.hstack((R_np, np.array(camera_position).reshape(3, 1)))
+    Rt = np.vstack((Rt, np.array([0, 0, 0, 1])))
+
+    return K, Rt, projection_matrix, view_matrix
+
+
+def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image, point, cam_info=None):
+    image_width, image_height = image.size
+
+    K, Rt, projection_matrix, view_matrix = get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=cam_info)
+
+    if isinstance(cam_info, dict) and cam_info.get("new_3d_proj", False):
+        # --- Implementation based on TestCameraUnprojection ---
+        
+        # 1. Map Pixel coordinates and Depth to Normalized Device Coordinates (NDC)
+        # NDC Range: [-1, 1] for x, y, z
+        
+        # Map Pixel X [0, Width] -> NDC X [-1.0, 1.0]
+        ndc_x = (2.0 * point[0] / image_width) - 1.0
+        
+        # Map Pixel Y [0, Height] -> NDC Y [1.0, -1.0]
+        # Note: Image origin is Top-Left, OpenGL NDC origin is Bottom-Left.
+        ndc_y = 1.0 - (2.0 * point[1] / image_height)
+        
+        # Map Depth Buffer [0.0, 1.0] -> NDC Z [-1.0, 1.0]
+        # Assumes point[2] is the non-linear depth buffer value.
+        z_ndc = 2.0 * point[2] - 1.0
+        
+        # 2. Create the Clip Space Vector [x, y, z, w]
+        clip_pos = np.array([ndc_x, ndc_y, z_ndc, 1.0])
+        
+        # 3. Construct the View-Projection Matrix
+        # VP = Projection @ View
+        VP = projection_matrix @ view_matrix
+        
+        # 4. Apply Inverse View-Projection Matrix
+        # Transform: Clip Space -> World Space
+        inv_VP = np.linalg.inv(VP)
+        world_hom = inv_VP @ clip_pos
+        
+        # 5. Perspective Divide
+        # Recover Cartesian [x, y, z] from Homogeneous [xw, yw, zw, w]
+        world_point_world_frame = world_hom[:3] / world_hom[3]
+
+    else:        
+        # Legacy PyBullet path: recenter and apply axis flips
+        pixel_point = np.array([[point[0] - (image_width / 2)], [(image_height / 2) - point[1]], [1.0]])
+        if camera == "wrist":
+            pixel_point = [pixel_point[1], pixel_point[0], pixel_point[2]]
+        elif camera == "head":
+            pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
+
+        # logger.info(PROGRESS + f"########### |(np.linalg.inv(K) @ pixel_point)| ={np.linalg.norm(np.linalg.inv(K) @ pixel_point)}" + ENDC)
+        world_point_camera_frame = (np.linalg.inv(K) @ pixel_point) * point[2]
+        world_point_world_frame = Rt @ np.vstack((world_point_camera_frame, np.array([1.0])))
+        world_point_world_frame = world_point_world_frame.squeeze()[:-1]
+ 
+    return world_point_world_frame

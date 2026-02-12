@@ -1,5 +1,6 @@
 import pybullet as p
 import numpy as np
+import os
 import math
 import config
 from config import OK, PROGRESS, FAIL, ENDC
@@ -162,8 +163,7 @@ class Robot:
             camera_position = config.head_camera_position
             camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
 
-        projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
-            
+        projection_matrix = np.array(p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)).reshape(4, 4, order="F")        
         # Special handling: head camera per-task behavior
         if camera == "head" and config.head_camera_use_debug_view:
             # GUI: copy view/projection from debug visualizer
@@ -176,7 +176,7 @@ class Robot:
                 yaw_deg=config.camera_yaw,
                 pitch_deg=config.camera_pitch,
             )            
-            self.logger.info(PROGRESS + f"_view_and_pos_from_spherical camera_position {camera_position}. config.head_camera_position {config.head_camera_position}" + ENDC)
+            #self.logger.info(PROGRESS + f"_view_and_pos_from_spherical camera_position {camera_position}. config.head_camera_position {config.head_camera_position}" + ENDC)
         else:
             rotation_matrix = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
             if camera == "wrist":
@@ -221,10 +221,13 @@ class Robot:
 
         depth_array = np.array(depth_buffer, dtype=np.float32).reshape(img_h, img_w)
 
+        LEGACY_NORMALIZE_DEPTH = False # TODO:False when moving to test like projection matrix     
+        GEMINI_TEST_DEPTH_IMAGE = False # TODO: Remove code for 65535 resolution if npy file is used 
+        
         if save_camera_image:
             rgb_image = Image.fromarray(rgb_array, mode="RGB")
             rgb_image.save(rgb_image_path)
-            GEMINI_TEST_DEPTH_IMAGE = False 
+            
             if GEMINI_TEST_DEPTH_IMAGE:
                 raw_depth = depth_array     
                 # 2. Scale to 16-bit integer range [0, 65535]
@@ -243,9 +246,18 @@ class Robot:
                 depth_u8 = (linear_depth * 255.0).astype(np.uint8)
                 depth_image = Image.fromarray(depth_u8, mode="L")
                 
-            depth_image.save(depth_image_path)
+            depth_image.save(depth_image_path)			
+            if LEGACY_NORMALIZE_DEPTH:
+                n = config.near_plane
+                f = config.far_plane
+                # Convert OpenGL depth to linear depth in [0,1]
+                z = depth_array
+                linear_depth = (2.0 * n * f) / (f + n - (2.0 * z - 1.0) * (f - n))
+                linear_depth = np.clip(linear_depth, 0.0, 1.0)
+                depth_array = linear_depth
+            np.save(os.path.splitext(depth_image_path)[0] + ".npy", depth_array.astype(np.float32))
 
-        return camera_position, camera_orientation_q
+        return camera_position, camera_orientation_q, view_matrix, projection_matrix
 
     def _debug_view_matrices_and_pos(self):
         """Return (view, projection, camera_pos) mirroring the GUI debug view.

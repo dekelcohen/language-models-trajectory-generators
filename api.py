@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import sys
 import torch
 import math
@@ -46,21 +46,22 @@ class API:
         segment in 2D --> transform to 3D world coordinates in Sim
         Workflow:
         ) Send to env CAPTURE_IMAGES message
-        ) env.py: robot.get_camera_image("head") 
-        ) def robot.py: get_camera_image
-            camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
-            if camera == "head" and config.head_camera_use_spherical_view: # Door task head camera
-              view_matrix, camera_position = self._view_and_pos_from_spherical(target pos, distance, yaw_deg, pitch_deg)
-              def _view_and_pos_from_spherical:
-                view_matrix = p.computeViewMatrixFromYawPitchRoll( ... )
-                  camera_position = <complex calc with target, distance, yaw_deg, pitch_deg>
-                  return view_matrix, camera_position
-            return camera_position, camera_orientation_q 
+          ) env.py: robot.get_camera_image("head") 
+          ) def robot.py: get_camera_image
+                camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
+                if camera == "head" and config.head_camera_use_spherical_view: # Door task head camera
+                  view_matrix, camera_position = self._view_and_pos_from_spherical(target pos, distance, yaw_deg, pitch_deg)
+                  def _view_and_pos_from_spherical:
+                    view_matrix = p.computeViewMatrixFromYawPitchRoll( ... )
+                      camera_position = <complex calc with target, distance, yaw_deg, pitch_deg>
+                      return view_matrix, camera_position
+                return camera_position, camera_orientation_q 
             
-          ) env::CAPTURE_IMAGES respond with head_camera_position=camera_position, head_camera_orientation_q=camera_orientation_q
+            ) env::CAPTURE_IMAGES respond with head_camera_position=camera_position, head_camera_orientation_q=camera_orientation_q
+              ) metaworld_server also returns: calib {K_head, K_wrist - intrinsic of head cam }
           ) utils.get_bounding_cube_from_point_cloud(head_camera_position, head_camera_orientation_q, K_override=None -if pybullet)
             ) contour_pixel_points = <countour of segmented object in 2d image>
-            ) get_world_point_world_frame(camera_position, camera_orientation_q, 'head', pixel_point for contour_pixel_points)
+            ) get_world_point_world_frame(camera_position, camera_orientation_q, 'head', pixel_point for contour_pixel_points, K_override)
                 K, Rt = get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=K_use)
                 elif camera == "head":
                   pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
@@ -76,15 +77,15 @@ class API:
         head_camera_position = head_camera_orientation_q = None
         wrist_camera_position = wrist_camera_orientation_q = None
         env_connection_message = None
-        self.calibration = None
+        self.cam_info = None
         if isinstance(recv_payload, list):
             if len(recv_payload) >= 6:
                 head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload[:5]
-                self.calibration = recv_payload[5]
+                self.cam_info = recv_payload[5]
             elif len(recv_payload) == 5:
                 head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message = recv_payload
             elif len(recv_payload) == 1:
-                # Only a status line; proceed with saved images but no poses/calibration
+                # Only a status line; proceed with saved images but no poses/cam_info
                 env_connection_message = recv_payload[0]
             else:
                 raise ValueError(f"Unexpected CAPTURE_IMAGES payload length: {len(recv_payload)}")
@@ -99,24 +100,15 @@ class API:
         self.wrist_camera_orientation_q = wrist_camera_orientation_q
 
         rgb_image_head = Image.open(config.rgb_image_head_path).convert("RGB")
-        depth_image_head = Image.open(config.depth_image_head_path).convert("L")
-        # Handle depth according to depth_format and backend calibration
+        # Prefer raw depth from .npy if available; fall back to 8-bit image
+        depth_npy_path = os.path.splitext(config.depth_image_head_path)[0] + ".npy"
         depth_format = getattr(self.args, "depth_format", "norm_1m")
-        depth_array = np.array(depth_image_head) / 255.
-        if getattr(self, "calibration", None) and isinstance(self.calibration, dict):
-            head_cal = self.calibration.get("head")
-            if head_cal and self.calibration.get("depth_encoding") == "opengl":
-                znear = float(head_cal.get("znear", 0.01))
-                zfar = float(head_cal.get("zfar", 100.0))
-                d = depth_array.astype(np.float64)
-                Z = (znear * zfar) / (zfar - d * (zfar - znear))
-                if depth_format == "raw":
-                    depth_array = np.clip(Z, znear, zfar)
-                elif depth_format == "norm_zfar":
-                    depth_array = np.clip(Z / zfar, 0.0, 1.0)
-                else:  # norm_1m
-                    depth_array = np.clip(Z, 0.0, 1.0)
-
+        if os.path.exists(depth_npy_path):
+            depth_array = np.load(depth_npy_path).astype(np.float32)
+        else:
+            depth_image_head = Image.open(config.depth_image_head_path).convert("L")
+            depth_array = (np.array(depth_image_head).astype(np.float32)) / 255.0
+        
         if self.segmentation_count == 0:
             xmem_image = Image.fromarray(np.zeros_like(depth_array)).convert("L")
             xmem_image.save(config.xmem_input_path)
@@ -150,12 +142,6 @@ class API:
 
         masks = utils.get_segmentation_mask(model_predictions, config.segmentation_threshold)
 
-        # If calibration available from server, pass head K to utils for accurate projection
-        K_head = None
-        if getattr(self, "calibration", None) and isinstance(self.calibration, dict):
-            head_cal = self.calibration.get("head")
-            if head_cal and head_cal.get("K"):
-                K_head = head_cal.get("K")
 
         self.logger.info(PROGRESS + f"************************ Before bounding_cubes_world_coordinates len(masks)={len(masks)}" + ENDC)
         bounding_cubes_world_coordinates, bounding_cubes_orientations = utils.get_bounding_cube_from_point_cloud(            
@@ -165,7 +151,7 @@ class API:
             self.head_camera_position,
             self.head_camera_orientation_q,
             self.segmentation_count,
-            K_override=K_head,
+            cam_info=self.cam_info,
         )
 
         utils.save_xmem_image(masks)
@@ -293,13 +279,6 @@ class API:
                     object_mask[object_mask == object] = True
                     object_mask = torch.Tensor(object_mask)
 
-                    # Reuse head calibration if available
-                    K_head = None
-                    if getattr(self, "calibration", None) and isinstance(self.calibration, dict):
-                        head_cal = self.calibration.get("head")
-                        if head_cal and head_cal.get("K"):
-                            K_head = head_cal.get("K")
-
                     bounding_cubes, orientations = utils.get_bounding_cube_from_point_cloud(
                         rgb_image,
                         [object_mask],
@@ -307,7 +286,7 @@ class API:
                         self.head_camera_position,
                         self.head_camera_orientation_q,
                         object - 1,
-                        K_override=K_head,
+                        cam_info=self.cam_info,
                     )
 
                     if len(bounding_cubes) == 0:
