@@ -163,7 +163,8 @@ class Robot:
             camera_position = config.head_camera_position
             camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
 
-        projection_matrix = np.array(p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)).reshape(4, 4, order="F")        
+        projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
+        # print(PROGRESS + f"get_camera_image projection_matrix.type: {type(projection_matrix)} projection_matrix {projection_matrix}"+ ENDC)
         # Special handling: head camera per-task behavior
         if camera == "head" and config.head_camera_use_debug_view:
             # GUI: copy view/projection from debug visualizer
