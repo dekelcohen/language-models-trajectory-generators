@@ -658,7 +658,7 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
         # Capture and save the head camera image using the debug view
         head_stats = {"size": None, "mean": None, "var": None}
         try:
-            head_pos, head_q = robot.get_camera_image(
+            head_pos, head_q, view_head, proj_head = robot.get_camera_image(
                 "head",
                 env,
                 save_camera_image=True,
