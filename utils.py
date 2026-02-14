@@ -100,7 +100,15 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
     bounding_cubes = []
     bounding_cubes_orientations = []
     logger.info(PROGRESS + f"------------------ Enter get_bounding_cube_from_point_cloud(...)" + ENDC)
-    
+    if os.environ.get("DEBUG_PINHOLE", "0") == "1":
+        px = 156
+        py = 72
+        pz = depth_array[py, px] # TODO: Fix: Correct depth as in test: 0.993040
+        point=[px, py, pz]    
+        logger.info(PROGRESS + f"------------------ Test 2D Known pixel {point}--> 3D world" + ENDC)
+        get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, point=point, cam_info=cam_info)
+        return
+        
     for i, mask in enumerate(masks):
 
         save_mask_image(mask, config.bounding_cube_mask_image_path.format(object=segmentation_count, mask=i))
@@ -202,6 +210,24 @@ def get_world_point_world_frame(camera_position, camera_orientation_q, camera, i
     image_width, image_height = image.size
 
     K, Rt, projection_matrix, view_matrix = get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=cam_info)
+    if os.environ.get("DEBUG_PINHOLE", "0") == "1":
+        # Observability: log view/projection and pixel depth for this query
+        try:
+            logger.info(PROGRESS + f"[get_world_point_world_frame] Projected pixel(u={point[0]}, v={point[1]}), depth={float(point[2]):.6f}" + ENDC)
+            if projection_matrix is not None:
+                logger.info(PROGRESS + f"[get_world_point_world_frame] projection_matrix.shape: {projection_matrix.shape} projection_matrix: \n{projection_matrix}" + ENDC)
+            else:
+                logger.info(PROGRESS + "[get_world_point_world_frame] projection_matrix: None (using K intrinsics)" + ENDC)
+            if view_matrix is not None:
+                logger.info(PROGRESS + f"[get_world_point_world_frame] view_matrix.shape: {view_matrix.shape} view_matrix  =\n{view_matrix}" + ENDC)
+            else:
+                logger.info(PROGRESS + "[get_world_point_world_frame] view_matrix: None" + ENDC)
+        except Exception as e:
+            try:
+                print("[utils.get_world_point_world_frame] log failure:", e)
+            except Exception:
+                pass
+
 
     if isinstance(cam_info, dict) and cam_info.get("new_3d_proj", False):
         # --- Implementation based on TestCameraUnprojection ---
@@ -235,6 +261,8 @@ def get_world_point_world_frame(camera_position, camera_orientation_q, camera, i
         # 5. Perspective Divide
         # Recover Cartesian [x, y, z] from Homogeneous [xw, yw, zw, w]
         world_point_world_frame = world_hom[:3] / world_hom[3]
+        if os.environ.get("DEBUG_PINHOLE", "0") == "1":
+            logger.info(PROGRESS + f"[get_world_point_world_frame] 3D world point: {world_point_world_frame}" + ENDC)
 
     else:        
         # Legacy PyBullet path: recenter and apply axis flips

@@ -105,6 +105,13 @@ class API:
         depth_format = getattr(self.args, "depth_format", "norm_1m")
         if os.path.exists(depth_npy_path):
             depth_array = np.load(depth_npy_path).astype(np.float32)
+            if os.environ.get("DEBUG_PINHOLE", "0") == "1":
+                ############ Test depth ##########
+                px = 156
+                py = 72
+                pz = depth_array[py, px]
+                point=[px, py, pz]
+                self.logger.info(PROGRESS + f"**************** api.detect_object: After load .npy depth test  {point}" + ENDC)
         else:
             depth_image_head = Image.open(config.depth_image_head_path).convert("L")
             depth_array = (np.array(depth_image_head).astype(np.float32)) / 255.0

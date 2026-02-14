@@ -57,6 +57,10 @@ class TestCameraUnprojection(unittest.TestCase):
         # Combined Model-View-Projection (MVP) Matrix
         VP = proj_matrix @ view_matrix
 
+        # --- Debug: Log camera matrices ---
+        print(f"[Test] view_matrix.shape: {view_matrix.shape} view_matrix:\n{view_matrix}")
+        print(f"[Test] proj_matrix.shape {proj_matrix.shape}: proj_matrix\n{proj_matrix}")
+
         # --- 5. Project Known Point to find the Pixel ---
         # We project the 3D center to 2D to find exactly which pixel corresponds to it.
         # This ensures we don't test a pixel that misses the object.
@@ -117,20 +121,28 @@ class TestCameraUnprojection(unittest.TestCase):
         # ensuring we don't hit an aliased edge or empty background pixel.
         # NOTE: In production (segmentation masks), do not use this loop. Instead, 
         # erode the mask by 1-2 pixels to avoid edges, then sample directly.
+        # USE_DEPTH_AVG_WINDOW = False to disable window and directly get pixel depth 
         px = np.clip(pixel_x, 0, width-1)
         py = np.clip(pixel_y, 0, height-1)
         
-        window = 1
-        y_min, y_max = max(0, py-window), min(height, py+window+1)
-        x_min, x_max = max(0, px-window), min(width, px+window+1)
-        patch = depth_data[y_min:y_max, x_min:x_max]
-        
-        # Filter out background values (typically 1.0) to find the closest object surface
-        valid_depths = patch[patch < 0.99]
+        USE_DEPTH_AVG_WINDOW = False
+        if USE_DEPTH_AVG_WINDOW:
+            window = 1
+            y_min, y_max = max(0, py-window), min(height, py+window+1)
+            x_min, x_max = max(0, px-window), min(width, px+window+1)
+            patch = depth_data[y_min:y_max, x_min:x_max]
+            
+            # Filter out background values (typically 1.0) to find the closest object surface
+            valid_depths = patch[patch < 0.99]
+        else:
+            valid_depths = []
         if len(valid_depths) > 0:
             real_depth_val = np.min(valid_depths)
         else:
             real_depth_val = depth_data[py, px]
+
+        # --- Debug: Log pixel + depth ---
+        print(config.PROGRESS + f"[Test] Pixel (x={pixel_x}, y={pixel_y}), depth={real_depth_val:.6f}" + config.ENDC)
 
         # --- 8. Unproject using REAL Depth (The Core Logic) ---
         
