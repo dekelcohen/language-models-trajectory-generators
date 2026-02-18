@@ -8,7 +8,7 @@ from config import OK, PROGRESS, FAIL, ENDC
 from PIL import Image
 from shapely.geometry import MultiPoint, Polygon, polygon
 
-logger = None 
+logger = None
 def get_segmentation_mask(model_predictions, segmentation_threshold):
 
     masks = []
