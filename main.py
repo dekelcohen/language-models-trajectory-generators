@@ -212,6 +212,8 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
     parser.add_argument("--track-provider", choices=["xmem", "none"], default="xmem", help="tracking provider for success verification; set to 'none' to disable XMem usage")
+    parser.add_argument("--add-px", type=int, default=None, help="manual X pixel offset for segmentation bbox")
+    parser.add_argument("--add-py", type=int, default=None, help="manual Y pixel offset for segmentation bbox")
     args = parser.parse_args()
 
     # Logging

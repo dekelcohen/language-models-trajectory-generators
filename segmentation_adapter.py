@@ -1,4 +1,4 @@
-"""
+﻿"""
 Segmentation provider adapter.
 
 Required installs for LangSAM provider:
@@ -14,8 +14,15 @@ from __future__ import annotations
 import os
 import tempfile
 from typing import List, Tuple
-
 import numpy as np
+
+# Logger
+from config import OK, PROGRESS, FAIL, ENDC
+logger = None
+
+# Optional pixel offsets supplied via CLI (wired from api.py)
+add_px = None
+add_py = None
 
 
 def _sam3_predict(
@@ -119,6 +126,26 @@ def _moondream_predict(image_pil, prompts: List[str]):
             continue
         # Ensure integer pixel coords for downstream drawing
         x1, y1, x2, y2 = [int(round(float(v))) for v in bbox_px]
+        # Workaround to allow manual control in tests over segmentation bbox 
+        # Optional manual bbox pixel offsets from globals (set via API)
+        if add_px is not None:
+            try:
+                _add_px = int(add_px)
+                x1 += _add_px
+                #x2 += _add_px
+                if logger:
+                    logger.info(PROGRESS + f"Manual bbox X offset: +{_add_px} --> x1={x1} y1={y1} x2={x2} y2={y2} " + ENDC)
+            except Exception as e:
+                print(f"Error using add_px={add_px}. {e}")
+        if add_py is not None:
+            try:
+                _add_py = int(add_py)
+                #y1 += _add_py
+                y2 += _add_py
+                if logger:
+                    logger.info(PROGRESS + f"Manual bbox Y offset: +{_add_py} --> x1={x1} y1={y1} x2={x2} y2={y2} " + ENDC)
+            except Exception as e:
+                print(f"Error using add_py={add_py}. {e}")
         x1 = max(0, min(W, x1)); x2 = max(0, min(W, x2))
         y1 = max(0, min(H, y1)); y2 = max(0, min(H, y2))
         if x2 <= x1 or y2 <= y1:

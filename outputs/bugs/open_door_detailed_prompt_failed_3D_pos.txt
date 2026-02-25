@@ -1,9 +1,14 @@
+TODO: Analyze Last Failure 19/02
+---------------------------------------
+(vlm_traj) E:\Robotics\VLM_Robotics\language-models-trajectory-generators>python main.py --task door -lm azure-gpt-5 -r franka --sim pybullet --seg-provider moondream --track-provider none --delete-images --add-px 20 --add-py -3
+pybullet build time: Dec 29 2025 23:47:54
+[INFO/MainProcess] CUDA not available. Please connect to a GPU instance if possible.
+pybullet build time: Dec 29 2025 23:47:54
+[INFO/EnvProcess] child process calling self.run()
+[INFO/EnvProcess] Setting up environment...
 [INFO/MainProcess] Finished setting up environment! sim=pybullet conn=p.DIRECT head_debug_view=False dbg_cam_available=True dbg_tuple_len=12 dbg(yaw=0.0, pitch=0.0, dist=0.0, target=[0.0, 0.0, 0.0]) cfg(yaw=190.0, pitch=-40.0, dist=1.0, target=[0.0, 0.64, 0.7]) head_img(size=[256, 256, 3], mean=203.26524861653647, var=2701.6621057365296)
 [INFO/MainProcess] Env state: {"door_id": 1, "door_hinge_index": 1, "latch_index": 2, "door_handle_latch": 2, "door_handle_pos": [-0.07745519744833454, -0.00880230021590278, 0.672376], "latch_pos": [-0.07745519744833454, -0.00880230021590278, 0.672376], "hinge_pos": [-0.21654298331956742, -0.14765775679373436, 0.697376]}
-User prompt 
-===========================================
-Enter a command: open the door: 1) safely approach from above: the lever is 15cm to the right of the 'door handle' position 2) rotate and move the gripper down so 1 jaw is between the door handle (lever) and the door itself 3) pull to open door.
-============================================
+Enter a command: open the door: 1) Calc mid section of door handle lever 2) safely approach from high above 3) rotate the gripper so the 2 jaws are from the 2 sides of teh lever 4) and move the gripper down so 1 jaw is between the door handle (lever) and the door itself 4) pull large distane to fully open door.
 [INFO/MainProcess] STARTING TASK...
 [INFO/MainProcess] Env state: {"door_id": 1, "door_hinge_index": 1, "latch_index": 2, "door_handle_latch": 2, "door_handle_pos": [-0.07745519744833454, -0.00880230021590278, 0.672376], "latch_pos": [-0.07745519744833454, -0.00880230021590278, 0.672376], "hinge_pos": [-0.21654298331956742, -0.14765775679373436, 0.697376]}
 [INFO/MainProcess] Generating ChatGPT output...
@@ -66,7 +71,7 @@ Tasks:
 Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
 Stop generation after each code block to wait for it to finish executing before continuing with your plan.
 
-The user command is "open the door: 1) safely approach from above: the lever is 15cm to the right of the 'door handle' position 2) rotate and move the gripper down so 1 jaw is between the door handle (lever) and the door itself 3) pull to open door.".
+The user command is "open the door: 1) Calc mid section of door handle lever 2) safely approach from high above 3) rotate the gripper so the 2 jaws are from the 2 sides of teh lever 4) and move the gripper down so 1 jaw is between the door handle (lever) and the door itself 4) pull large distane to fully open door.".
 
 Here is an in context example of multiple LLM responses for each step
 --------------------------------------------------------------------------
@@ -184,41 +189,82 @@ trajectory_5 = generate_linear_trajectory(grasp_pose, lift_pose)
 execute_trajectory(trajectory_5)
 
 -------------------- End of Sample -----------------
+
 Instructions:
 Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
 Stop generation after each code block to wait for it to finish executing before continuing with your plan.
 
 
 assistant:
-I will interact with the lever portion of the door handle. The most suitable part for the gripper is the lever near its base: I will insert one jaw between the lever and the door surface so the lever is pinched between one jaw below and the other above, enabling a controlled pull to open the door.
+To interact with an object part: We will use the midsection of the door handle lever as the primary grasp target. Grasping at the lever’s midsection provides balanced clearance on both sides for the gripper jaws and helps avoid interference with the lever base/rosette on the door.
 
-Next, I will detect the necessary objects in the environment to get precise positions, orientations, and dimensions.
+We will first localize the lever. Then we will also detect the door to infer its plane/normal for the pull direction and to compute a safe lateral offset so one jaw can sit between the lever and the door plane.
+
+Now detecting the lever:
 
 ```python
-detect_object("door handle")
+detect_object("door handle lever")
 ```
 [INFO/MainProcess] Finished generating ChatGPT output!
 [INFO/MainProcess] Capturing head and wrist camera images...
 [INFO/MainProcess] Finished capturing head camera image!
 [INFO/MainProcess] Segmenting head camera image...
+[INFO/MainProcess] Manual bbox X offset: +20 --> x1=180 y1=66 x2=199 y2=86
+[INFO/MainProcess] Manual bbox Y offset: +-3 --> x1=180 y1=66 x2=199 y2=83
 [INFO/MainProcess] Finished segmenting head camera image!
 [INFO/MainProcess] Saved segmentation overlay to ./images\seg_overlay_moondream_0.png
 [INFO/MainProcess] ************************ Before bounding_cubes_world_coordinates len(masks)=1
 [INFO/MainProcess] ------------------ Enter get_bounding_cube_from_point_cloud(...)
-[INFO/MainProcess] [Contour] mean pixel_point (u,v,depth)=[179.0, 75.5, 0.9934303566321239]
-[INFO/MainProcess] ++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)=666
+[INFO/MainProcess] [Contour] mean pixel_point (u,v,depth)=[189.0, 74.0, 0.9937017723625782]
+[INFO/MainProcess] ++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)=255
 [INFO/MainProcess] Adding bounding cubes to the environment...
 [INFO/MainProcess] Finished adding bounding cubes to the environment!
+[INFO/MainProcess] Projected 2D pixel of door handle lever Position: [188, 75]
+[INFO/MainProcess] Adding bounding cubes to the environment...
 [INFO/MainProcess] Generating ChatGPT output...
 user:
 Print statement output:
-Position of door handle: [-0.229, -0.001, 0.673]
+Position of door handle lever: [-0.296, -0.053, 0.644]
 Dimensions:
-Width: 0.249
-Length: 0.121
-Height: 0.723
-Orientation along shorter side (length): -0.714
-Orientation along longer side (width): 0.857
+Width: 0.261
+Length: 0.107
+Height: 0.235
+Orientation along shorter side (length): -0.036
+Orientation along longer side (width): 1.534
+
+
+
+
+assistant:
+```python
+detect_object("door")
+```
+[INFO/MainProcess] Finished generating ChatGPT output!
+[INFO/MainProcess] Capturing head and wrist camera images...
+[INFO/MainProcess] Finished capturing head camera image!
+[INFO/MainProcess] Segmenting head camera image...
+[INFO/MainProcess] Manual bbox X offset: +20 --> x1=154 y1=14 x2=217 y2=111
+[INFO/MainProcess] Manual bbox Y offset: +-3 --> x1=154 y1=14 x2=217 y2=108
+[INFO/MainProcess] Finished segmenting head camera image!
+[INFO/MainProcess] Saved segmentation overlay to ./images\seg_overlay_moondream_1.png
+[INFO/MainProcess] ************************ Before bounding_cubes_world_coordinates len(masks)=1
+[INFO/MainProcess] ------------------ Enter get_bounding_cube_from_point_cloud(...)
+[INFO/MainProcess] [Contour] mean pixel_point (u,v,depth)=[185.0, 60.5, 0.9943173407063854]
+[INFO/MainProcess] ++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)=5612
+[INFO/MainProcess] Adding bounding cubes to the environment...
+[INFO/MainProcess] Finished adding bounding cubes to the environment!
+[INFO/MainProcess] Projected 2D pixel of door Position: [184, 31]
+[INFO/MainProcess] Adding bounding cubes to the environment...
+[INFO/MainProcess] Generating ChatGPT output...
+user:
+Print statement output:
+Position of door: [-0.228, -0.167, 0.893]
+Dimensions:
+Width: 0.585
+Length: 0.101
+Height: 0.945
+Orientation along shorter side (length): -0.712
+Orientation along longer side (width): 0.859
 
 
 
@@ -226,88 +272,108 @@ Orientation along longer side (width): 0.857
 assistant:
 Approach decision and plan:
 
-Only one door handle is detected. The lever is specified to be 15 cm to the right of the handle position. With the x-axis increasing to the left, “to the right” means a negative x-offset. I will therefore use:
-- Lever position = handle position + [-0.15, 0.0, 0.0]
+- Instances: Only one door handle lever and one door were detected, so we will interact with those.
+- Best grasp point: The midsection of the lever handle. This provides clearance from the rosette/base and equal leverage.
+- Gripper orientation: Align the gripper jaws parallel to the lever’s long axis (lever long-axis angle = 1.534 rad). This places the two jaws on the two sides of the lever.
+- Door plane and pull direction: Use the door’s shorter-side (thickness) orientation (-0.712 rad) as the door-normal direction. Choose the sign so the pull is toward us (positive y), for a natural “pull-to-open.”
+- Insertion strategy: Approach from high above the handle center, then offset slightly toward the door plane before descending so that the inner jaw sits between the lever and the door (a small in-plane offset toward the door plane, then a controlled vertical descent).
+- Collision avoidance: All XY moves happen at a safe hover height above the top surface; descents are strictly along Z. Extra clearance added above the lever top.
+- Pull: After seating one jaw between the lever and door, pull along the chosen door-normal direction by a large distance to open the door, then lift slightly to clear.
 
-Best approach:
-- Move to a safe hover pose above the handle first, at the current high z to avoid collisions.
-- Rotate the gripper so the jaws are perpendicular to the lever’s long direction (angle_long + pi/2), and translate over the lever while descending to a pre-insert height.
-- Continue descending a few millimeters to insert one jaw into the gap between the lever and the door.
-- Close the gripper to latch onto the lever.
-- Pull towards us along +y to open the door.
+Step-by-step trajectory plan:
+1) Move to a safe hover above the lever center at pre-grasp height; rotate to align jaws parallel to lever’s long axis.
+2) Ensure gripper is open.
+3) While at hover height, shift slightly toward the door plane (so inner jaw will sit between door and lever).
+4) Descend to just above the lever top.
+5) Descend to the lever midsection (target contact height).
+6) Small in-plane push toward the door plane to ensure the inner jaw is between the lever and door.
+7) Close the gripper to secure the lever if graspable; otherwise the jaw-hook still provides purchase.
+8) Pull along the outward door-normal direction by a large distance to open the door.
+9) Lift slightly to clear, then finish.
 
-Collision avoidance:
-- All XY motion is performed at a safe high z first.
-- The descent to insert the jaw is small and controlled to avoid contact with the door surface.
+Now, we will implement this plan.
 
-Detailed step-by-step plan:
-1) Compute lever position and target yaw. Move in a straight line from the current pose to a safe hover directly above the handle.
-2) Open the gripper to ensure clearance for insertion.
-3) Rotate and move from hover-above-handle to pre-insert above the lever (hover a few centimeters above).
-4) Descend a few millimeters to insert one jaw between the lever and the door.
-5) Close the gripper to secure the lever.
-6) Pull along +y (towards us) to open the door.
-7) Open the gripper to release.
-8) Retract upward to a safe hover height.
-9) Mark the task as completed.
+Step 1: Compute geometry, plan hover pose, and move to safe hover above the lever center
 
-Step 1: Move to a safe hover above the handle (straight-line trajectory in XYZ, keep yaw = 0)
 ```python
-import math
-
-# Utility: wrap angle to [-pi, pi]
-def wrap_to_pi(theta: float) -> float:
-    while theta > math.pi:
-        theta -= 2 * math.pi
-    while theta < -math.pi:
-        theta += 2 * math.pi
-    return theta
-
-# Utility: generate straight-line end-effector trajectory
-# start_pose/end_pose: [x, y, z, yaw], num_points: number of interpolated waypoints (>=5)
-def generate_linear_trajectory(start_pose, end_pose, num_points=9):
+# Utility: Generate a straight-line trajectory in task space between two 4D poses
+def generate_linear_trajectory(start_pose, end_pose, num_points=7):
+    """
+    Generate a straight-line trajectory in Cartesian space for the end-effector.
+    Params:
+      - start_pose: [x, y, z, theta]
+      - end_pose:   [x, y, z, theta]
+      - num_points: number of interpolation points (>=5 recommended)
+    Returns:
+      - list of [x, y, z, theta] poses
+    """
     sx, sy, sz, s_theta = start_pose
     ex, ey, ez, e_theta = end_pose
     traj = []
     for i in range(num_points):
         t = i / (num_points - 1)
-        # Interpolate yaw linearly; assume small delta (we will avoid wrapping issues by ensuring deltas < pi)
-        yaw_i = s_theta + (e_theta - s_theta) * t
         traj.append([
             sx + (ex - sx) * t,
             sy + (ey - sy) * t,
             sz + (ez - sz) * t,
-            yaw_i
+            s_theta + (e_theta - s_theta) * t
         ])
     return traj
 
-# Perception-derived values
-handle_pos = [-0.229, -0.001, 0.673]
-angle_short = -0.714
-angle_long = 0.857
+# Detected lever (handle) properties
+lever_pos = [-0.296, -0.053, 0.644]  # center position
+lever_width = 0.261
+lever_length = 0.107
+lever_height = 0.235
+lever_angle_long = 1.534    # orientation along longer side (width)
+lever_angle_short = -0.036  # orientation along shorter side (length)
 
-# Lever is 15 cm to the right (negative x direction, since x increases to the left)
-lever_pos = [handle_pos[0] - 0.150, handle_pos[1], handle_pos[2]]
+# Detected door properties
+door_pos = [-0.228, -0.167, 0.893]
+door_width = 0.585
+door_length = 0.101   # treat as door thickness; its orientation indicates door normal direction
+door_height = 0.945
+door_angle_normal = -0.712  # door "shorter side" orientation ~ door normal
 
-# Gripper orientation: jaws perpendicular to the lever's long axis
-target_yaw = wrap_to_pi(angle_long + math.pi / 2.0)  # = 0.857 + pi/2 ≈ 2.428 rad
-
-# Current robot state (provided)
+# Robot current state (from environment setup)
 current_pose = [-0.3887993829569245, 0.6538050429520935, 0.9597697721155961, 0.0]
 
-# Safe hover z: keep current high z to avoid obstacles during XY motion
-z_hover = current_pose[2]
+# Compute vertical approach heights
+lever_top_z = lever_pos[2] + lever_height / 2.0
+pre_grasp_clearance = 0.150
+approach_clearance = 0.010
+pre_grasp_z = lever_top_z + pre_grasp_clearance
+approach_z = lever_top_z + approach_clearance
+contact_z = lever_pos[2]  # midsection of the lever
 
-# Stage 1 hover above the handle (no rotation change yet)
-hover_handle_pose = [handle_pos[0], handle_pos[1], z_hover, 0.0]
+# Compute door-normal pull direction in XY
+import math
+n_dx = math.cos(door_angle_normal)
+n_dy = math.sin(door_angle_normal)
+# Choose the sign so that pull is toward us (positive y)
+if n_dy < 0:
+    n_dx, n_dy = -n_dx, -n_dy
 
-# Print key computed values (3 decimals)
-print(f"Lever pos: [{lever_pos[0]:.3f}, {lever_pos[1]:.3f}, {lever_pos[2]:.3f}]")
-print(f"Target yaw: {target_yaw:.3f} rad")
-print(f"Hover z: {z_hover:.3f} m")
+# Insertion and pull distances
+d_insert = 0.020   # small in-plane offset toward door plane so inner jaw sits between door and lever
+d_wedge = 0.010    # micro push to ensure seating
+pull_dist = 0.350  # large pull to fully open
 
-# Trajectory 1: current -> hover above handle
-trajectory_1 = generate_linear_trajectory(current_pose, hover_handle_pose, num_points=9)
+# Gripper orientation: jaws parallel to lever's long axis so they sit on two sides of the lever
+grip_theta = lever_angle_long
+
+# Log key computed values (3 decimals as required)
+print(f"lever_top_z: {lever_top_z:.3f}")
+print(f"pre_grasp_z: {pre_grasp_z:.3f}")
+print(f"approach_z: {approach_z:.3f}")
+print(f"contact_z: {contact_z:.3f}")
+print(f"pull_dir: ({n_dx:.3f}, {n_dy:.3f})")
+print(f"grip_theta: {grip_theta:.3f}")
+print(f"d_insert: {d_insert:.3f}, d_wedge: {d_wedge:.3f}, pull_dist: {pull_dist:.3f}")
+
+# Step 1: Move to a safe hover directly above the lever center with desired orientation
+hover_pose = [lever_pos[0], lever_pos[1], pre_grasp_z, grip_theta]
+trajectory_1 = generate_linear_trajectory(current_pose, hover_pose, num_points=7)
 execute_trajectory(trajectory_1)
 ```
 [INFO/MainProcess] Finished generating ChatGPT output!
@@ -316,16 +382,21 @@ execute_trajectory(trajectory_1)
 [INFO/MainProcess] Generating ChatGPT output...
 user:
 Print statement output:
-Lever pos: [-0.379, -0.001, 0.673]
-Target yaw: 2.428 rad
-Hover z: 0.960 m
+lever_top_z: 0.762
+pre_grasp_z: 0.912
+approach_z: 0.772
+contact_z: 0.644
+pull_dir: (-0.757, 0.653)
+grip_theta: 1.534
+d_insert: 0.020, d_wedge: 0.010, pull_dist: 0.350
 
 
 
 assistant:
 [INFO/EnvProcess] Finished adding trajectory points to the environment!
 [INFO/EnvProcess] Finished executing generated trajectory!
-Step 2: Open the gripper to ensure maximum clearance for insertion
+Step 2: Open the gripper before approaching/inserting.
+
 ```python
 open_gripper()
 ```
@@ -336,18 +407,17 @@ user:
 
 assistant:
 [INFO/EnvProcess] Finished opening gripper!
-Step 3: Rotate and translate to hover directly above the lever at safe height before descending
+Step 3: At hover height, shift slightly toward the door plane so the inner jaw will be positioned to slot between the lever and door during descent.
+
 ```python
-import math
-
-# Stage 2: hover above the lever at safe z with final yaw for insertion
-hover_lever_pose = [lever_pos[0], lever_pos[1], z_hover, target_yaw]
-
-# Print for verification
-print(f"Hover above lever pose: [{hover_lever_pose[0]:.3f}, {hover_lever_pose[1]:.3f}, {hover_lever_pose[2]:.3f}, {hover_lever_pose[3]:.3f}]")
-
-# Trajectory 2: hover above handle -> hover above lever with final yaw
-trajectory_2 = generate_linear_trajectory(hover_handle_pose, hover_lever_pose, num_points=9)
+# Step 3: Small in-plane shift toward the door plane at hover height
+insert_hover_pose = [
+    lever_pos[0] - n_dx * d_insert,
+    lever_pos[1] - n_dy * d_insert,
+    pre_grasp_z,
+    grip_theta
+]
+trajectory_2 = generate_linear_trajectory(hover_pose, insert_hover_pose, num_points=7)
 execute_trajectory(trajectory_2)
 ```
 [INFO/MainProcess] Finished generating ChatGPT output!
@@ -355,29 +425,21 @@ execute_trajectory(trajectory_2)
 [INFO/MainProcess] Executing generated trajectory...
 [INFO/MainProcess] Generating ChatGPT output...
 user:
-Print statement output:
-Hover above lever pose: [-0.379, -0.001, 0.960, 2.428]
-
-
 
 assistant:
 [INFO/EnvProcess] Finished adding trajectory points to the environment!
 [INFO/EnvProcess] Finished executing generated trajectory!
-Step 4: Descend to a controlled pre-insert height above the lever before inserting a jaw underneath
+Step 4: Descend along Z to just above the lever top at the insertion-aligned XY
+
 ```python
-# Heights for approach and insertion
-pre_insert_z = lever_pos[2] + 0.050   # 5 cm above lever center
-insert_z = lever_pos[2] - 0.010       # 1 cm below lever center to tuck one jaw under the lever
-
-# Poses
-approach_pose = [lever_pos[0], lever_pos[1], pre_insert_z, target_yaw]
-
-# Print key heights
-print(f"Pre-insert z: {pre_insert_z:.3f} m")
-print(f"Insert z: {insert_z:.3f} m")
-
-# Trajectory 3: hover above lever -> pre-insert above lever
-trajectory_3 = generate_linear_trajectory(hover_lever_pose, approach_pose, num_points=9)
+# Step 4: Move down to just above the lever top at the insertion XY
+approach_pose = [
+    insert_hover_pose[0],
+    insert_hover_pose[1],
+    approach_z,
+    grip_theta
+]
+trajectory_3 = generate_linear_trajectory(insert_hover_pose, approach_pose, num_points=7)
 execute_trajectory(trajectory_3)
 ```
 [INFO/MainProcess] Finished generating ChatGPT output!
@@ -385,25 +447,21 @@ execute_trajectory(trajectory_3)
 [INFO/MainProcess] Executing generated trajectory...
 [INFO/MainProcess] Generating ChatGPT output...
 user:
-Print statement output:
-Pre-insert z: 0.723 m
-Insert z: 0.663 m
-
-
 
 assistant:
 [INFO/EnvProcess] Finished adding trajectory points to the environment!
 [INFO/EnvProcess] Finished executing generated trajectory!
-Step 5: Descend from pre-insert height to insert height so one jaw can tuck under the lever
+Step 5: Descend from just-above-top to the lever midsection (contact height)
+
 ```python
-# Define the insert pose at the lower z to place one jaw under the lever
-insert_pose = [lever_pos[0], lever_pos[1], insert_z, target_yaw]
-
-# Print for verification
-print(f"Insert pose: [{insert_pose[0]:.3f}, {insert_pose[1]:.3f}, {insert_pose[2]:.3f}, {insert_pose[3]:.3f}]")
-
-# Trajectory 4: pre-insert -> insert
-trajectory_4 = generate_linear_trajectory(approach_pose, insert_pose, num_points=9)
+# Step 5: Descend to the lever midsection (contact height)
+contact_pose = [
+    approach_pose[0],
+    approach_pose[1],
+    contact_z,
+    grip_theta
+]
+trajectory_4 = generate_linear_trajectory(approach_pose, contact_pose, num_points=7)
 execute_trajectory(trajectory_4)
 ```
 [INFO/MainProcess] Finished generating ChatGPT output!
@@ -411,15 +469,34 @@ execute_trajectory(trajectory_4)
 [INFO/MainProcess] Executing generated trajectory...
 [INFO/MainProcess] Generating ChatGPT output...
 user:
-Print statement output:
-Insert pose: [-0.379, -0.001, 0.663, 2.428]
-
-
 
 assistant:
 [INFO/EnvProcess] Finished adding trajectory points to the environment!
 [INFO/EnvProcess] Finished executing generated trajectory!
-Step 6: Close the gripper to secure the lever
+Step 6: Apply a small in-plane push toward the door plane at contact height to seat the inner jaw between the lever and the door.
+
+```python
+# Step 6: Small in-plane push toward the door plane (opposite the outward normal) at contact height
+wedge_pose = [
+    contact_pose[0] - n_dx * d_wedge,
+    contact_pose[1] - n_dy * d_wedge,
+    contact_pose[2],
+    grip_theta
+]
+trajectory_5 = generate_linear_trajectory(contact_pose, wedge_pose, num_points=7)
+execute_trajectory(trajectory_5)
+```
+[INFO/MainProcess] Finished generating ChatGPT output!
+[INFO/MainProcess] Adding trajectory points to the environment...
+[INFO/MainProcess] Executing generated trajectory...
+[INFO/MainProcess] Generating ChatGPT output...
+user:
+
+assistant:
+[INFO/EnvProcess] Finished adding trajectory points to the environment!
+[INFO/EnvProcess] Finished executing generated trajectory!
+Step 7: Close the gripper to secure the lever (or maintain jaw-hook purchase)
+
 ```python
 close_gripper()
 ```
@@ -430,42 +507,17 @@ user:
 
 assistant:
 [INFO/EnvProcess] Finished closing gripper!
-Step 7a: Begin the pull by moving slightly towards us (+y) to preload and start opening the door, keeping z and yaw constant
+Step 8: Pull along the outward door-normal direction by a large distance to open the door
+
 ```python
-# Small initial pull distance towards us (+y)
-pre_pull_dy = 0.050
-pre_pull_pose = [insert_pose[0], insert_pose[1] + pre_pull_dy, insert_pose[2], target_yaw]
-
-print(f"Initial pull dy: {pre_pull_dy:.3f} m")
-
-# Trajectory 5: insert -> small pre-pull
-trajectory_5 = generate_linear_trajectory(insert_pose, pre_pull_pose, num_points=7)
-execute_trajectory(trajectory_5)
-```
-[INFO/MainProcess] Finished generating ChatGPT output!
-[INFO/MainProcess] Adding trajectory points to the environment...
-[INFO/MainProcess] Executing generated trajectory...
-[INFO/MainProcess] Generating ChatGPT output...
-user:
-Print statement output:
-Initial pull dy: 0.050 m
-
-
-
-assistant:
-[INFO/EnvProcess] Finished adding trajectory points to the environment!
-[INFO/EnvProcess] Finished executing generated trajectory!
-Step 7b: Continue pulling towards us (+y) to open the door
-```python
-# Main pull distance towards us (+y)
-main_pull_dy = 0.250
-final_pull_pose = [pre_pull_pose[0], pre_pull_pose[1] + main_pull_dy, pre_pull_pose[2], target_yaw]
-
-print(f"Main pull dy: {main_pull_dy:.3f} m")
-print(f"Final pull pose: [{final_pull_pose[0]:.3f}, {final_pull_pose[1]:.3f}, {final_pull_pose[2]:.3f}, {final_pull_pose[3]:.3f}]")
-
-# Trajectory 6: pre-pull -> final pull
-trajectory_6 = generate_linear_trajectory(pre_pull_pose, final_pull_pose, num_points=13)
+# Step 8: Pull along the outward door-normal direction to open the door
+pull_pose = [
+    wedge_pose[0] + n_dx * pull_dist,
+    wedge_pose[1] + n_dy * pull_dist,
+    wedge_pose[2],
+    grip_theta
+]
+trajectory_6 = generate_linear_trajectory(wedge_pose, pull_pose, num_points=11)
 execute_trajectory(trajectory_6)
 ```
 [INFO/MainProcess] Finished generating ChatGPT output!
@@ -473,16 +525,34 @@ execute_trajectory(trajectory_6)
 [INFO/MainProcess] Executing generated trajectory...
 [INFO/MainProcess] Generating ChatGPT output...
 user:
-Print statement output:
-Main pull dy: 0.250 m
-Final pull pose: [-0.379, 0.299, 0.663, 2.428]
-
-
 
 assistant:
 [INFO/EnvProcess] Finished adding trajectory points to the environment!
 [INFO/EnvProcess] Finished executing generated trajectory!
-Step 8: Open the gripper to release the lever
+Step 9: Lift to a safe height to clear the handle after the pull
+
+```python
+# Step 9: Lift vertically to a safe height at current XY after pulling
+lift_pose = [
+    pull_pose[0],
+    pull_pose[1],
+    pre_grasp_z,
+    grip_theta
+]
+trajectory_7 = generate_linear_trajectory(pull_pose, lift_pose, num_points=7)
+execute_trajectory(trajectory_7)
+```
+[INFO/MainProcess] Finished generating ChatGPT output!
+[INFO/MainProcess] Adding trajectory points to the environment...
+[INFO/MainProcess] Executing generated trajectory...
+[INFO/MainProcess] Generating ChatGPT output...
+user:
+
+assistant:
+[INFO/EnvProcess] Finished adding trajectory points to the environment!
+[INFO/EnvProcess] Finished executing generated trajectory!
+Step 10: Release the handle after opening the door
+
 ```python
 open_gripper()
 ```
@@ -493,66 +563,10 @@ user:
 
 assistant:
 [INFO/EnvProcess] Finished opening gripper!
-Step 9: Retract vertically to a safe hover height above the lever to clear the handle and door surface
-```python
-# Retract straight up to safe hover height at current XY and yaw
-retract_up_pose = [final_pull_pose[0], final_pull_pose[1], z_hover, target_yaw]
-
-print(f"Retract up pose: [{retract_up_pose[0]:.3f}, {retract_up_pose[1]:.3f}, {retract_up_pose[2]:.3f}, {retract_up_pose[3]:.3f}]")
-
-# Trajectory 7: final pull -> retract up
-trajectory_7 = generate_linear_trajectory(final_pull_pose, retract_up_pose, num_points= nine := 9)
-execute_trajectory(trajectory_7)
-```
-[INFO/MainProcess] Finished generating ChatGPT output!
-[INFO/MainProcess] Generating ChatGPT output...
-user:
-Running code block 1 of your previous response resulted in the following error:
-Traceback (most recent call last):
-  File "E:\Robotics\VLM_Robotics\language-models-trajectory-generators\main.py", line 337, in <module>
-    exec(code)
-  File "<string>", line 8
-    trajectory_7 = generate_linear_trajectory(final_pull_pose, retract_up_pose, num_points= nine := 9)
-                                                                                                 ^^
-SyntaxError: invalid syntax
-
-Can you output a modified code block to resolve this error?
-
-
-assistant:
-```python
-# Retract straight up to safe hover height at current XY and yaw
-retract_up_pose = [final_pull_pose[0], final_pull_pose[1], z_hover, target_yaw]
-
-print(f"Retract up pose: [{retract_up_pose[0]:.3f}, {retract_up_pose[1]:.3f}, {retract_up_pose[2]:.3f}, {retract_up_pose[3]:.3f}]")
-
-# Trajectory 7: final pull -> retract up
-trajectory_7 = generate_linear_trajectory(final_pull_pose, retract_up_pose, num_points=9)
-execute_trajectory(trajectory_7)
-```
-[INFO/MainProcess] Finished generating ChatGPT output!
-[INFO/MainProcess] Adding trajectory points to the environment...
-[INFO/MainProcess] Executing generated trajectory...
-[INFO/MainProcess] Generating ChatGPT output...
-user:
-Print statement output:
-Retract up pose: [-0.379, 0.299, 0.960, 2.428]
-
-
-
-assistant:
-[INFO/EnvProcess] Finished adding trajectory points to the environment!
-[INFO/EnvProcess] Finished executing generated trajectory!
 ```python
 task_completed()
 ```
 [INFO/MainProcess] Finished generating ChatGPT output!
 [Info] Writing: rgb_image_0_inf.mp4 | Size: 256x256
-[Info] Sequence ended at 66.
-[Success] Saved ./images/trajectory\..\rgb_image_0_inf.mp4 (66 frames).
-[INFO/MainProcess] Saved trajectory video from captured frames.
-[INFO/MainProcess] Waiting to execute all generated trajectories...
-[INFO/MainProcess] Finished executing all generated trajectories!
-[INFO/MainProcess] Tracking disabled (--track-provider=none); skipping XMem verification.
-[INFO/MainProcess] FINISHED TASK!
-Enter a command: [INFO/MainProcess] Interrupted by user (Ctrl+C). Shutting down...
+[Info] Sequence ended at 54.
+[Success] Saved ./images/trajectory\..\rgb_image_0_inf.mp4 (54 frames).

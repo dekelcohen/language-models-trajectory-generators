@@ -205,8 +205,34 @@ def get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orie
 
     return K, Rt, projection_matrix, view_matrix
 
-
+def project_3d_world_pos_to_2d_pixel(camera_position, camera_orientation_q, camera, image, world_pos, cam_info):
+    """
+    Calc 2D projection in pixel image space from a 3D x,y,z world pos 
+    Note: depth info is not required, as all the 3D world pos on a ray from a certain pixel x_0,y_0 would be projected on the same x_0, y_0
+    """
+    image_width, image_height = image.size
+    K, Rt, projection_matrix, view_matrix = get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=cam_info)
+    pixel_2d = []
+    if not view_matrix is None and not projection_matrix is None:
+        # 3. Construct the View-Projection Matrix
+        # VP = Projection @ View
+        VP = projection_matrix @ view_matrix
+        point_4d = np.append(world_pos, 1.0) # Convert to Homogeneous [x,y,z,1]
+        clip = VP @ point_4d
+        ndc = clip / clip[3] # Perspective Divide to get Normalized Device Coordinates (NDC)
+                
+        # Map NDC [-1, 1] to Pixel Coordinates x in [0, image_width],  y in [0, image_height]
+        pixel_x = int(round((ndc[0] + 1.0) * image_width / 2.0))
+        # Note: We subtract from 1.0 because Image Y is Top-Down, while NDC Y is Bottom-Up
+        pixel_y = int(round((1.0 - ndc[1]) * image_height / 2.0))
+        pixel_2d = [pixel_x, pixel_y]
+    return pixel_2d
+    
 def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image, point, cam_info=None):
+    """
+    Calc 3D world pos x,y,z from 2D pixel_point [x=point[0],y=point[1]] + depth value (point[2])
+    Uses view and projection matrices obtained from Sim + depth value from depth map
+    """
     image_width, image_height = image.size
 
     K, Rt, projection_matrix, view_matrix = get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=cam_info)

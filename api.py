@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 import sys
 import torch
 import math
@@ -6,6 +6,7 @@ import os
 import config
 import json
 import models
+import segmentation_adapter
 from segmentation_adapter import get_segmentation_output
 import utils
 from PIL import Image
@@ -21,6 +22,10 @@ class API:
         self.main_connection = main_connection
         self.logger = logger
         utils.logger = self.logger # injects logger into utils global scope 
+        segmentation_adapter.logger = self.logger # injects logger into utils global scope 
+        # Wire CLI pixel offsets into segmentation adapter globals
+        segmentation_adapter.add_px = args.add_px
+        segmentation_adapter.add_py = args.add_py        
         self.client = client
         self.langsam_model = langsam_model
         self.xmem_model = xmem_model
@@ -178,7 +183,12 @@ class API:
             object_length = np.around(np.linalg.norm(bounding_cube_world_coordinates[2] - bounding_cube_world_coordinates[1]), 3)
             object_height = np.around(np.linalg.norm(bounding_cube_world_coordinates[5] - bounding_cube_world_coordinates[0]), 3)
 
-            print("Position of " + segmentation_texts[i] + ":", list(np.around(bounding_cube_world_coordinates[4], 3)))
+            obj_position = list(np.around(bounding_cube_world_coordinates[4], 3))
+            print("Position of " + segmentation_texts[i] + ":", obj_position)            
+            proj_2d_pixel = utils.project_3d_world_pos_to_2d_pixel(self.head_camera_position, self.head_camera_orientation_q, camera="head", image=rgb_image_head, world_pos=obj_position, cam_info=self.cam_info )
+            self.logger.info(PROGRESS + f"Projected 2D pixel of {segmentation_texts[i]} Position: {proj_2d_pixel}" + ENDC)             
+            self.logger.info(PROGRESS + "Adding bounding cubes to the environment..." + ENDC)
+                
 
             print("Dimensions:")
             print("Width:", object_width)
