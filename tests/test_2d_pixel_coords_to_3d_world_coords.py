@@ -71,7 +71,7 @@ class TestCameraUnprojection(unittest.TestCase):
         width = config.image_width
         height = config.image_height
         
-        # Map NDC [-1, 1] to Pixel Coordinates [0, Width/Height]
+        # Map NDC [-1, 1] to Pixel Coordinates x in [0, image_width],  y in [0, image_height]
         pixel_x = int(round((ndc[0] + 1.0) * width / 2.0))
         # Note: We subtract from 1.0 because Image Y is Top-Down, while NDC Y is Bottom-Up
         pixel_y = int(round((1.0 - ndc[1]) * height / 2.0))
