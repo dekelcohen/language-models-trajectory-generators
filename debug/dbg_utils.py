@@ -3,29 +3,7 @@ import cv2
 import os
 import glob
 
-# Unified lookahead helper used at start and mid-sequence
-def find_available_frame(
-    folder_path: str,
-    base_name: str,
-    current_idx: int,
-    end_idx: int,
-    ext: str,
-    lookahead_max: int,
-    include_current: bool = True,
-):
-    """
-    Find first existing frame index in [current_idx, current_idx+lookahead_max]
-    (or (current_idx+1, ...) when include_current=False). Returns (path, idx) or (None, None).
-    """
-    start = int(current_idx) + (0 if include_current else 1)
-    stop = int(current_idx) + int(lookahead_max)
-    if end_idx != float('inf'):
-        stop = min(stop, int(end_idx))
-    for idx in range(start, stop + 1):
-        candidate = os.path.join(folder_path, f"{base_name}_{idx}.{ext}")
-        if os.path.exists(candidate):
-            return candidate, idx
-    return None, None
+from helpers.image_utils import find_available_frame
 
 def create_video_from_images(
     folder_path: str = 'images/trajectory', 
