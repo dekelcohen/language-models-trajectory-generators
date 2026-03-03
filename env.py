@@ -418,7 +418,8 @@ def run_simulation_environment(args, env_connection, logger):
 
             if env_connection_received[0] == CAPTURE_IMAGES:
 
-                robot.get_camera_image("head", env, save_camera_image=True, rgb_image_path=config.rgb_image_trajectory_path.format(step=0), depth_image_path=config.depth_image_trajectory_path.format(step=0))
+                robot.get_camera_image("head", env, save_camera_image=True, rgb_image_path=config.rgb_image_trajectory_path.format(step=0), depth_image_path=None)
+                robot.get_camera_image("wrist", env, save_camera_image=True, rgb_image_path=config.wrist_rgb_image_trajectory_path.format(step=0), depth_image_path=None)
                 head_camera_position, head_camera_orientation_q, view_head, proj_head = robot.get_camera_image("head", env, save_camera_image=True, rgb_image_path=config.rgb_image_head_path, depth_image_path=config.depth_image_head_path)
                 wrist_camera_position, wrist_camera_orientation_q, view_wrist, proj_wrist = robot.get_camera_image("wrist", env, save_camera_image=True, rgb_image_path=config.rgb_image_wrist_path, depth_image_path=config.depth_image_wrist_path)
 
@@ -743,5 +744,6 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
 if __name__ == "__main__":
     # Entry point for quick, no-code door kinematics testing in GUI mode.
     run_sim_demo(disable_forces=False, connection_mode=p.GUI)
+
 
 

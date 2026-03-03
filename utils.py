@@ -36,18 +36,19 @@ def get_max_contour(image, image_width, image_height):
     ret, thresh = cv.threshold(image, 127, 255, 0)
     contours, hierarchy = cv.findContours(thresh, 1, 2)
 
-    contour_index = None
-    max_length = 0
-    for c, contour in enumerate(contours):
-        contour_points = [(c, r) for r in range(image_height) for c in range(image_width) if cv.pointPolygonTest(contour, (c, r), measureDist=False) == 1]
-        if len(contour_points) > max_length:
-            contour_index = c
-            max_length = len(contour_points)
-
-    if contour_index is None:
+    if not contours:
         return None
 
-    return contours[contour_index]
+    # Choose the contour with the largest area to be robust to thin rectangles
+    max_idx = None
+    max_area = 0.0
+    for i, contour in enumerate(contours):
+        area = cv.contourArea(contour)
+        if area > max_area:
+            max_area = area
+            max_idx = i
+
+    return contours[max_idx] if max_idx is not None else None
 
 
 
@@ -117,7 +118,7 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
         contour = get_max_contour(mask_np, image_width, image_height)
         if contour is not None:
             
-            contour_pixel_points = [(c, r, depth_array[r][c]) for r in range(image_height) for c in range(image_width) if cv.pointPolygonTest(contour, (c, r), measureDist=False) == 1]
+            contour_pixel_points = [(c, r, depth_array[r][c]) for r in range(image_height) for c in range(image_width) if cv.pointPolygonTest(contour, (c, r), measureDist=False) >= 0]
             if len(contour_pixel_points) > 0:
                 _mean_px = np.mean(np.array(contour_pixel_points, dtype=np.float64), axis=0)
                 logger.info(PROGRESS + f"[Contour] mean pixel_point (u,v,depth)={[_mean_px[0], _mean_px[1], _mean_px[2]]}" + ENDC)

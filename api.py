@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import sys
 import torch
 import math
@@ -256,6 +256,20 @@ class API:
                         fps=config.trajectory_video_fps,
                     )
                 self.logger.info(OK + "Saved trajectory video from captured frames." + ENDC)
+
+                # Also create wrist-camera video from saved frames (same folder)
+                try:
+                    with redirect_stdout(sys.stderr):
+                        create_video_from_images(
+                            folder_path=config.trajectory_folder,
+                            base_name=config.trajectory_wrist_image_base,
+                            start_idx=0,
+                            end_idx=float('inf'),
+                            fps=config.trajectory_video_fps,
+                        )
+                    self.logger.info(OK + "Saved wrist trajectory video from captured frames." + ENDC)
+                except Exception as e_w:
+                    self.logger.info(PROGRESS + f"Warning: could not create wrist trajectory video: {e_w}" + ENDC)
             except Exception as e:
                 self.logger.info(PROGRESS + f"Warning: could not create trajectory video: {e}" + ENDC)
 
@@ -379,3 +393,5 @@ class API:
         self.trajectory_length = 0
         self.segmentation_texts = []
         self.attempted_task = False
+
+

@@ -107,7 +107,8 @@ class Robot:
                 p.setJointMotorControl2(self.id, gripper2_index, p.POSITION_CONTROL, targetPosition=gripper_target_position, force=config.gripper_movement_force_franka)
 
             env.update()
-            self.get_camera_image("head", env, save_camera_image=is_trajectory, rgb_image_path=config.rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=config.depth_image_trajectory_path.format(step=self.trajectory_step))
+            self.get_camera_image("head", env, save_camera_image=is_trajectory, rgb_image_path=config.rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
+            self.get_camera_image("wrist", env, save_camera_image=is_trajectory, rgb_image_path=config.wrist_rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
             if is_trajectory:
                 self.trajectory_step += 1
 
@@ -223,21 +224,12 @@ class Robot:
         depth_array = np.array(depth_buffer, dtype=np.float32).reshape(img_h, img_w)
 
         LEGACY_NORMALIZE_DEPTH = False # TODO:False when moving to test like projection matrix     
-        GEMINI_TEST_DEPTH_IMAGE = False # TODO: Remove code for 65535 resolution if npy file is used 
+        
         
         if save_camera_image:
             rgb_image = Image.fromarray(rgb_array, mode="RGB")
             rgb_image.save(rgb_image_path)
-            
-            if GEMINI_TEST_DEPTH_IMAGE:
-                raw_depth = depth_array     
-                # 2. Scale to 16-bit integer range [0, 65535]
-                depth_u16 = (raw_depth * 65535.0).astype(np.uint16)
-                
-                # 3. Save as 16-bit PNG
-                #    'I;16' is the PIL mode for 16-bit unsigned integers
-                depth_image = Image.fromarray(depth_u16, mode='I;16')
-            else:
+            if depth_image_path:           
                 n = config.near_plane
                 f = config.far_plane
                 # Convert OpenGL depth to linear depth in [0,1]
@@ -246,17 +238,9 @@ class Robot:
                 linear_depth = np.clip(linear_depth, 0.0, 1.0)
                 depth_u8 = (linear_depth * 255.0).astype(np.uint8)
                 depth_image = Image.fromarray(depth_u8, mode="L")
-                
-            depth_image.save(depth_image_path)			
-            if LEGACY_NORMALIZE_DEPTH:
-                n = config.near_plane
-                f = config.far_plane
-                # Convert OpenGL depth to linear depth in [0,1]
-                z = depth_array
-                linear_depth = (2.0 * n * f) / (f + n - (2.0 * z - 1.0) * (f - n))
-                linear_depth = np.clip(linear_depth, 0.0, 1.0)
-                depth_array = linear_depth
-            np.save(os.path.splitext(depth_image_path)[0] + ".npy", depth_array.astype(np.float32))
+                    
+                depth_image.save(depth_image_path)
+                np.save(os.path.splitext(depth_image_path)[0] + ".npy", depth_array.astype(np.float32))
 
         return camera_position, camera_orientation_q, view_matrix, projection_matrix
 
@@ -327,5 +311,6 @@ class Robot:
             tz - distance * fz,
         ]
         return view_matrix, camera_position
+
 
 

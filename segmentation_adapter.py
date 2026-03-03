@@ -17,7 +17,7 @@ from typing import List, Tuple
 import numpy as np
 
 # Logger
-from config import OK, PROGRESS, FAIL, ENDC
+from config import OK, PROGRESS, WARNING, FAIL, ENDC
 logger = None
 
 # Optional pixel offsets supplied via CLI (wired from api.py)
@@ -103,7 +103,7 @@ def override_bbox_from_globals(H: int, W: int):
         )
 
     if logger:
-        logger.info(PROGRESS + f"Using override bbox as-is: x1={x1} y1={y1} x2={x2} y2={y2}" + ENDC)
+        logger.info(WARNING + f"Using --ovr-bbox manual override instead of segmentation results: x1={x1} y1={y1} x2={x2} y2={y2}" + ENDC)
     return x1, y1, x2, y2
 
 

@@ -117,15 +117,15 @@ SET_DOOR_STATE = 18
 CAPTURE_TRAJECTORY_FRAME = 19
 
 # Paths
+images_folder = "./images" 
 rgb_image_wrist_path = "./images/rgb_image_wrist.png"
 depth_image_wrist_path = "./images/depth_image_wrist.png"
 rgb_image_head_path = "./images/rgb_image_head.png"
 depth_image_head_path = "./images/depth_image_head.png"
-rgb_image_trajectory_path = "./images/trajectory/rgb_image_{step}.png"
-depth_image_trajectory_path = "./images/trajectory/depth_image_{step}.png"
 bounding_cube_mask_image_path = "./images/bounding_cube_mask_{object}_{mask}.png"
 
 # Overlays and runs
+overlay_folder = images_folder + "/overlay"
 overlay_image_path = "./images/overlay/overlay_{step}.png"
 runs_dir = "./runs"
 
@@ -135,6 +135,11 @@ trajectory_log_every = 5
 trajectory_folder = "./images/trajectory"
 trajectory_video_fps = 15
 trajectory_image_base = "rgb_image"
+trajectory_wrist_image_base = "wrist_image"
+rgb_image_trajectory_path = trajectory_folder + "/rgb_image_{step}.png"
+depth_image_trajectory_path = trajectory_folder + "/depth_image_{step}.png"
+wrist_rgb_image_trajectory_path = trajectory_folder + "/wrist_image_{step}.png"
+wrist_depth_image_trajectory_path = trajectory_folder + "/wrist_depth_image_{step}.png"
 # For perception captures of static elements, log only for first N events
 perception_log_first_n = 1
 # Optionally, re-log every M frames (0 disables)
@@ -147,11 +152,12 @@ xmem_output_path = "./images/xmem_output_{step}.png"
 # Segmentation overlay output for any provider
 seg_overlay_image_path = "./images/seg_overlay_{provider}_{object}.png"
 
-# Output
-OK = "\033[92m"
-PROGRESS = "\033[93m"
-FAIL = "\033[91m"
-ENDC = "\033[0m"
+# Output - ANSI escape color codes:
+OK = "\033[92m"       # Bright Green
+PROGRESS = "\033[97m" # Bright White
+WARNING = "\033[93m"  # Bright Yellow
+FAIL = "\033[91m"     # Bright Red
+ENDC = "\033[0m"      # Reset to default
 
 # 3D coordinates prompt section (default: grasp/metaworld)
 three_d_coordinates_prompt_section = (
@@ -160,3 +166,4 @@ three_d_coordinates_prompt_section = (
     "  2. The y-axis is in the depth direction, increasing away from you.\n"
     "  3. The z-axis is in the vertical direction, increasing upwards."
 )
+

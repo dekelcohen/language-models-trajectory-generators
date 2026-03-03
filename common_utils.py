@@ -1,7 +1,7 @@
 import os
 import shutil
 from typing import Iterable
-
+from config import images_folder, trajectory_folder, overlay_folder
 
 def ensure_image_dirs_exist(delete: bool = False, extra_dirs: Iterable[str] | None = None) -> None:
     """Ensure image directories exist; optionally delete existing contents first.
@@ -14,11 +14,10 @@ def ensure_image_dirs_exist(delete: bool = False, extra_dirs: Iterable[str] | No
     If delete is True, removes these directories (if present) before recreating.
     Extra directories can be provided via extra_dirs.
     """
-
     dirs = [
-        "./images",
-        "./images/trajectory",
-        "./images/overlay",
+        images_folder,
+        trajectory_folder,
+        overlay_folder,
     ]
     if extra_dirs:
         for d in extra_dirs:
