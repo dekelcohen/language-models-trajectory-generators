@@ -214,6 +214,7 @@ if __name__ == "__main__":
     parser.add_argument("--track-provider", choices=["xmem", "none"], default="xmem", help="tracking provider for success verification; set to 'none' to disable XMem usage")
     parser.add_argument("--add-px", type=int, default=None, help="manual X pixel offset for segmentation bbox")
     parser.add_argument("--add-py", type=int, default=None, help="manual Y pixel offset for segmentation bbox")
+    parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")    
     args = parser.parse_args()
 
     # Logging

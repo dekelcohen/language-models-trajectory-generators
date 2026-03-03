@@ -26,6 +26,9 @@ class API:
         # Wire CLI pixel offsets into segmentation adapter globals
         segmentation_adapter.add_px = args.add_px
         segmentation_adapter.add_py = args.add_py        
+        # Parse optional override bbox string "x1,y1,x2,y2"
+        segmentation_adapter.set_override_bbox_from_string(args.ovr_bbox)
+        
         self.client = client
         self.langsam_model = langsam_model
         self.xmem_model = xmem_model

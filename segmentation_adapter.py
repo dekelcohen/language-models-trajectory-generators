@@ -24,6 +24,88 @@ logger = None
 add_px = None
 add_py = None
 
+# Optional bbox override supplied via CLI (wired from api.py)
+# When all four are set to integers, the adapter will ignore provider
+# boxes and use this rectangle for both boxes and masks.
+_ovr_x1 = None
+_ovr_x2 = None
+_ovr_y1 = None
+_ovr_y2 = None
+
+
+def apply_diag_offsets(x1: int, y1: int, x2: int, y2: int, H: int, W: int):
+    """
+    Apply diagnostic pixel offsets (add_px/add_py) to a rectangle and clamp.
+    Preserves historical behavior from prior nested helper:
+      - add_px shifts x1 by +dx
+      - add_py shifts y2 by +dy
+    Returns clamped integer coordinates (x1, y1, x2, y2).
+    """
+    try:
+        if add_px is not None:
+            dx = int(add_px)
+            x1 += dx
+            if logger:
+                logger.info(PROGRESS + f"Manual bbox X offset: +{dx} --> x1={x1} y1={y1} x2={x2} y2={y2} " + ENDC)
+    except Exception as e:
+        print(f"Error using add_px={add_px}. {e}")
+
+    try:
+        if add_py is not None:
+            dy = int(add_py)
+            y2 += dy
+            if logger:
+                logger.info(PROGRESS + f"Manual bbox Y offset: +{dy} --> x1={x1} y1={y1} x2={x2} y2={y2} " + ENDC)
+    except Exception as e:
+        print(f"Error using add_py={add_py}. {e}")
+
+    # Clamp to image bounds
+    x1_c = max(0, min(W, int(x1)))
+    x2_c = max(0, min(W, int(x2)))
+    y1_c = max(0, min(H, int(y1)))
+    y2_c = max(0, min(H, int(y2)))
+    return x1_c, y1_c, x2_c, y2_c
+
+
+def override_bbox_from_globals(H: int, W: int):
+    """
+    If all override globals are set, return integer (x1,y1,x2,y2) as provided.
+    No clipping is performed. If values violate image bounds/order, raise.
+    """
+    vals = (_ovr_x1, _ovr_y1, _ovr_x2, _ovr_y2)
+    if any(v is None for v in vals):
+        return None
+    try:
+        x1, y1, x2, y2 = map(int, vals)
+    except Exception as e:
+        raise ValueError(f"Failed to parse override bbox values {_ovr_x1,_ovr_y1,_ovr_x2,_ovr_y2}: {e}")
+
+    problems = []
+    if not (0 <= x1 <= W):
+        problems.append(f"x1={x1} not in [0,{W}]")
+    if not (0 <= x2 <= W):
+        problems.append(f"x2={x2} not in [0,{W}]")
+    if not (0 <= y1 <= H):
+        problems.append(f"y1={y1} not in [0,{H}]")
+    if not (0 <= y2 <= H):
+        problems.append(f"y2={y2} not in [0,{H}]")
+    if x2 <= x1 or y2 <= y1:
+        problems.append(f"order invalid (need x1<x2 and y1<y2), got {(x1,y1,x2,y2)}")
+
+    if problems:
+        guidance = (
+            "Provide a bbox within image bounds and correct order: "
+            f"0 <= x1 < x2 <= {W}, 0 <= y1 < y2 <= {H}. "
+            "Adjust your --ovr-bbox values accordingly."
+        )
+        raise ValueError(
+            "Override bbox violates constraints: " + "; ".join(problems) + ". " + guidance
+        )
+
+    if logger:
+        logger.info(PROGRESS + f"Using override bbox as-is: x1={x1} y1={y1} x2={x2} y2={y2}" + ENDC)
+    return x1, y1, x2, y2
+
 
 def _sam3_predict(
     image_pil,
@@ -120,34 +202,21 @@ def _moondream_predict(image_pil, prompts: List[str]):
     boxes_np = []
     labels: List[str] = []
 
+    # If user supplied a full override bbox, apply it for all predictions
+    override_rect = override_bbox_from_globals(H, W)
+
     for p in preds:
-        bbox_px = p.get("bbox_pixels") or []
-        if len(bbox_px) != 4:
-            continue
-        # Ensure integer pixel coords for downstream drawing
-        x1, y1, x2, y2 = [int(round(float(v))) for v in bbox_px]
-        # Workaround to allow manual control in tests over segmentation bbox 
-        # Optional manual bbox pixel offsets from globals (set via API)
-        if add_px is not None:
-            try:
-                _add_px = int(add_px)
-                x1 += _add_px
-                #x2 += _add_px
-                if logger:
-                    logger.info(PROGRESS + f"Manual bbox X offset: +{_add_px} --> x1={x1} y1={y1} x2={x2} y2={y2} " + ENDC)
-            except Exception as e:
-                print(f"Error using add_px={add_px}. {e}")
-        if add_py is not None:
-            try:
-                _add_py = int(add_py)
-                #y1 += _add_py
-                y2 += _add_py
-                if logger:
-                    logger.info(PROGRESS + f"Manual bbox Y offset: +{_add_py} --> x1={x1} y1={y1} x2={x2} y2={y2} " + ENDC)
-            except Exception as e:
-                print(f"Error using add_py={add_py}. {e}")
-        x1 = max(0, min(W, x1)); x2 = max(0, min(W, x2))
-        y1 = max(0, min(H, y1)); y2 = max(0, min(H, y2))
+        if override_rect is not None:
+            x1, y1, x2, y2 = override_rect
+        else:
+            bbox_px = p.get("bbox_pixels") or []
+            if len(bbox_px) != 4:
+                continue
+            # Ensure integer pixel coords for downstream drawing
+            x1, y1, x2, y2 = [int(round(float(v))) for v in bbox_px]
+            # Apply diagnostic offsets once and reuse for both boxes and masks
+            x1, y1, x2, y2 = apply_diag_offsets(x1, y1, x2, y2, H, W)
+
         if x2 <= x1 or y2 <= y1:
             continue
 
@@ -188,3 +257,21 @@ def get_segmentation_output(
         return _moondream_predict(image, segmentation_texts)
     else:
         raise ValueError(f"Unknown segmentation provider: {provider}")
+
+def set_override_bbox_from_string(ovr_str: str | None):
+    """Parse a string "x1,y1,x2,y2" and set override globals.
+    Accepts ints or floats; rounds to nearest int. None clears overrides.
+    Raises ValueError on bad format.
+    """
+    global _ovr_x1, _ovr_y1, _ovr_x2, _ovr_y2
+    if not ovr_str:
+        _ovr_x1 = _ovr_y1 = _ovr_x2 = _ovr_y2 = None
+        return
+    parts = [p.strip() for p in str(ovr_str).split(',') if p.strip() != '']
+    if len(parts) != 4:
+        raise ValueError(f"--ovr-bbox must have 4 comma-separated values (x1,y1,x2,y2). Got: {ovr_str}")
+    try:
+        x1, y1, x2, y2 = [int(round(float(v))) for v in parts]
+    except Exception as e:
+        raise ValueError(f"Failed to parse --ovr-bbox values from '{ovr_str}': {e}")
+    _ovr_x1, _ovr_y1, _ovr_x2, _ovr_y2 = x1, y1, x2, y2
