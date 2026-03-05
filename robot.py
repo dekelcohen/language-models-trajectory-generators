@@ -177,20 +177,55 @@ class Robot:
                 distance=config.camera_distance,
                 yaw_deg=config.camera_yaw,
                 pitch_deg=config.camera_pitch,
-            )            
-            #self.logger.info(PROGRESS + f"_view_and_pos_from_spherical camera_position {camera_position}. config.head_camera_position {config.head_camera_position}" + ENDC)
+            )
         else:
             rotation_matrix = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
+            
             if camera == "wrist":
-                init_camera_vector = [0, 0, 1]
-                init_up_vector = [1, 0, 0]
+                init_camera_vector = np.array([0, 0, 1])
+                camera_vector = rotation_matrix.dot(init_camera_vector)
+                
+                wrist_pos = np.array(camera_position)
+                
+                # --- NEW: "Drone" Over-the-Shoulder Tracking ---
+                # 1. Pull straight back along the line of sight (40cm)
+                pullback_pos = wrist_pos - (0.4 * camera_vector)
+                
+                # 2. Lift UP towards the global ceiling (0cm) to get above the arm
+                global_up_shift = np.array([0.0, 0.0, 0.0])
+                
+                # 3. Shift RIGHT (30cm) to peek around the elbow/forearm
+                # We calculate global 'right' by taking the cross product of where we are looking and the ceiling
+                right_vector = np.cross(camera_vector, np.array([0, 0, 1]))
+                if np.linalg.norm(right_vector) > 1e-3:
+                    right_vector = right_vector / np.linalg.norm(right_vector)
+                else:
+                    right_vector = np.array([1, 0, 0]) # Fallback if looking straight down
+                
+                lateral_shift = 0.3 * right_vector
+                
+                # Apply all shifts to get the final camera position
+                camera_position = pullback_pos + global_up_shift + lateral_shift
+                
+                # Force the camera to look at the gripper (or slightly ahead of it)
+                target_position = wrist_pos + (0.05 * camera_vector)
+                
+                # Force the camera's image to stay perfectly level with the room
+                up_vector =[0, 0, 1]
+                
             elif camera == "head":
-                init_camera_vector = [0, 0, 1]
+                init_camera_vector =[0, 0, 1]
                 init_up_vector = [-1, 0, 0]
+                
+                camera_vector = rotation_matrix.dot(init_camera_vector)
+                up_vector = rotation_matrix.dot(init_up_vector)
+                target_position = camera_position + camera_vector
+                
+            # Compute the view matrix directly
+            view_matrix = p.computeViewMatrix(cameraEyePosition=camera_position, 
+                                              cameraTargetPosition=target_position, 
+                                              cameraUpVector=up_vector)
 
-            camera_vector = rotation_matrix.dot(init_camera_vector)
-            up_vector = rotation_matrix.dot(init_up_vector)
-            view_matrix = p.computeViewMatrix(camera_position, camera_position + camera_vector, up_vector)
 
         image = p.getCameraImage(
             config.image_width,

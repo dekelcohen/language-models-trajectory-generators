@@ -226,8 +226,7 @@ class API:
                 for _i in idxs:
                     if _i not in _uniq:
                         _uniq.append(_i)
-                _preview = [trajectory[i] for i in _uniq]
-                self.logger.info(PROGRESS + f"Previewing {len(_preview)} of {_n} trajectory points (start/25%/50%/75%/end)" + ENDC)
+                _preview = [trajectory[i] for i in _uniq]                
         except Exception:
             _preview = trajectory
         self.main_connection.send([ADD_TRAJECTORY_POINTS, _preview, "random", False])
