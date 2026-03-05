@@ -11,6 +11,8 @@ You are, however, able to call any of the following Python functions, if require
 3. open_gripper() -> None: This function will open the gripper on the robot arm, and will also not return anything.
 4. close_gripper() -> None: This function will close the gripper on the robot arm, and will also not return anything.
 5. task_completed() -> None: Call this function only when the task has been completed. This function will also not return anything.
+6. generate_linear_trajectory(desc: str, start_pose: list, end_pose: list, num_points: int = 20) -> list: Returns a straight-line end-effector trajectory between two 4D poses [x,y,z,theta]. This helper is provided by the environment and already logs motion details. do not call logger for trajectory/motion. desc is a short sentence to describe the motion and its end_pose
+7. logger: Use logger.info(PROGRESS + f"...<var>..." + ENDC) for concise status logs. print() is used for LLM feedback - not for logging.
 When calling any of the functions, make sure to stop generation after each function call and wait for it to be executed, before calling another function and continuing with your plan.
 
 ENVIRONMENT SET-UP:
@@ -38,7 +40,8 @@ When generating the code for the trajectory, do the following:
 3. If the trajectory is broken down into multiple steps, make sure to chain them such that the start point of trajectory_2 is the same as the end point of trajectory_1 and so on, to ensure a smooth overall trajectory. Call the execute_trajectory function after each trajectory step.
 4. When defining the functions, specify the required parameters, and document them clearly in the code. Make sure to include the orientation parameter in both definition and calls (use). make sure all dimensions of caller arguments match the function definition and body
 5. If you want to print the calculated value of a variable to use later, make sure to use the print function to three decimal places, instead of simply writing the variable name. Do not print any of the trajectory variables, since the output will be too long.
-6. Mark any code clearly with the ```python and ``` tags.
+6. Mark any code clearly with the ```python and ``` tags.\n7. Use the provided generate_linear_trajectory helper; do not redefine it. Use logger.info(PROGRESS + f"..." + ENDC) for concise status logs instead of print for routine status.
+7. No need to import any of the above AVAILABLE FUNCTIONS. these are already injected into the python interpreter context
 
 INITIAL PLANNING 1:
 If the task requires interaction with an object part (as opposed to the object as a whole), describe which part of the object would be most suitable for the gripper to interact with.
@@ -95,21 +98,6 @@ Grasping strategy: close the gripper at mid-height, then lift vertically to conf
 Step-by-Step Trajectory Execution
 Step 1: Move to a safe hover pose above the can
 python
-Copy code
-# Utility function: generate straight-line end-effector trajectory
-def generate_linear_trajectory(start_pose, end_pose, num_points=N_pts):
-    sx, sy, sz, s_theta = start_pose
-    ex, ey, ez, e_theta = end_pose
-    traj = []
-    for i in range(num_points):
-        t = i / (num_points - 1)
-        traj.append([
-            sx + (ex - sx) * t,
-            sy + (ey - sy) * t,
-            sz + (ez - sz) * t,
-            s_theta + (e_theta - s_theta) * t
-        ])
-    return traj
 
 # Perception-derived variables
 can_position = [pos_x, pos_y, pos_z]
@@ -127,7 +115,7 @@ current_pose = [ee_x, ee_y, ee_z, ee_theta]
 # Target hover pose
 hover_pose = [pos_x, pos_y, pre_grasp_z, grip_orientation]
 
-trajectory_1 = generate_linear_trajectory(current_pose, hover_pose)
+trajectory_1 = generate_linear_trajectory("hover to approach target", current_pose, hover_pose)
 execute_trajectory(trajectory_1)
 Step 2: Open the gripper
 python
@@ -140,7 +128,7 @@ z_above_top = top_z + clearance_top
 
 approach_pose = [pos_x, pos_y, z_above_top, grip_orientation]
 
-trajectory_2 = generate_linear_trajectory(hover_pose, approach_pose)
+trajectory_2 = generate_linear_trajectory("descend to approach height", hover_pose, approach_pose)
 execute_trajectory(trajectory_2)
 Step 4: Descend to pre-close height near grasp level
 python
@@ -150,14 +138,14 @@ z_preclose = z_grasp + clearance_preclose
 
 pre_close_pose = [pos_x, pos_y, z_preclose, grip_orientation]
 
-trajectory_3 = generate_linear_trajectory(approach_pose, pre_close_pose)
+trajectory_3 = generate_linear_trajectory("descend to pre-close height", approach_pose, pre_close_pose)
 execute_trajectory(trajectory_3)
 Step 5: Descend to grasp height
 python
 Copy code
 grasp_pose = [pos_x, pos_y, z_grasp, grip_orientation]
 
-trajectory_4 = generate_linear_trajectory(pre_close_pose, grasp_pose)
+trajectory_4 = generate_linear_trajectory("descend to grasp height", pre_close_pose, grasp_pose)
 execute_trajectory(trajectory_4)
 Step 6: Close the gripper
 python
@@ -168,7 +156,7 @@ python
 Copy code
 lift_pose = [pos_x, pos_y, pre_grasp_z, grip_orientation]
 
-trajectory_5 = generate_linear_trajectory(grasp_pose, lift_pose)
+trajectory_5 = generate_linear_trajectory("lift after grasp", grasp_pose, lift_pose)
 execute_trajectory(trajectory_5)
 
 -------------------- End of Sample -----------------

@@ -43,6 +43,8 @@ class API:
         self.head_camera_orientation_q = None
         self.wrist_camera_position = None
         self.wrist_camera_orientation_q = None
+        self.head_image_size = None
+        self.wrist_image_size = None
         self.command = None
         # Tracking provider selection ("xmem" or "none")
         self.track_provider = getattr(args, "track_provider", "xmem")
@@ -108,6 +110,7 @@ class API:
         self.wrist_camera_orientation_q = wrist_camera_orientation_q
 
         rgb_image_head = Image.open(config.rgb_image_head_path).convert("RGB")
+        self.head_image_size = rgb_image_head.size
         # Prefer raw depth from .npy if available; fall back to 8-bit image
         depth_npy_path = os.path.splitext(config.depth_image_head_path)[0] + ".npy"
         depth_format = getattr(self.args, "depth_format", "norm_1m")
@@ -188,8 +191,8 @@ class API:
 
             obj_position = list(np.around(bounding_cube_world_coordinates[4], 3))
             print("Position of " + segmentation_texts[i] + ":", obj_position)            
-            proj_2d_pixel = utils.project_3d_world_pos_to_2d_pixel(self.head_camera_position, self.head_camera_orientation_q, camera="head", image=rgb_image_head, world_pos=obj_position, cam_info=self.cam_info )
-            self.logger.info(PROGRESS + f"Projected 2D pixel of {segmentation_texts[i]} Position: {proj_2d_pixel}" + ENDC)             
+            proj_2d_pixel = utils.project_3d_world_pos_to_2d_pixel(self.head_camera_position, self.head_camera_orientation_q, camera="head", image_size=self.head_image_size, world_pos=obj_position, cam_info=self.cam_info )
+            self.logger.info(PROGRESS + f"Projected 2D pixel of {segmentation_texts[i]} Position: {proj_2d_pixel}" + ENDC) 
             self.logger.info(PROGRESS + "Adding bounding cubes to the environment..." + ENDC)
                 
 
@@ -212,7 +215,17 @@ class API:
     def execute_trajectory(self, trajectory):
 
         self.logger.info(PROGRESS + "Adding trajectory points to the environment..." + ENDC)
-        self.main_connection.send([ADD_TRAJECTORY_POINTS, trajectory])
+        # Downsample preview to max 3 points: start, middle, end
+        _preview = trajectory
+        try:
+            if isinstance(trajectory, (list, tuple)) and len(trajectory) > 3:
+                _n = len(trajectory)
+                _mid = (_n - 1) // 2
+                _preview = [trajectory[0], trajectory[_mid], trajectory[-1]]
+                self.logger.info(PROGRESS + f"Previewing 3 of {_n} trajectory points (start/mid/end)" + ENDC)
+        except Exception:
+            _preview = trajectory
+        self.main_connection.send([ADD_TRAJECTORY_POINTS, _preview])
 
         self.logger.info(PROGRESS + "Executing generated trajectory..." + ENDC)
         self.main_connection.send([EXECUTE_TRAJECTORY, trajectory])
@@ -221,6 +234,51 @@ class API:
 
 
 
+
+    def generate_linear_trajectory(self, desc, start_pose, end_pose, num_points=20):
+        """Return a linear [x, y, z, theta] trajectory and log the call.
+        Logs: desc, start/end poses, and 2D head-camera projection of end pose.
+        """
+        if not isinstance(start_pose, (list, tuple)) or not isinstance(end_pose, (list, tuple)):
+            raise ValueError("start_pose and end_pose must be list/tuple of length 4")
+        if len(start_pose) != 4 or len(end_pose) != 4:
+            raise ValueError("start_pose and end_pose must be length 4 [x,y,z,theta]")
+        if int(num_points) < 2:
+            raise ValueError("num_points must be >= 2")
+        try:
+            sx, sy, sz, s_theta = [float(v) for v in start_pose]
+            ex, ey, ez, e_theta = [float(v) for v in end_pose]
+        except Exception as e:
+            raise ValueError("Invalid pose values: %s" % e)
+
+        # Project end pose (x,y,z) to 2D pixels if camera info is available
+        end_px = None
+        try:
+            if self.head_camera_position is not None and self.head_camera_orientation_q is not None and hasattr(self, 'cam_info') and self.cam_info is not None and self.head_image_size is not None:
+                end_px = utils.project_3d_world_pos_to_2d_pixel(
+                    self.head_camera_position,
+                    self.head_camera_orientation_q,
+                    camera='head',
+                    image_size=self.head_image_size,
+                    world_pos=[ex, ey, ez],
+                    cam_info=self.cam_info,
+                )
+        except Exception:
+            end_px = None
+
+        self.logger.info(PROGRESS + "generate_linear_trajectory desc='" + str(desc) + "' start=" + str([sx, sy, sz, s_theta]) + " end=" + str([ex, ey, ez, e_theta]) + " end_px=" + str(end_px) + ENDC)
+
+        traj = []
+        n = int(num_points)
+        for i in range(n):
+            t = i / (n - 1)
+            traj.append([
+                sx + (ex - sx) * t,
+                sy + (ey - sy) * t,
+                sz + (ez - sz) * t,
+                s_theta + (e_theta - s_theta) * t,
+            ])
+        return traj
     def open_gripper(self):
 
         self.logger.info(PROGRESS + "Opening gripper..." + ENDC)

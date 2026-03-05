@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import math
 import openai
 import torch
@@ -35,7 +35,7 @@ def query_sim_objects_state(conn, logger):
     Prints EEF pose, door joint angle, and every object entry with pos/dims.
     """
     try:
-        conn.send([config.GET_STATE, {"objects": []}])  # empty â†’ all geoms
+        conn.send([config.GET_STATE, {"objects": []}])  # empty all geoms
         gt = conn.recv()
         if not isinstance(gt, dict):
             return
@@ -283,6 +283,8 @@ if __name__ == "__main__":
     open_gripper = api.open_gripper
     close_gripper = api.close_gripper
     task_completed = api.task_completed
+    generate_linear_trajectory = api.generate_linear_trajectory
+    logger = api.logger
 
     try:
         # Query ground-truth state (all objects/geoms) for cross-check

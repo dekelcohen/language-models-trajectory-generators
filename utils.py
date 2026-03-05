@@ -107,7 +107,7 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
         pz = depth_array[py, px] # TODO: Fix: Correct depth as in test: 0.993040
         point=[px, py, pz]    
         logger.info(PROGRESS + f"------------------ Test 2D Known pixel {point}--> 3D world" + ENDC)
-        get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, point=point, cam_info=cam_info)
+        get_world_point_world_frame(camera_position, camera_orientation_q, "head", image.size, point=point, cam_info=cam_info)
         return
         
     for i, mask in enumerate(masks):
@@ -125,7 +125,7 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
             else:
                 logger.info(PROGRESS + "[Contour] No pixels inside contour; mean undefined" + ENDC)
             logger.info(PROGRESS + f"++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)={len(contour_pixel_points)}" + ENDC)            
-            contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image, pixel_point, cam_info=cam_info) for pixel_point in contour_pixel_points]
+            contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image.size, pixel_point, cam_info=cam_info) for pixel_point in contour_pixel_points]
             # Optional depth statistics within the mask to probe Z handling
             if os.environ.get("DEBUG_DEPTH", "0") == "1":
                 try:
@@ -206,12 +206,12 @@ def get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orie
 
     return K, Rt, projection_matrix, view_matrix
 
-def project_3d_world_pos_to_2d_pixel(camera_position, camera_orientation_q, camera, image, world_pos, cam_info):
+def project_3d_world_pos_to_2d_pixel(camera_position, camera_orientation_q, camera, image_size, world_pos, cam_info):
     """
     Calc 2D projection in pixel image space from a 3D x,y,z world pos 
     Note: depth info is not required, as all the 3D world pos on a ray from a certain pixel x_0,y_0 would be projected on the same x_0, y_0
     """
-    image_width, image_height = image.size
+    image_width, image_height = image_size
     K, Rt, projection_matrix, view_matrix = get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=cam_info)
     pixel_2d = []
     if not view_matrix is None and not projection_matrix is None:
@@ -229,12 +229,12 @@ def project_3d_world_pos_to_2d_pixel(camera_position, camera_orientation_q, came
         pixel_2d = [pixel_x, pixel_y]
     return pixel_2d
     
-def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image, point, cam_info=None):
+def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image_size, point, cam_info=None):
     """
     Calc 3D world pos x,y,z from 2D pixel_point [x=point[0],y=point[1]] + depth value (point[2])
     Uses view and projection matrices obtained from Sim + depth value from depth map
     """
-    image_width, image_height = image.size
+    image_width, image_height = image_size
 
     K, Rt, projection_matrix, view_matrix = get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=cam_info)
     if os.environ.get("DEBUG_PINHOLE", "0") == "1":

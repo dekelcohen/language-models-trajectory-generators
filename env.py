@@ -9,6 +9,42 @@ from robot import Robot
 from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT
 from config import SET_DOOR_STATE, CAPTURE_TRAJECTORY_FRAME
+# --- Debug helpers ------------------------------------------------------
+def add_debug_sphere(pos_xyz, radius=0.02, color=(1, 0, 0, 1)):
+    """
+    Create a visual-only sphere at the specified 3D world coordinate.
+    No collision shape and 0 mass so it doesn't affect physics.
+    Returns a marker (body) id or None on failure.
+    """
+    try:
+        visual_shape_id = p.createVisualShape(
+            shapeType=p.GEOM_SPHERE,
+            radius=float(radius),
+            rgbaColor=list(color)
+        )
+        marker_id = p.createMultiBody(
+            baseMass=0.0,
+            baseVisualShapeIndex=visual_shape_id,
+            basePosition=list(map(float, pos_xyz))
+        )
+        return marker_id
+    except Exception as e:
+        # Keep environment running; surface issue to console for diagnosis
+        print("[Env] Warning: add_debug_sphere failed:", e)
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
+        return None
+
+
+def remove_debug_sphere(marker_id):
+    """Remove a previously created debug sphere by its body id."""
+    try:
+        if marker_id is not None:
+            p.removeBody(int(marker_id))
+    except Exception as e:
+        print("[Env] Warning: remove_debug_sphere failed:", e)
 
 # --- Task Profiles ------------------------------------------------------
 # --- Simulation Environment Profiles -----------------------------------
@@ -334,6 +370,8 @@ def run_simulation_environment(args, env_connection, logger):
     env.load()
 
     robot = Robot(args, logger)
+    # Hold ids for visual debug spheres of trajectory points between requests
+    trajectory_debug_marker_ids = []
     if env.simenv.move_to_start_pos():
         robot.move(env, robot.ee_start_position, robot.ee_start_orientation_e, gripper_open=True, is_trajectory=False)
 
@@ -458,6 +496,26 @@ def run_simulation_environment(args, env_connection, logger):
                 trajectory = env_connection_received[1]
 
                 trajectory_points = [point[:3] for point in trajectory]
+                # Remove previous debug spheres
+                try:
+                    for _id in list(trajectory_debug_marker_ids):
+                        try:
+                            remove_debug_sphere(_id)
+                        except Exception:
+                            pass
+                    trajectory_debug_marker_ids.clear()
+                except Exception:
+                    pass
+
+                # Add visual debug spheres for each trajectory point
+                try:
+                    for _pt in trajectory_points:
+                        _mid = add_debug_sphere(_pt, radius=0.02, color=(0, 1, 1, 0.8))
+                        if _mid is not None:
+                            trajectory_debug_marker_ids.append(_mid)
+                except Exception:
+                    pass
+
                 p.addUserDebugPoints(trajectory_points, [[0, 1, 1]] * len(trajectory_points), pointSize=5, lifeTime=0)
 
                 logger.info(OK + "Finished adding trajectory points to the environment!" + ENDC)
