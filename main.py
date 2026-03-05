@@ -193,6 +193,25 @@ def read_env_handshake(main_connection, logger, default_pos):
         logger.error(FAIL + f"Failed to log env state: {e}" + ENDC)
     return ee_pos, msg, coords_section, sim_state
 
+def process_cli_viz_point_arg(args, conn, logger):
+    """Parse --viz-point """
+    if not args.viz_point:
+        return
+    try:
+        _pt = json.loads(args.viz_point)
+        if isinstance(_pt, (list, tuple)) and len(_pt) >= 3:
+            _pos = [float(_pt[0]), float(_pt[1]), float(_pt[2])]
+            conn.send([config.ADD_TRAJECTORY_POINTS, [_pos], "red", True])
+            try:
+                logger.info(PROGRESS + f"Added permanent viz point at {_pos}" + ENDC)
+            except Exception:
+                pass
+    except Exception as e:
+        try:
+            logger.info(FAIL + f"Failed to add viz point: {e}" + ENDC)
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
 
@@ -215,6 +234,7 @@ if __name__ == "__main__":
     parser.add_argument("--add-px", type=int, default=None, help="manual X pixel offset for segmentation bbox")
     parser.add_argument("--add-py", type=int, default=None, help="manual Y pixel offset for segmentation bbox")
     parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")    
+    parser.add_argument("--viz-point", type=str, default=None, help="Add a permanent 3d world visualization point as \"[x,y,z]\"")
     args = parser.parse_args()
 
     # Logging
@@ -264,6 +284,7 @@ if __name__ == "__main__":
         env_process.start()
         # Receive environment handshake and derive EE position for prompt
         ee_pos_for_prompt, _msg, coords_section, sim_state = read_env_handshake(main_connection, logger, ee_pos_for_prompt)
+        process_cli_viz_point_arg(args, main_connection, logger)
     else:
         # Metaworld: WebSockets transport only
         main_connection, server_proc = _setup_metaworld_ws(args, logger)

@@ -218,14 +218,19 @@ class API:
         # Downsample preview to max 3 points: start, middle, end
         _preview = trajectory
         try:
-            if isinstance(trajectory, (list, tuple)) and len(trajectory) > 3:
+            if isinstance(trajectory, (list, tuple)) and len(trajectory) > 5:
                 _n = len(trajectory)
-                _mid = (_n - 1) // 2
-                _preview = [trajectory[0], trajectory[_mid], trajectory[-1]]
-                self.logger.info(PROGRESS + f"Previewing 3 of {_n} trajectory points (start/mid/end)" + ENDC)
+                idxs = [0, int(round(( _n - 1) * 0.25)), int(round(( _n - 1) * 0.5)), int(round(( _n - 1) * 0.75)), _n - 1]
+                # Ensure strictly increasing unique indices
+                _uniq = []
+                for _i in idxs:
+                    if _i not in _uniq:
+                        _uniq.append(_i)
+                _preview = [trajectory[i] for i in _uniq]
+                self.logger.info(PROGRESS + f"Previewing {len(_preview)} of {_n} trajectory points (start/25%/50%/75%/end)" + ENDC)
         except Exception:
             _preview = trajectory
-        self.main_connection.send([ADD_TRAJECTORY_POINTS, _preview])
+        self.main_connection.send([ADD_TRAJECTORY_POINTS, _preview, "random", False])
 
         self.logger.info(PROGRESS + "Executing generated trajectory..." + ENDC)
         self.main_connection.send([EXECUTE_TRAJECTORY, trajectory])

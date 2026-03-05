@@ -10,7 +10,7 @@ from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT
 from config import SET_DOOR_STATE, CAPTURE_TRAJECTORY_FRAME
 # --- Debug helpers ------------------------------------------------------
-def add_debug_sphere(pos_xyz, radius=0.02, color=(1, 0, 0, 1)):
+def add_debug_sphere(pos_xyz, radius=0.015, color=(1, 0, 0, 1)):
     """
     Create a visual-only sphere at the specified 3D world coordinate.
     No collision shape and 0 mass so it doesn't affect physics.
@@ -46,8 +46,81 @@ def remove_debug_sphere(marker_id):
     except Exception as e:
         print("[Env] Warning: remove_debug_sphere failed:", e)
 
+# --- Trajectory visualization helpers ----------------------------------
+COLOR_TABLE = [
+    (1,0,0,0.8),(0,0.6,0,0.8),(0,0.5,1,0.8),(1,0.5,0,0.8),
+    (0.7,0,1,0.8),(1,0,0.7,0.8),(0,0.8,0.8,0.8),(0.8,0.8,0,0.8),
+    (0.5,0.5,0.5,0.8),(0.2,0.2,1,0.8)
+]
+
+def _resolve_color(spec, color_cycle_idx):
+    if isinstance(spec, str):
+        name = spec.strip().lower()
+        named = {
+            'red': (1,0,0,0.8), 'green': (0,0.6,0,0.8), 'blue': (0,0.5,1,0.8),
+            'orange': (1,0.5,0,0.8), 'purple': (0.7,0,1,0.8), 'magenta': (1,0,0.7,0.8),
+            'cyan': (0,0.8,0.8,0.8), 'yellow': (0.8,0.8,0,0.8), 'gray': (0.5,0.5,0.5,0.8)
+        }
+        if name == 'random':
+            c = COLOR_TABLE[color_cycle_idx % len(COLOR_TABLE)]
+            return c, (color_cycle_idx + 1) % len(COLOR_TABLE)
+        if name in named:
+            return named[name], color_cycle_idx
+    return (0,1,1,0.8), color_cycle_idx  # default cyan
+
+
+def handle_add_trajectory_points(trajectory, color_spec, permanent, logger,
+                                 marker_steps, permanent_ids, color_cycle_idx):
+    """Add trajectory preview visualization with spheres + debug points.
+    - marker_steps: list of lists of ids (rolling history for non-permanent)
+    - permanent_ids: list of ids that persist
+    - Returns updated (marker_steps, permanent_ids, color_cycle_idx)
+    """
+    rgba, color_cycle_idx = _resolve_color(color_spec, color_cycle_idx)
+    trajectory_points = [point[:3] for point in trajectory]
+
+    # Add spheres
+    step_ids = []
+    try:
+        for _pt in trajectory_points:
+            _mid = add_debug_sphere(_pt, radius=0.015, color=rgba)
+            if _mid is not None:
+                if permanent:
+                    permanent_ids.append(_mid)
+                else:
+                    step_ids.append(_mid)
+    except Exception:
+        pass
+
+    # Rolling window pruning for non-permanent batches
+    if not permanent and len(step_ids) > 0:
+        marker_steps.append(step_ids)
+        try:
+            while len(marker_steps) > getattr(config, 'visualize_traj_history_steps', 6):
+                old_ids = marker_steps.pop(0)
+                for _id in old_ids:
+                    try:
+                        remove_debug_sphere(_id)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # Debug points (RGB only)
+    try:
+        p.addUserDebugPoints(trajectory_points, [[rgba[0], rgba[1], rgba[2]]] * len(trajectory_points), pointSize=5, lifeTime=0)
+    except Exception:
+        pass
+
+    if logger is not None:
+        try:
+            logger.info(OK + "Finished adding trajectory points to the environment!" + ENDC)
+        except Exception:
+            pass
+    return marker_steps, permanent_ids, color_cycle_idx
 # --- Task Profiles ------------------------------------------------------
 # --- Simulation Environment Profiles -----------------------------------
+
 def _get_joint_index_by_name(body_id, joint_name):
     try:
         for j in range(p.getNumJoints(body_id)):
@@ -58,6 +131,7 @@ def _get_joint_index_by_name(body_id, joint_name):
         print(f"[Env] Error reading joints of body {body_id}:", e)
         traceback.print_exc()
     return None
+
 
 def _get_link_index_by_name(body_id, link_name):
     """Return the link index (same as the joint index in PyBullet)
@@ -77,7 +151,6 @@ def _get_link_index_by_name(body_id, link_name):
         print(f"[Env] Error reading links of body {body_id}:", e)
         traceback.print_exc()
     return None
-    
 class SimEnvBase:
     """Base environment profile. Applies hard-coded runtime overrides and
     loads any required assets. No global config edits elsewhere."""
@@ -239,8 +312,20 @@ class SimEnvDoor(SimEnvBase):
             self.latch_index = _get_joint_index_by_name(self.door_id, "latch_joint")
             # Door handle is the child link named 'latch' in URDF; look it up by link name
             self.door_handle_latch = _get_link_index_by_name(self.door_id, "latch")            
+            
             if self.door_hinge_index is not None:
-                p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
+                # p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
+                # Instead of rigidly holding it at 0.0 with 200 force, give it a resting friction
+                p.setJointMotorControl2(
+                    self.door_id, 
+                    self.door_hinge_index, 
+                    controlMode=p.VELOCITY_CONTROL, 
+                    targetVelocity=0.0, 
+                    force=2.0  # Just enough force to keep it from swinging on its own, but weak enough for the robot to pull
+                )
+                # Increase friction on the handle (latch link)
+                p.changeDynamics(self.door_id, self.door_handle_latch, lateralFriction=2.0, spinningFriction=1.0)
+
             if self.latch_index is not None:
                 p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
         except Exception as e:
@@ -371,7 +456,9 @@ def run_simulation_environment(args, env_connection, logger):
 
     robot = Robot(args, logger)
     # Hold ids for visual debug spheres of trajectory points between requests
-    trajectory_debug_marker_ids = []
+    trajectory_debug_marker_steps = []
+    permanent_marker_ids = []
+    color_cycle_idx = 0
     if env.simenv.move_to_start_pos():
         robot.move(env, robot.ee_start_position, robot.ee_start_orientation_e, gripper_open=True, is_trajectory=False)
 
@@ -494,31 +581,13 @@ def run_simulation_environment(args, env_connection, logger):
             elif env_connection_received[0] == ADD_TRAJECTORY_POINTS:
 
                 trajectory = env_connection_received[1]
+                color_spec = env_connection_received[2] if len(env_connection_received) > 2 else None
+                permanent = bool(env_connection_received[3]) if len(env_connection_received) > 3 else False
 
-                trajectory_points = [point[:3] for point in trajectory]
-                # Remove previous debug spheres
-                try:
-                    for _id in list(trajectory_debug_marker_ids):
-                        try:
-                            remove_debug_sphere(_id)
-                        except Exception:
-                            pass
-                    trajectory_debug_marker_ids.clear()
-                except Exception:
-                    pass
-
-                # Add visual debug spheres for each trajectory point
-                try:
-                    for _pt in trajectory_points:
-                        _mid = add_debug_sphere(_pt, radius=0.02, color=(0, 1, 1, 0.8))
-                        if _mid is not None:
-                            trajectory_debug_marker_ids.append(_mid)
-                except Exception:
-                    pass
-
-                p.addUserDebugPoints(trajectory_points, [[0, 1, 1]] * len(trajectory_points), pointSize=5, lifeTime=0)
-
-                logger.info(OK + "Finished adding trajectory points to the environment!" + ENDC)
+                trajectory_debug_marker_steps, permanent_marker_ids, color_cycle_idx = handle_add_trajectory_points(
+                    trajectory, color_spec, permanent, logger,
+                    trajectory_debug_marker_steps, permanent_marker_ids, color_cycle_idx
+                )
 
             elif env_connection_received[0] == EXECUTE_TRAJECTORY:
 

@@ -150,6 +150,9 @@ xmem_input_path = "./images/xmem_input.png"
 xmem_output_path = "./images/xmem_output_{step}.png"
 
 # Segmentation overlay output for any provider
+# Visualization
+# Keep this many recent preview-steps of trajectory markers (spheres) visible (rolling window).
+visualize_traj_history_steps = 6
 seg_overlay_image_path = "./images/seg_overlay_{provider}_{object}.png"
 
 # Output - ANSI escape color codes:
