@@ -216,7 +216,9 @@ def process_cli_viz_point_arg(args, conn, logger):
 if __name__ == "__main__":
 
     openai.api_key = os.getenv("OPENAI_API_KEY")
-    client = openai.OpenAI()
+    client = None
+    if not openai.api_key is None and len(openai.api_key) > 0:
+        client = openai.OpenAI()
 
     # Parse args
     parser = argparse.ArgumentParser(description="Main Program.")
