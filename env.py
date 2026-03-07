@@ -307,6 +307,16 @@ class SimEnvDoor(SimEnvBase):
                 door_start_orientation_q,
                 useFixedBase=True,
             )
+            # Cosmetics:
+            # 2. Load the image texture into PyBullet
+            wood_texture_id = p.loadTexture("my_assets/adroit_door/wood.png")
+
+            # 3. Apply the texture to the Frame (Base Link: index -1)
+            p.changeVisualShape(self.door_id, 0, textureUniqueId=wood_texture_id)
+
+            # 4. Apply the texture to the Door Panel (Link: index 0)
+            p.changeVisualShape(self.door_id, 1, textureUniqueId=wood_texture_id)
+
             # Resolve indices based on the newly loaded door
             self.door_hinge_index = _get_joint_index_by_name(self.door_id, "door_hinge")
             self.latch_index = _get_joint_index_by_name(self.door_id, "latch_joint")

@@ -214,7 +214,6 @@ class API:
 
     def execute_trajectory(self, trajectory):
 
-        self.logger.info(PROGRESS + "Adding trajectory points to the environment..." + ENDC)
         # Downsample preview to max 3 points: start, middle, end
         _preview = trajectory
         try:
@@ -229,7 +228,9 @@ class API:
                 _preview = [trajectory[i] for i in _uniq]                
         except Exception:
             _preview = trajectory
-        self.main_connection.send([ADD_TRAJECTORY_POINTS, _preview, "random", False])
+        if self.args.vis_traj:
+            self.logger.info(PROGRESS + "Adding trajectory points to the environment..." + ENDC)
+            self.main_connection.send([ADD_TRAJECTORY_POINTS, _preview, "random", False])
 
         self.logger.info(PROGRESS + "Executing generated trajectory..." + ENDC)
         self.main_connection.send([EXECUTE_TRAJECTORY, trajectory])
@@ -455,5 +456,7 @@ class API:
         self.trajectory_length = 0
         self.segmentation_texts = []
         self.attempted_task = False
+
+
 
 

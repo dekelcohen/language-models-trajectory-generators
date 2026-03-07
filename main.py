@@ -235,6 +235,7 @@ if __name__ == "__main__":
     parser.add_argument("--add-py", type=int, default=None, help="manual Y pixel offset for segmentation bbox")
     parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")    
     parser.add_argument("--viz-point", type=str, default=None, help="Add a permanent 3d world visualization point as \"[x,y,z]\"")
+    parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
     args = parser.parse_args()
 
     # Logging
