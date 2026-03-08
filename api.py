@@ -360,7 +360,7 @@ class API:
                               
         # Use conversation history; do not summarize
         messages = self.conversation_messages
-        self.logger.info(PROGRESS + f"VLM review using {len(frame_paths)} frames (stride=5)." + ENDC)
+        self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5)." + ENDC)
         messages = models.get_chatgpt_output(self.client, self.args.language_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, log_msgs=True)
         # Update shared conversation
         self.conversation_messages = messages
@@ -394,6 +394,7 @@ class API:
         
         if self.attempted_task:
             self.completed_task = True
+            self.logger.info(PROGRESS + "task_completed second attempt (attempted_task=True)" + ENDC)
             return
         self.logger.info(PROGRESS + "Waiting to execute all generated trajectories..." + ENDC)
         self.main_connection.send([TASK_COMPLETED])

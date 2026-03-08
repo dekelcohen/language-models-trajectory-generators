@@ -7,8 +7,7 @@ import sys
 import argparse
 import json
 import traceback
-import multiprocessing
-import logging
+from debug.dbg_utils import init_loguru_logger
 import functools
 import models
 import config
@@ -19,6 +18,7 @@ from io import StringIO
 from contextlib import redirect_stdout
 from api import API
 from env import run_simulation_environment
+import segmentation_adapter  # override bbox/object filtering for segmentation
 from prompts.main_prompt import MAIN_PROMPT
 from prompts.error_correction_prompt import ERROR_CORRECTION_PROMPT
 from prompts.print_output_prompt import PRINT_OUTPUT_PROMPT
@@ -234,14 +234,33 @@ if __name__ == "__main__":
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
     parser.add_argument("--review-provider", choices=["vlm", "xmem"], default="vlm", help="review provider for success verification; vlm uses the vision-language (gpt) reviewer; xmem preserves the legacy tracking flow")
     parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")    
+    parser.add_argument(
+        "--ovr-obj",
+        type=str,
+        default=None,
+        help=(
+            "Apply --ovr-bbox only to predictions whose text label (provider 'class') matches this regex. "
+            "If omitted, the override applies to all predictions (legacy behavior). "
+            "Examples: door.*?(handle|knob|lever) ; (?i)^door\\s+lever$ . "
+        ),
+    )
     parser.add_argument("--viz-point", type=str, default=None, help="Add a permanent 3d world visualization point as \"[x,y,z]\"")
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
     args = parser.parse_args()
 
-    # Logging
-    logger = multiprocessing.log_to_stderr()
-    logger.setLevel(logging.INFO)
+    
+    try:
+        os.makedirs(config.images_folder, exist_ok=True)
+    except Exception as e:
+        # Fail fast to avoid silent non-file logging
+        raise RuntimeError(f"Failed to ensure images folder exists at '{config.images_folder}': {e}") from e
 
+    # Logging (Loguru): emit to console and to a file under images folder
+    logger = init_loguru_logger("vlm_traj.log")
+    # Also wire adapter-level logger for its internal warnings
+    segmentation_adapter.logger = logger
+
+    segmentation_adapter.set_override_object_regex(args.ovr_obj)
     # Ensure image output directories exist (optionally clean before)
     from common_utils import ensure_image_dirs_exist
     ensure_image_dirs_exist(delete=args.delete_images)
@@ -281,7 +300,9 @@ if __name__ == "__main__":
     if args.sim == "pybullet":
         main_connection, env_connection = Pipe()
         # Start process
-        env_process = Process(target=run_simulation_environment, name="EnvProcess", args=[args, env_connection, logger])
+        # Do not pass Loguru logger across processes (not picklable on Windows).
+        # Child process will initialize its own Loguru sinks.
+        env_process = Process(target=run_simulation_environment, name="EnvProcess", args=[args, env_connection, None])
         env_process.start()
         # Receive environment handshake and derive EE position for prompt
         ee_pos_for_prompt, _msg, coords_section, sim_state = read_env_handshake(main_connection, logger, ee_pos_for_prompt)

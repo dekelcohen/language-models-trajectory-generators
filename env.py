@@ -1,5 +1,7 @@
+import os
 import pybullet as p
 import numpy as np
+from debug.dbg_utils import init_loguru_logger
 import pybullet_data
 from PIL import Image
 import traceback
@@ -450,6 +452,9 @@ class Environment:
 def run_simulation_environment(args, env_connection, logger):
 
     # Environment set-up
+    # Initialize env process logger (console + ANSI-stripped file)    
+    logger = init_loguru_logger("env_pybullet.log")
+                    
     logger.info(PROGRESS + "Setting up environment..." + ENDC)
 
     physics_client = p.connect(p.DIRECT) # Dekel: Changed for headless offscreen (no GUI) - was p.GUI
@@ -666,9 +671,7 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
     - Disables door joint motor forces for easy mouse-pick/drag of the hinge/latch (GUI).
     - In GUI, enables real-time simulation and idles; in DIRECT, exits after setup.
     """
-    import logging
-    logger = logging.getLogger("env_gui")
-    logger.setLevel(logging.INFO)
+    logger = loguru_logger    
     try:
         tag = "[Env GUI]" if connection_mode==p.GUI else "[Env Direct]"
         physics_client = p.connect(connection_mode)

@@ -174,3 +174,69 @@ def install_debug_reminder(tip: str | None = None) -> None:
 
     _REMINDER_INSTALLED = True
 
+# -------------------------
+# Log file ANSI stripping
+# -------------------------
+import re
+from typing import Any, Dict
+
+_ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+# Some environments may strip the ESC byte, leaving bracket codes like "[92m" in text.
+# This regex removes a limited set of such codes (color/style + erase) to avoid false positives.
+_BARE_ANSI_RE = re.compile(r"\[[0-9;]*[mK]")
+
+def _strip_ansi_for_file(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove ANSI escape codes from record["message"] for file logging.
+
+    - Strips standard CSI sequences starting with ESC.
+    - Also strips bracket-only color/erase sequences (e.g., "[92m", "[0m", "[2K")
+      which can appear if ESC was lost upstream.
+    """
+    try:
+        msg = str(record.get("message", ""))
+        msg = _ANSI_RE.sub("", msg)
+        msg = _BARE_ANSI_RE.sub("", msg)
+        record["message"] = msg
+    except Exception:
+        pass
+    return record
+
+def init_loguru_logger(file_basename: str = "vlm_traj.log"):
+    import os
+    import sys
+    import config
+    from loguru import logger as loguru_logger
+
+    log_file_path = os.path.join(config.images_folder, file_basename)
+
+    # Remove default logger so we control both sinks
+    loguru_logger.remove()
+
+    # Console sink (keep colors, no stripping)
+    loguru_logger.add(
+        sys.stdout,
+        level="INFO",
+        colorize=True,
+        format="{time:HH:mm} | {level:<8} | {message}",
+    )
+
+    # File sink (strip ANSI)
+    def _file_log_format(record):
+        msg = str(record["message"])
+        msg = _ANSI_RE.sub("", msg)
+        msg = _BARE_ANSI_RE.sub("", msg)
+
+        # Escape braces so Loguru formatter doesn't treat them as placeholders
+        msg = msg.replace("{", "{{").replace("}", "}}")
+        return f"{record['time']:HH:mm} | {record['level'].name:<8} | {msg}\n"
+
+    loguru_logger.add(
+        log_file_path,
+        level="INFO",
+        enqueue=True,
+        encoding="utf-8",
+        colorize=False,
+        format=_file_log_format,
+    )
+
+    return loguru_logger

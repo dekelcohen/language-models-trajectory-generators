@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import re
 from typing import List, Tuple
 import numpy as np
 
@@ -29,8 +30,9 @@ _ovr_x2 = None
 _ovr_y1 = None
 _ovr_y2 = None
 
-
-
+# Optional object-match regex: when set, apply the bbox override
+# only to predictions whose text label matches the regex.
+_ovr_obj_regex = None  # type: re.Pattern | None
 def override_bbox_from_globals(H: int, W: int):
     """
     If all override globals are set, return integer (x1,y1,x2,y2) as provided.
@@ -166,19 +168,21 @@ def _moondream_predict(image_pil, prompts: List[str]):
     boxes_np = []
     labels: List[str] = []
 
-    # If user supplied a full override bbox, apply it for all predictions
+    # If user supplied a full override bbox, consider applying per-match
     override_rect = override_bbox_from_globals(H, W)
 
     for p in preds:
-        if override_rect is not None:
-            x1, y1, x2, y2 = override_rect
-        else:
-            bbox_px = p.get("bbox_pixels") or []
-            if len(bbox_px) != 4:
-                continue
-            # Ensure integer pixel coords for downstream drawing
+        bbox_px = p.get("bbox_pixels") or []
+        if len(bbox_px) == 4:
             x1, y1, x2, y2 = [int(round(float(v))) for v in bbox_px]
-            
+        else:
+            raise ValueError(f'bbox_pixels should be 4 ints {bbox_px}')
+
+        label_str = str(p.get("class", ""))
+        # Apply override only when set and either regex not provided (apply all) or label matches regex
+        if override_rect is not None and (_ovr_obj_regex is None or _ovr_obj_regex.search(label_str or "")):
+            x1, y1, x2, y2 = override_rect
+
         if x2 <= x1 or y2 <= y1:
             continue
 
@@ -237,3 +241,20 @@ def set_override_bbox_from_string(ovr_str: str | None):
     except Exception as e:
         raise ValueError(f"Failed to parse --ovr-bbox values from '{ovr_str}': {e}")
     _ovr_x1, _ovr_y1, _ovr_x2, _ovr_y2 = x1, y1, x2, y2
+
+
+def set_override_object_regex(regex_str: str | None):
+    """
+    Set an optional regex. When provided, --ovr-bbox is applied only
+    to predictions whose text label (provider 'class') matches the regex.
+    If None or empty, the override applies to all predictions (legacy behavior).
+    Raises ValueError when the regex is invalid.
+    """
+    global _ovr_obj_regex
+    if not regex_str:
+        _ovr_obj_regex = None
+        return
+    try:
+        _ovr_obj_regex = re.compile(str(regex_str))
+    except Exception as e:
+        raise ValueError(f"Invalid --ovr-obj regex '{regex_str}': {e}")
