@@ -20,9 +20,6 @@ import numpy as np
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
 logger = None
 
-# Optional pixel offsets supplied via CLI (wired from api.py)
-add_px = None
-add_py = None
 
 # Optional bbox override supplied via CLI (wired from api.py)
 # When all four are set to integers, the adapter will ignore provider
@@ -32,39 +29,6 @@ _ovr_x2 = None
 _ovr_y1 = None
 _ovr_y2 = None
 
-
-def apply_diag_offsets(x1: int, y1: int, x2: int, y2: int, H: int, W: int):
-    """
-    Apply diagnostic pixel offsets (add_px/add_py) to a rectangle and clamp.
-    Preserves historical behavior from prior nested helper:
-      - add_px shifts x1 by +dx
-      - add_py shifts y2 by +dy
-    Returns clamped integer coordinates (x1, y1, x2, y2).
-    """
-    try:
-        if add_px is not None:
-            dx = int(add_px)
-            x1 += dx
-            if logger:
-                logger.info(PROGRESS + f"Manual bbox X offset: +{dx} --> x1={x1} y1={y1} x2={x2} y2={y2} " + ENDC)
-    except Exception as e:
-        print(f"Error using add_px={add_px}. {e}")
-
-    try:
-        if add_py is not None:
-            dy = int(add_py)
-            y2 += dy
-            if logger:
-                logger.info(PROGRESS + f"Manual bbox Y offset: +{dy} --> x1={x1} y1={y1} x2={x2} y2={y2} " + ENDC)
-    except Exception as e:
-        print(f"Error using add_py={add_py}. {e}")
-
-    # Clamp to image bounds
-    x1_c = max(0, min(W, int(x1)))
-    x2_c = max(0, min(W, int(x2)))
-    y1_c = max(0, min(H, int(y1)))
-    y2_c = max(0, min(H, int(y2)))
-    return x1_c, y1_c, x2_c, y2_c
 
 
 def override_bbox_from_globals(H: int, W: int):
@@ -214,9 +178,7 @@ def _moondream_predict(image_pil, prompts: List[str]):
                 continue
             # Ensure integer pixel coords for downstream drawing
             x1, y1, x2, y2 = [int(round(float(v))) for v in bbox_px]
-            # Apply diagnostic offsets once and reuse for both boxes and masks
-            x1, y1, x2, y2 = apply_diag_offsets(x1, y1, x2, y2, H, W)
-
+            
         if x2 <= x1 or y2 <= y1:
             continue
 

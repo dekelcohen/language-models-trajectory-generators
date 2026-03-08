@@ -103,35 +103,67 @@ def visualize_segmentation_overlay(image, masks_any, boxes_any, labels, out_path
 
 
 
-def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdout):
+def log_messages(messages, file, prefix):
+    """messages to log
+    - file: stream to print warnings to
+    - prefix: filename prefix (e.g., "vlm_review" or "chat")
+    """
+    try:
+        import json
+        import os
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = os.path.join(config.images_folder, f"{prefix}_messages_{ts}.json")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(messages, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Warning: failed to log messages JSON: {e}", file=file)
+        
+def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdout, image_paths=None, log_msgs=False):
+    """
+    Call LLM (model - for zure or client - openai client) with new_prompt, existing conversation messages, role, image_paths - to attach images.
+    new_prompt - optional: can be None or empty (only if image_paths is also None/empty)
+    image_paths - optional: can be None or empty 
+    messages - existing conversation messages. will be updated with assistant response and returned.
+      You can optionally add to messages before calling and pass new_prompt=None, image_paths=None
+    """
     print(role + ":", file=file)
     print(new_prompt, file=file)
-    messages.append({"role": role, "content": new_prompt})
-
+    from azure_openai import append_to_messages
+    messages_before = list(messages) if messages is not None else []
+    messages = append_to_messages(new_prompt, image_paths, messages, role)
     # ----------------------------------------------------------------------
     # 1. Azure OpenAI mode: model name starts with "azure-"
     # ----------------------------------------------------------------------
     if model.startswith("azure-"):
-        from azure_openai import call_llm   # import your Azure helper
-
-        # deployment name is the substring after "azure-"
+        from azure_openai import call_llm
         deployment = model[len("azure-"):]
-
         print("assistant:", file=file)
-
-        # Call Azure endpoint (non-streaming)
-        new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=60000) # max_tokens for gpt-5 thinking 
-
-        # Convert LLM JSON response to text
-        #new_output = json.dumps(azure_response, ensure_ascii=False)
-
+        new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=60000)
         print(new_output, file=file)
-        
         if not new_output or len(new_output) < 5:
-            print(f'Warning: Model response is empty or very short {new_output}. messages: {messages}')
-            
-        messages.append({"role": "assistant", "content": new_output})
-        return messages
+            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")        
+    else:
+        completion = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            messages=messages,
+            stream=True
+        )
+        print("assistant:", file=file)
+        new_output = ""
+        for chunk in completion:
+            chunk_content = chunk.choices[0].delta.content
+            finish_reason = chunk.choices[0].finish_reason
+            if chunk_content is not None:
+                print(chunk_content, end="", file=file)
+                new_output += chunk_content
+            else:
+                print("finish_reason:", finish_reason, file=file)
+    messages.append({"role": "assistant", "content": new_output})
+    if log_msgs:
+        log_messages(messages, file, prefix=("vlm_review" if image_paths else "chat"))
+    return messages
 
     # ----------------------------------------------------------------------
     # 2. OpenAI normal mode (original code)
@@ -207,3 +239,4 @@ def get_xmem_output(model, device, trajectory_length):
                 output.save(config.xmem_output_path.format(step=i))
 
     return masks
+

@@ -84,6 +84,8 @@ def append_to_messages(new_prompt: str,
 
     # Text-only message
     if not attach_images:
+        if not new_prompt:
+            return messages
         messages.append({
             "role": role,
             "content": new_prompt

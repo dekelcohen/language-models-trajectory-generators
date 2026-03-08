@@ -14,6 +14,39 @@ from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT
 
+
+def create_trajectory_videos(logger):
+    """Create trajectory debug videos from captured frames (head and wrist).
+    Uses `config.trajectory_folder`, `trajectory_image_base`, `trajectory_wrist_image_base`, and `trajectory_video_fps`. Logs warnings instead of raising on errors.
+    """
+    try:
+        from debug.dbg_utils import create_video_from_images
+        from contextlib import redirect_stdout
+        import sys as _sys
+        with redirect_stdout(_sys.stderr):
+            create_video_from_images(
+                folder_path=config.trajectory_folder,
+                base_name=config.trajectory_image_base,
+                start_idx=0,
+                end_idx=float('inf'),
+                fps=config.trajectory_video_fps,
+            )
+        logger.info(OK + "Saved trajectory video from captured frames." + ENDC)
+        try:
+            with redirect_stdout(_sys.stderr):
+                create_video_from_images(
+                    folder_path=config.trajectory_folder,
+                    base_name=config.trajectory_wrist_image_base,
+                    start_idx=0,
+                    end_idx=float('inf'),
+                    fps=config.trajectory_video_fps,
+                )
+            logger.info(OK + "Saved wrist trajectory video from captured frames." + ENDC)
+        except Exception as e_w:
+            logger.info(PROGRESS + f"Warning: could not create wrist trajectory video: {e_w}" + ENDC)
+    except Exception as e:
+        logger.info(PROGRESS + f"Warning: could not create trajectory video: {e}" + ENDC)
+
 class API:
 
     def __init__(self, args, main_connection, logger, client, langsam_model, xmem_model, device):
@@ -22,10 +55,7 @@ class API:
         self.main_connection = main_connection
         self.logger = logger
         utils.logger = self.logger # injects logger into utils global scope 
-        segmentation_adapter.logger = self.logger # injects logger into utils global scope 
-        # Wire CLI pixel offsets into segmentation adapter globals
-        segmentation_adapter.add_px = args.add_px
-        segmentation_adapter.add_py = args.add_py        
+        segmentation_adapter.logger = self.logger # injects logger into utils global scope         
         # Parse optional override bbox string "x1,y1,x2,y2"
         segmentation_adapter.set_override_bbox_from_string(args.ovr_bbox)
         
@@ -33,6 +63,8 @@ class API:
         self.langsam_model = langsam_model
         self.xmem_model = xmem_model
         self.device = device
+        self.conversation_messages = []
+        self.trajectory_step = 0
         self.segmentation_texts = []
         self.segmentation_count = 0
         self.trajectory_length = 0
@@ -46,9 +78,6 @@ class API:
         self.head_image_size = None
         self.wrist_image_size = None
         self.command = None
-        # Tracking provider selection ("xmem" or "none")
-        self.track_provider = getattr(args, "track_provider", "xmem")
-
 
 
     def detect_object(self, segmentation_text):
@@ -234,7 +263,20 @@ class API:
 
         self.logger.info(PROGRESS + "Executing generated trajectory..." + ENDC)
         self.main_connection.send([EXECUTE_TRAJECTORY, trajectory])
-
+        try:
+            resp = self.main_connection.recv()
+            if isinstance(resp, list) and len(resp) >= 2:
+                _msg, step = resp[0], resp[1]
+                try:
+                    self.trajectory_step = int(step)
+                except Exception:
+                    pass
+                try:
+                    self.logger.info(_msg)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         self.trajectory_length += len(trajectory)
 
 
@@ -297,85 +339,91 @@ class API:
         self.main_connection.send([CLOSE_GRIPPER])
 
 
-
-    def task_completed(self):
-
-        if self.attempted_task:
+    def run_vlm_review(self):
+        """Subsample trajectory frames and ask VLM to judge success.
+        Expects strict JSON: { "success": true/false, "reasoning": "..." }.
+        Does not mutate the environment.
+        """
+        from prompts.review_prompt import REVIEW_PROMPT
+        import os
+        frame_paths = []
+        max_step = self.trajectory_step
+        # Subsample every 5th frame from head RGB only
+        for i in range(0, max_step + 1, 5):
+            pth = config.rgb_image_trajectory_path.format(step=i)
+            if os.path.exists(pth):
+                frame_paths.append(pth)
+        # Build prompt with placeholders
+        prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.command)) \
+                              .replace("[INSERT 3D COORDINATES PROMPT SECTION]", self.coords_section) \
+                              .replace("[INSERT FRAME PATHS]", "\n".join(frame_paths))
+                              
+        # Use conversation history; do not summarize
+        messages = self.conversation_messages
+        self.logger.info(PROGRESS + f"VLM review using {len(frame_paths)} frames (stride=5)." + ENDC)
+        messages = models.get_chatgpt_output(self.client, self.args.language_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, log_msgs=True)
+        # Update shared conversation
+        self.conversation_messages = messages
+        # Parse assistant JSON
+        raw = messages[-1]["content"] if messages and isinstance(messages[-1], dict) else ""
+        try:
+            s = raw.strip()
+            # Robust extraction: find JSON object boundaries if extra characters slipped in
+            if not s.startswith("{"):
+                _l = s.find('{'); _r = s.rfind('}')
+                if _l >= 0 and _r >= 0 and _r > _l:
+                    s = s[_l:_r+1]
+            resp = json.loads(s)
+        except Exception as e:
+            self.logger.info(FAIL + f"Review JSON parse error: {e}. Raw=\n{raw}" + ENDC)
+            self.failed_task = True
+            return
+        success = bool(resp.get("success") is True)
+        reason = resp.get("reasoning", "")
+        improvement_steps = resp.get("improvement_steps", "")
+        if success:
+            self.logger.info(OK + f"Review: success. Reason: {reason}\nImprovement steps: {improvement_steps}" + ENDC)
             self.completed_task = True
         else:
-            # Create a trajectory video at the beginning for easier debugging.
-            # Redirect only create_video stdout to stderr so main's exec() stdout capture
-            # does not treat prints as LLM feedback triggers. Logger remains unaffected.
-            try:
-                from debug.dbg_utils import create_video_from_images
-                from contextlib import redirect_stdout
-                import sys
-                with redirect_stdout(sys.stderr):
-                    create_video_from_images(
-                        folder_path=config.trajectory_folder,
-                        base_name=config.trajectory_image_base,
-                        start_idx=0,
-                        end_idx=float('inf'),
-                        fps=config.trajectory_video_fps,
-                    )
-                self.logger.info(OK + "Saved trajectory video from captured frames." + ENDC)
+            self.logger.info(FAIL + f"Review: failure. Reason: {reason}\nImprovement steps: {improvement_steps}" + ENDC)
+            self.failed_task = True
 
-                # Also create wrist-camera video from saved frames (same folder)
-                try:
-                    with redirect_stdout(sys.stderr):
-                        create_video_from_images(
-                            folder_path=config.trajectory_folder,
-                            base_name=config.trajectory_wrist_image_base,
-                            start_idx=0,
-                            end_idx=float('inf'),
-                            fps=config.trajectory_video_fps,
-                        )
-                    self.logger.info(OK + "Saved wrist trajectory video from captured frames." + ENDC)
-                except Exception as e_w:
-                    self.logger.info(PROGRESS + f"Warning: could not create wrist trajectory video: {e_w}" + ENDC)
-            except Exception as e:
-                self.logger.info(PROGRESS + f"Warning: could not create trajectory video: {e}" + ENDC)
 
-            self.logger.info(PROGRESS + "Waiting to execute all generated trajectories..." + ENDC)
-            self.main_connection.send([TASK_COMPLETED])
-            [env_connection_message] = self.main_connection.recv()
-            self.logger.info(env_connection_message)
+    def task_completed(self):        
+        create_trajectory_videos(self.logger)
+        
+        if self.attempted_task:
+            self.completed_task = True
+            return
+        self.logger.info(PROGRESS + "Waiting to execute all generated trajectories..." + ENDC)
+        self.main_connection.send([TASK_COMPLETED])
+        [env_connection_message] = self.main_connection.recv()
+        self.logger.info(env_connection_message)
 
-            # If tracking is disabled, skip XMem-based verification entirely
-            if self.track_provider == "none":
-                self.logger.info(PROGRESS + "Tracking disabled (--track-provider=none); skipping XMem verification." + ENDC)
-                self.completed_task = True
-                return
-
+        # Dispatch review provider
+        if self.args.review_provider == "xmem":
+            # Legacy XMem path preserved
             self.logger.info(PROGRESS + "Generating XMem output..." + ENDC)
             masks = models.get_xmem_output(self.xmem_model, self.device, self.trajectory_length)
             self.logger.info(OK + "Finished generating XMem output!" + ENDC)
 
             num_objects = len(np.unique(masks[0])) - 1
-
             new_prompt = SUCCESS_DETECTION_PROMPT.replace("[INSERT TASK]", self.command)
             new_prompt += "\n"
-
             self.logger.info(PROGRESS + "Calculating object bounding cubes..." + ENDC)
 
             for object in range(1, num_objects + 1):
-
                 object_positions = []
                 object_orientations = []
-
                 idx_offset = 0
-
                 for i, mask in enumerate(masks):
-
                     rgb_image = Image.open(config.rgb_image_trajectory_path.format(step=i * config.xmem_output_every)).convert("RGB")
                     depth_image = Image.open(config.depth_image_trajectory_path.format(step=i * config.xmem_output_every)).convert("L")
                     depth_array = np.array(depth_image) / 255.
-
                     object_mask = mask.copy()
                     object_mask[object_mask != object] = False
                     object_mask[object_mask == object] = True
                     object_mask = torch.Tensor(object_mask)
-
                     bounding_cubes, orientations = utils.get_bounding_cube_from_point_cloud(
                         rgb_image,
                         [object_mask],
@@ -385,77 +433,65 @@ class API:
                         object - 1,
                         cam_info=self.cam_info,
                     )
-
                     if len(bounding_cubes) == 0:
-
                         self.logger.info("No bounding cube found: removed.")
                         idx_offset += 1
-
                     else:
-
                         [bounding_cube] = bounding_cubes
                         [orientation] = orientations
                         position = bounding_cube[4]
                         orientation = orientation[0]
                         orientation = np.mod(orientation + math.pi, 2 * math.pi) - math.pi
-
                         object_positions.append(position)
-
                         if i == 0:
-
                             object_orientations.append(orientation)
-
                         else:
-
                             previous_orientation = object_orientations[i - 1 - idx_offset]
                             possible_orientations = np.array([np.mod(orientation + i * math.pi / 2 + math.pi, 2 * math.pi) - math.pi for i in range(4)])
                             circular_difference = np.minimum(np.abs(possible_orientations - previous_orientation), 2 * math.pi - np.abs(possible_orientations - previous_orientation))
                             min_index = np.argmin(circular_difference)
                             orientation = possible_orientations[min_index]
                             object_orientations.append(orientation)
-
                 new_prompt += self.segmentation_texts[object - 1] + " trajectory positions and orientations:\n"
                 new_prompt += "Positions:\n"
                 new_prompt += str(np.around([position for p, position in enumerate(object_positions) if p % config.xmem_lm_input_every == 0], 3)) + "\n"
                 new_prompt += "Orientations:\n"
                 new_prompt += str(np.around([orientation for o, orientation in enumerate(object_orientations) if o % config.xmem_lm_input_every == 0], 3)) + "\n"
-                new_prompt += "\n"
-
             self.logger.info(OK + "Finished calculating object bounding cubes!" + ENDC)
-
             self.attempted_task = True
-
             messages = []
-
             self.logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
             messages = models.get_chatgpt_output(self.client, self.args.language_model, new_prompt, messages, "system", file=sys.stderr)
             self.logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
-
             code_block = messages[-1]["content"].split("```python")
-
             task_completed = self.task_completed
             task_failed = self.task_failed
-
             for block in code_block:
                 if len(block.split("```")) > 1:
                     code = block.split("```")[0]
                     exec(code)
-
-
-
+            return
+        # VLM review path
+        try:
+            self.run_vlm_review()
+        except Exception as e:
+            self.logger.info(FAIL + f"VLM review failed: {e}" + ENDC)
+            # Fall back to marking failure; main loop will replan
+            self.failed_task = True
+        self.attempted_task = True
+        return
+    
     def task_failed(self):
-
+        """Mark failure without resetting the environment.
+        Keeps the current sim state to mimic real-world retries.
+        """
         self.failed_task = True
+        # Do not reset env or counters; retries will continue from current state
 
-        self.logger.info(PROGRESS + "Resetting environment..." + ENDC)
-        self.main_connection.send([RESET_ENVIRONMENT])
-        [env_connection_message] = self.main_connection.recv()
-        self.logger.info(env_connection_message)
 
-        self.segmentation_count = 0
-        self.trajectory_length = 0
-        self.segmentation_texts = []
-        self.attempted_task = False
+
+
+
 
 
 

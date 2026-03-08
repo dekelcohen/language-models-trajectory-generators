@@ -232,9 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
     parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
-    parser.add_argument("--track-provider", choices=["xmem", "none"], default="xmem", help="tracking provider for success verification; set to 'none' to disable XMem usage")
-    parser.add_argument("--add-px", type=int, default=None, help="manual X pixel offset for segmentation bbox")
-    parser.add_argument("--add-py", type=int, default=None, help="manual Y pixel offset for segmentation bbox")
+    parser.add_argument("--review-provider", choices=["vlm", "xmem"], default="vlm", help="review provider for success verification; vlm uses the vision-language (gpt) reviewer; xmem preserves the legacy tracking flow")
     parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")    
     parser.add_argument("--viz-point", type=str, default=None, help="Add a permanent 3d world visualization point as \"[x,y,z]\"")
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
@@ -266,7 +264,7 @@ if __name__ == "__main__":
         langsam_model = None
     xmem_model = None
     # Lazily load XMem only if requested
-    if args.track_provider == "xmem":
+    if args.review_provider == "xmem":
         try:
             sys.path.append("./XMem/")
             from XMem.model.network import XMem  # type: ignore
@@ -302,6 +300,8 @@ if __name__ == "__main__":
 
     # Pass env sim_state into API for diagnostics
     api.sim_state = sim_state
+    api.ee_pos_for_prompt = ee_pos_for_prompt
+    api.coords_section = coords_section
     detect_object = api.detect_object
     execute_trajectory = api.execute_trajectory
     open_gripper = api.open_gripper
@@ -341,6 +341,7 @@ if __name__ == "__main__":
 
         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
+        api.conversation_messages = messages
         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
         while True:
@@ -393,6 +394,7 @@ if __name__ == "__main__":
     
                         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
                         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
+                        api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
                         logger.info(PROGRESS + "RETRYING TASK..." + ENDC)
@@ -416,6 +418,7 @@ if __name__ == "__main__":
     
                         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
                         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
+                        api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
                         api.failed_task = False
@@ -424,6 +427,7 @@ if __name__ == "__main__":
     
                         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
                         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
+                        api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
                         error = False
@@ -437,6 +441,7 @@ if __name__ == "__main__":
 
             logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
             messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
+            api.conversation_messages = messages
             logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     except KeyboardInterrupt:
         logger.info(PROGRESS + "Interrupted by user (Ctrl+C). Shutting down..." + ENDC)

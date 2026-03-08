@@ -8,7 +8,6 @@ import config
 from robot import Robot
 from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT
-from config import SET_DOOR_STATE, CAPTURE_TRAJECTORY_FRAME
 # --- Debug helpers ------------------------------------------------------
 def add_debug_sphere(pos_xyz, radius=0.015, color=(1, 0, 0, 1)):
     """
@@ -610,45 +609,7 @@ def run_simulation_environment(args, env_connection, logger):
                     env.update()
 
                 logger.info(OK + "Finished executing generated trajectory!" + ENDC)
-
-            elif env_connection_received[0] == SET_DOOR_STATE:
-
-                # Payload: {"door_angle": float | None, "latch_angle": float | None}
-                payload = env_connection_received[1] if len(env_connection_received) > 1 else {}
-                door_angle = payload.get("door_angle") if isinstance(payload, dict) else None
-                latch_angle = payload.get("latch_angle") if isinstance(payload, dict) else None
-                try:
-                    self.set_door_state(door_angle=door_angle, latch_angle=latch_angle)
-                    # Run a few sim steps for visual settling
-                    for _ in range(5):
-                        self.update()
-                    env_connection_message = OK + "Updated door state." + ENDC
-                    env_connection.send([env_connection_message])
-                except Exception as e:
-                    env_connection_message = FAIL + f"Failed to update door state: {e}" + ENDC
-                    env_connection.send([env_connection_message])
-
-            elif env_connection_received[0] == CAPTURE_TRAJECTORY_FRAME:
-
-                # Render and save a trajectory frame via robot API
-                try:
-                    step_idx = env_connection_received[1] if len(env_connection_received) > 1 else None
-                    if step_idx is None:
-                        step_idx = 0
-
-                    robot.get_camera_image(
-                        "head",
-                        env,
-                        save_camera_image=True,
-                        rgb_image_path=config.rgb_image_trajectory_path.format(step=step_idx),
-                        depth_image_path=config.depth_image_trajectory_path.format(step=step_idx),
-                    )
-
-                    env_connection_message = OK + f"Captured trajectory frame {step_idx}." + ENDC
-                    env_connection.send([env_connection_message])
-                except Exception as e:
-                    env_connection_message = FAIL + f"Failed to capture trajectory frame: {e}" + ENDC
-                    env_connection.send([env_connection_message])
+                env_connection.send([OK + "Finished executing generated trajectory!" + ENDC, robot.trajectory_step])
 
             elif env_connection_received[0] == OPEN_GRIPPER:
 
