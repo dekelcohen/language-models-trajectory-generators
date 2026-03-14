@@ -1,7 +1,11 @@
-# pip install opencv-python
-import cv2
+﻿# pip install opencv-python loguru
 import os
+import sys
+import io
 import glob
+import config
+import cv2
+from loguru import logger as loguru_logger
 
 from helpers.image_utils import find_available_frame
 
@@ -201,23 +205,89 @@ def _strip_ansi_for_file(record: Dict[str, Any]) -> Dict[str, Any]:
         pass
     return record
 
-def init_loguru_logger(file_basename: str = "vlm_traj.log"):
-    import os
-    import sys
-    import config
-    from loguru import logger as loguru_logger
 
+class _StdStreamTee(io.TextIOBase):
+    """
+    Tee stdout/stderr into the file-only path without duplicating console
+    """
+    def __init__(self, stream, bound_logger):
+        self._stream = stream
+        self._logger = bound_logger
+        self._buffer = ""
+
+    def write(self, s):
+        try:
+            # Always forward to the real console stream
+            self._stream.write(s)
+        except Exception:
+            pass
+
+        try:
+            # Buffer and emit in blocks up to the last newline
+            self._buffer += str(s)
+            last = self._buffer.rfind("\n")
+            if last != -1:
+               chunk = self._buffer[:last]
+               self._buffer = self._buffer[last+1:]
+               chunk = chunk.replace("\r", "")
+               # Emit as a single record to avoid per-line prefixes
+               if chunk:
+                   self._logger.info(chunk)
+               else:
+                   self._logger.info("")
+        except Exception:
+            # Never raise from logger path; console already received text
+            pass
+        return len(s)
+
+    def flush(self):
+        try:
+            self._stream.flush()
+        except Exception:
+            pass
+        try:
+            if self._buffer:
+                self._logger.info(self._buffer.rstrip("\r\n"))
+                self._buffer = ""
+        except Exception:
+            pass
+
+    def isatty(self):
+        try:
+            return self._stream.isatty()
+        except Exception:
+            return False
+            
+def init_loguru_logger(file_basename: str = "vlm_traj.log"):
+    """Initialize Loguru with console + file sinks and tee stdio to file.
+
+    - Console: pretty colors, does NOT duplicate captured prints.
+    - File: receives both logger messages and any writes to stdout/stderr.
+    """    
     log_file_path = os.path.join(config.images_folder, file_basename)
+
+    # Keep references to the real stdio before we touch anything
+    orig_stdout = sys.stdout
+    orig_stderr = sys.stderr
 
     # Remove default logger so we control both sinks
     loguru_logger.remove()
 
+    # Ensure console does NOT print the re-logged stdio lines again
+    def _console_filter(record):
+        try:
+            src = record.get("extra", {}).get("source")
+            return src not in ("stdout", "stderr")
+        except Exception:
+            return True
+
     # Console sink (keep colors, no stripping)
     loguru_logger.add(
-        sys.stdout,
+        orig_stdout,
         level="INFO",
         colorize=True,
-        format="{time:HH:mm} | {level:<8} | {message}",
+        filter=_console_filter,
+        format="{time:DD/MM HH:mm} | {level:<8} | {message}",
     )
 
     # File sink (strip ANSI)
@@ -228,7 +298,7 @@ def init_loguru_logger(file_basename: str = "vlm_traj.log"):
 
         # Escape braces so Loguru formatter doesn't treat them as placeholders
         msg = msg.replace("{", "{{").replace("}", "}}")
-        return f"{record['time']:HH:mm} | {record['level'].name:<8} | {msg}\n"
+        return f"{record['time']:DD/MM HH:mm} | {record['level'].name:<8} | {msg}\n"
 
     loguru_logger.add(
         log_file_path,
@@ -239,4 +309,10 @@ def init_loguru_logger(file_basename: str = "vlm_traj.log"):
         format=_file_log_format,
     )
 
+
+    # Bind sources so console sink can filter them out
+    sys.stdout = _StdStreamTee(orig_stdout, loguru_logger.bind(source="stdout"))
+    sys.stderr = _StdStreamTee(orig_stderr, loguru_logger.bind(source="stderr"))
+
     return loguru_logger
+

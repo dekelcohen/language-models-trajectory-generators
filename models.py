@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 import matplotlib.pyplot as plt
 import sys
 import torch
@@ -119,7 +119,7 @@ def log_messages(messages, file, prefix):
     except Exception as e:
         print(f"Warning: failed to log messages JSON: {e}", file=file)
         
-def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdout, image_paths=None, log_msgs=False):
+def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, image_paths=None, log_msgs=False):
     """
     Call LLM (model - for zure or client - openai client) with new_prompt, existing conversation messages, role, image_paths - to attach images.
     new_prompt - optional: can be None or empty (only if image_paths is also None/empty)
@@ -127,6 +127,8 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=sys.stdou
     messages - existing conversation messages. will be updated with assistant response and returned.
       You can optionally add to messages before calling and pass new_prompt=None, image_paths=None
     """
+    if file is None:
+        file = sys.stdout
     print(role + ":", file=file)
     print(new_prompt, file=file)
     from azure_openai import append_to_messages
@@ -239,4 +241,5 @@ def get_xmem_output(model, device, trajectory_length):
                 output.save(config.xmem_output_path.format(step=i))
 
     return masks
+
 

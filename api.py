@@ -376,7 +376,6 @@ class API:
             resp = json.loads(s)
         except Exception as e:
             self.logger.info(FAIL + f"Review JSON parse error: {e}. Raw=\n{raw}" + ENDC)
-            self.failed_task = True
             return
         success = bool(resp.get("success") is True)
         reason = resp.get("reasoning", "")

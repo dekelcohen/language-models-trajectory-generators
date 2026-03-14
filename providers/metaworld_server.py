@@ -562,6 +562,12 @@ def main():
                     except Exception:
                         qpos = None
                     await websocket.send(json.dumps({"eef_pos": eef.tolist(), "objects": objs, "doorjoint_angle": qpos}))
+                elif cmd == config.GET_ROBOT_STATE:
+                    try:
+                        eef = env.get_endeff_pos().copy()
+                        await websocket.send(json.dumps({"eef_pos": eef.tolist()}))
+                    except Exception:
+                        await websocket.send(json.dumps({}))
                 elif cmd == config.GET_CAMERA_INFO:
                     try:
                         K_h, zn_h, zf_h, w, h = _get_intrinsics(env, head_id)
@@ -668,6 +674,5 @@ def main():
     
 if __name__ == "__main__":
     main()
-
 
 
