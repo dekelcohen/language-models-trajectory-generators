@@ -380,13 +380,11 @@ class API:
         success = bool(resp.get("success") is True)
         reason = resp.get("reasoning", "")
         improvement_steps = resp.get("improvement_steps", "")
+        self.logger.info((OK if success else FAIL) + f"Review: success={success}. See details in above json" + ENDC)
         if success:
-            self.logger.info(OK + f"Review: success. Reason: {reason}\nImprovement steps: {improvement_steps}" + ENDC)
             self.completed_task = True
         else:
-            self.logger.info(FAIL + f"Review: failure. Reason: {reason}\nImprovement steps: {improvement_steps}" + ENDC)
             self.failed_task = True
-
 
     def task_completed(self):        
         create_trajectory_videos(self.logger)

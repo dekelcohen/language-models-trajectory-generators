@@ -28,6 +28,29 @@ from config import OK, PROGRESS, FAIL, ENDC
 
 print = functools.partial(print, flush=True)
 
+# --- Prompt helper ------------------------------------------------------
+def prepend_to_initial_command(command, args, logger):
+    """Return command optionally prepended with file contents for first MAIN_PROMPT.
+    On read error, logs a warning and returns the original command.
+    """
+    first_command = command
+    if args.prepend_prompt:
+        try:
+            with open(args.prepend_prompt, "r", encoding="utf-8") as _pf:
+                _pre = _pf.read().strip()
+            if _pre:
+                first_command = _pre + "\n" + command
+                try:
+                    logger.info(PROGRESS + "Prepended prompt from --prepend-prompt file." + ENDC)
+                except Exception:
+                    pass
+        except Exception as e:
+            try:
+                logger.info(PROGRESS + "Warning: failed reading --prepend-prompt file." + ENDC)
+            except Exception:
+                pass
+    return first_command
+
 
 # --- Diagnostics helper -------------------------------------------------
 def query_sim_objects_state(conn, logger):
@@ -234,17 +257,15 @@ if __name__ == "__main__":
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
     parser.add_argument("--review-provider", choices=["vlm", "xmem"], default="vlm", help="review provider for success verification; vlm uses the vision-language (gpt) reviewer; xmem preserves the legacy tracking flow")
     parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")    
-    parser.add_argument(
-        "--ovr-obj",
-        type=str,
-        default=None,
-        help=(
+    parser.add_argument("--ovr-obj",  type=str, default=None, help=(
             "Apply --ovr-bbox only to predictions whose text label (provider 'class') matches this regex. "
             "If omitted, the override applies to all predictions (legacy behavior). "
             "Examples: door.*?(handle|knob|lever) ; (?i)^door\\s+lever$ . "
         ),
     )
     parser.add_argument("--viz-point", type=str, default=None, help="Add a permanent 3d world visualization point as \"[x,y,z]\"")
+    parser.add_argument("--prepend-prompt", type=str, default=None, help="Path to a text file whose contents are prepended to the initial command (first MAIN_PROMPT only).",
+    )
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
     args = parser.parse_args()
 
@@ -350,10 +371,12 @@ if __name__ == "__main__":
     
         error = False
     
+        # Build initial command from optional prepend file
+        first_command = prepend_to_initial_command(command, args, logger)
         new_prompt = MAIN_PROMPT.replace("[INSERT DETECT_OBJECT_TOOL]", DETECT_OBJECT_TOOL) \
                                 .replace("[INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]", DETECT_OBJECT_TOOL_INITIAL_PLANNING) \
                                 .replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)) \
-                                .replace("[INSERT TASK]", command) \
+                                .replace("[INSERT TASK]", first_command) \
                                 .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section) \
                                 .replace("[INSERT IN CONTEXT EXAMPLE]", IN_CONTEXT_EXAMPLE)
          
@@ -482,5 +505,8 @@ if __name__ == "__main__":
         _safe_terminate(server_proc, logger)
 
         api.completed_task = False
+
+
+
 
 
