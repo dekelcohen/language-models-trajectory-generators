@@ -239,7 +239,7 @@ def process_cli_viz_point_arg(args, conn, logger):
                      
         if points:
             # Permanent, red markers by default
-            conn.send([config.ADD_TRAJECTORY_POINTS, points, "red", True])                                    
+            conn.send([config.ADD_TRAJECTORY_POINTS, points, "blue", True, "line"])                                    
             logger.info(PROGRESS + f"Added visualization debug points in sim: {points} permanent viz points" + ENDC)            
         else:            
             logger.info(WARNING + "--viz-point provided but contained no valid coordinates" + ENDC)

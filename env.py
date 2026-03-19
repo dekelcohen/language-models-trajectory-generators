@@ -1,4 +1,4 @@
-import os
+﻿import os
 import pybullet as p
 import numpy as np
 from debug.dbg_utils import init_loguru_logger
@@ -7,6 +7,7 @@ from PIL import Image
 import traceback
 import time
 import config
+import math
 from robot import Robot
 from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE
@@ -47,6 +48,57 @@ def remove_debug_sphere(marker_id):
     except Exception as e:
         print("[Env] Warning: remove_debug_sphere failed:", e)
 
+
+def add_debug_cylinder_between(p1, p2, radius=0.004, color=(1, 0, 0, 1)):
+    """Draw a thin visual cylinder between two 3D points; returns body id or None.
+    Uses a massless MultiBody so it renders in camera captures (DIRECT/GUI).
+    """
+    try:
+        a = np.array(list(map(float, p1)), dtype=float)
+        b = np.array(list(map(float, p2)), dtype=float)
+        v = b - a
+        L = float(np.linalg.norm(v))
+        if not np.isfinite(L) or L < 1e-6:
+            return add_debug_sphere(a.tolist(), radius=radius*1.5, color=color)
+        mid = ((a + b) * 0.5).tolist()
+        # Orientation: align local +Z with direction v
+        z = np.array([0.0, 0.0, 1.0], dtype=float)
+        u = v / L
+        c = float(np.dot(z, u))
+        if c > 0.999999:
+            quat = [0, 0, 0, 1]
+        elif c < -0.999999:
+            quat = p.getQuaternionFromAxisAngle([1, 0, 0], math.pi)
+        else:
+            axis = np.cross(z, u)
+            axis_norm = float(np.linalg.norm(axis))
+            if axis_norm < 1e-8:
+                quat = [0, 0, 0, 1]
+            else:
+                axis = (axis / axis_norm).tolist()
+                angle = math.acos(c)
+                quat = p.getQuaternionFromAxisAngle(axis, angle)
+        vis_id = p.createVisualShape(
+            shapeType=p.GEOM_CYLINDER,
+            radius=float(radius),
+            length=L,
+            rgbaColor=list(color)
+        )
+        body_id = p.createMultiBody(
+            baseMass=0.0,
+            baseVisualShapeIndex=vis_id,
+            basePosition=mid,
+            baseOrientation=quat
+        )
+        return body_id
+    except Exception as e:
+        print("[Env] Warning: add_debug_cylinder_between failed:", e)
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
+        return None
+
 # --- Trajectory visualization helpers ----------------------------------
 COLOR_TABLE = [
     (1,0,0,0.8),(0,0.6,0,0.8),(0,0.5,1,0.8),(1,0.5,0,0.8),
@@ -70,19 +122,31 @@ def _resolve_color(spec, color_cycle_idx):
     return (0,1,1,0.8), color_cycle_idx  # default cyan
 
 
-def handle_add_trajectory_points(trajectory, color_spec, permanent, logger,
+
+def handle_add_trajectory_points(trajectory, color_spec, permanent, marker_spec, logger,
                                  marker_steps, permanent_ids, color_cycle_idx):
-    """Add trajectory preview visualization with spheres + debug points.
+    """Add trajectory preview visualization with spheres (+ optional polyline).
     - marker_steps: list of lists of ids (rolling history for non-permanent)
     - permanent_ids: list of ids that persist
     - Returns updated (marker_steps, permanent_ids, color_cycle_idx)
     """
     rgba, color_cycle_idx = _resolve_color(color_spec, color_cycle_idx)
     trajectory_points = [point[:3] for point in trajectory]
-
-    # Add spheres
+    
+    # Add spheres and optional segments
     step_ids = []
     try:
+        # Optional connecting polyline
+        if isinstance(marker_spec, str) and marker_spec.lower() == 'line' and len(trajectory_points) > 1:
+            rgb = [rgba[0], rgba[1], rgba[2], rgba[3] if len(rgba) > 3 else 0.8]
+            for i in range(len(trajectory_points) - 1):
+                _lid = add_debug_cylinder_between(trajectory_points[i], trajectory_points[i+1], radius=0.004, color=rgb)
+                if _lid is not None:
+                    if permanent:
+                        permanent_ids.append(_lid)
+                    else:
+                        step_ids.append(_lid)
+        # Spheres at points
         for _pt in trajectory_points:
             _mid = add_debug_sphere(_pt, radius=0.015, color=rgba)
             if _mid is not None:
@@ -90,14 +154,18 @@ def handle_add_trajectory_points(trajectory, color_spec, permanent, logger,
                     permanent_ids.append(_mid)
                 else:
                     step_ids.append(_mid)
-    except Exception:
-        pass
+    except Exception as e:
+        print("[Env] Warning: handle_add_trajectory_points draw failed:", e)
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
 
     # Rolling window pruning for non-permanent batches
     if not permanent and len(step_ids) > 0:
         marker_steps.append(step_ids)
         try:
-            while len(marker_steps) > getattr(config, 'visualize_traj_history_steps', 6):
+            while len(marker_steps) > getattr(config, "visualize_traj_history_steps", 6):
                 old_ids = marker_steps.pop(0)
                 for _id in old_ids:
                     try:
@@ -597,9 +665,10 @@ def run_simulation_environment(args, env_connection, logger):
                 trajectory = env_connection_received[1]
                 color_spec = env_connection_received[2] if len(env_connection_received) > 2 else None
                 permanent = bool(env_connection_received[3]) if len(env_connection_received) > 3 else False
+                marker_spec = env_connection_received[4] if len(env_connection_received) > 4 else "points"
 
                 trajectory_debug_marker_steps, permanent_marker_ids, color_cycle_idx = handle_add_trajectory_points(
-                    trajectory, color_spec, permanent, logger,
+                    trajectory, color_spec, permanent, marker_spec, logger,
                     trajectory_debug_marker_steps, permanent_marker_ids, color_cycle_idx
                 )
 
@@ -680,7 +749,7 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
     - Disables door joint motor forces for easy mouse-pick/drag of the hinge/latch (GUI).
     - In GUI, enables real-time simulation and idles; in DIRECT, exits after setup.
     """
-    logger = loguru_logger    
+    logger = init_loguru_logger("env_pybullet.log")
     try:
         tag = "[Env GUI]" if connection_mode==p.GUI else "[Env Direct]"
         physics_client = p.connect(connection_mode)
@@ -695,7 +764,14 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
 
         env = Environment(_Args)
         env.load()
-        
+
+        GRASP_POSE = True 
+        if GRASP_POSE:
+            trajectory = [[-0.279, -0.126, 0.600],[-0.279, -0.126, 0.700],[-0.300, 0.100, 0.700],[-0.300, 0.100, 0.600]]
+            trajectory_debug_marker_steps, permanent_marker_ids, color_cycle_idx = handle_add_trajectory_points(
+                    trajectory = trajectory, color_spec='blue', permanent=True, marker_spec='line', logger=logger,
+                    marker_steps = [], permanent_ids = [], color_cycle_idx = 0)
+                
         OVERLAY_COORD_TEST = False
         if OVERLAY_COORD_TEST:
             # Temp coordinates check 
@@ -854,6 +930,8 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
 if __name__ == "__main__":
     # Entry point for quick, no-code door kinematics testing in GUI mode.
     run_sim_demo(disable_forces=False, connection_mode=p.GUI)
+
+
 
 
 
