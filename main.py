@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 import math
 import openai
 import torch
@@ -24,7 +24,7 @@ from prompts.error_correction_prompt import ERROR_CORRECTION_PROMPT
 from prompts.print_output_prompt import PRINT_OUTPUT_PROMPT
 from prompts.task_failure_prompt import TASK_FAILURE_PROMPT
 from prompts.task_summary_prompt import TASK_SUMMARY_PROMPT
-from config import OK, PROGRESS, FAIL, ENDC
+from config import OK, PROGRESS, WARNING, FAIL, ENDC
 
 print = functools.partial(print, flush=True)
 
@@ -217,24 +217,35 @@ def read_env_handshake(main_connection, logger, default_pos):
     return ee_pos, msg, coords_section, sim_state
 
 def process_cli_viz_point_arg(args, conn, logger):
-    """Parse --viz-point """
-    if not args.viz_point:
+    """Parse --viz-point/--vis-point and send one or more points.
+
+    Accepts either a single point JSON list "[x,y,z]" or a JSON list of
+    points "[[x1,y1,z1],[x2,y2,z2], ...]". Points are rendered as permanent
+    markers in the simulator.
+    """
+    if not getattr(args, "viz_point", None):
         return
     try:
-        _pt = json.loads(args.viz_point)
-        if isinstance(_pt, (list, tuple)) and len(_pt) >= 3:
-            _pos = [float(_pt[0]), float(_pt[1]), float(_pt[2])]
-            conn.send([config.ADD_TRAJECTORY_POINTS, [_pos], "red", True])
-            try:
-                logger.info(PROGRESS + f"Added permanent viz point at {_pos}" + ENDC)
-            except Exception:
-                pass
-    except Exception as e:
-        try:
-            logger.info(FAIL + f"Failed to add viz point: {e}" + ENDC)
-        except Exception:
-            pass
-
+        raw = json.loads(args.viz_point)
+        points = []                   
+        # List of points [[x,y,z], ...]
+        if isinstance(raw, (list, tuple)) and len(raw) > 0 and isinstance(raw[0], (list, tuple)):
+            for item in raw:
+                if isinstance(item, (list, tuple)) and len(item) == 3:
+                    points.append([float(item[0]), float(item[1]), float(item[2])])
+        # Single point [x,y,z]            
+        elif isinstance(raw, (list, tuple)) and len(raw) == 3:
+            points.append([float(raw[0]), float(raw[1]), float(raw[2])])
+                     
+        if points:
+            # Permanent, red markers by default
+            conn.send([config.ADD_TRAJECTORY_POINTS, points, "red", True])                                    
+            logger.info(PROGRESS + f"Added visualization debug points in sim: {points} permanent viz points" + ENDC)            
+        else:            
+            logger.info(WARNING + "--viz-point provided but contained no valid coordinates" + ENDC)
+            
+    except Exception as e:        
+        logger.info(FAIL + f"Failed to add viz point(s): {e}" + ENDC)        
 
 if __name__ == "__main__":
 
@@ -263,7 +274,9 @@ if __name__ == "__main__":
             "Examples: door.*?(handle|knob|lever) ; (?i)^door\\s+lever$ . "
         ),
     )
-    parser.add_argument("--viz-point", type=str, default=None, help="Add a permanent 3d world visualization point as \"[x,y,z]\"")
+    # Accept both --viz-point (original) and --vis-point (alias)
+    parser.add_argument("--viz-point", "--vis-point", dest="viz_point", type=str, default=None,
+                        help="Add permanent 3D world visualization point(s) as JSON: \"[x,y,z]\" or \"[[x1,y1,z1],[x2,y2,z2],ג€¦]\"")
     parser.add_argument("--prepend-prompt", type=str, default=None, help="Path to a text file whose contents are prepended to the initial command (first MAIN_PROMPT only).",
     )
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
@@ -371,7 +384,10 @@ if __name__ == "__main__":
     
         error = False
     
-        # Build initial command from optional prepend file
+        # Build initial command 
+        # Images paths to include in prompt - currently only rgb head-cam
+        image_paths = [config.rgb_image_head_path]
+        # --prepend-prompt - optional prepend a prev run conversation or any other long prompt 
         first_command = prepend_to_initial_command(command, args, logger)
         new_prompt = MAIN_PROMPT.replace("[INSERT DETECT_OBJECT_TOOL]", DETECT_OBJECT_TOOL) \
                                 .replace("[INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]", DETECT_OBJECT_TOOL_INITIAL_PLANNING) \
@@ -388,7 +404,7 @@ if __name__ == "__main__":
             pass
 
         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
+        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, role="system", image_paths=image_paths)
         api.conversation_messages = messages
         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
@@ -505,6 +521,7 @@ if __name__ == "__main__":
         _safe_terminate(server_proc, logger)
 
         api.completed_task = False
+
 
 
 
