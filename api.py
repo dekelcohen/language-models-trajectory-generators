@@ -13,7 +13,7 @@ from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT
-
+from helpers.image_utils import list_file_paths
 
 def create_trajectory_videos(logger):
     """Create trajectory debug videos from captured frames (head and wrist).
@@ -346,13 +346,9 @@ class API:
         """
         from prompts.review_prompt import REVIEW_PROMPT
         import os
-        frame_paths = []
-        max_step = self.trajectory_step
         # Subsample every 5th frame from head RGB only
-        for i in range(0, max_step + 1, 5):
-            pth = config.rgb_image_trajectory_path.format(step=i)
-            if os.path.exists(pth):
-                frame_paths.append(pth)
+        frame_paths = list_file_paths(root=config.trajectory_folder, base_name=config.trajectory_image_base)
+                
         # Build prompt with placeholders
         prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.command)) \
                               .replace("[INSERT 3D COORDINATES PROMPT SECTION]", self.coords_section) \

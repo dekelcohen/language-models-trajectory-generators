@@ -1,0 +1,121 @@
+) TODO: DreamZero 
+		   ) TODO: Install RLBench (wsl) - test with RLBench 
+		     ) Con: wsl - meaning cannot work on laptop - except VPN connection to my dekel-linux at work
+			 ) Pro: Door + many other tasks with good visuals 
+		   ) TODO:Q: Call Dreamzero from prompt (VLM as sub-task decompose only) OR have VLM move arm close to target with good view --> then call DreamZero ?
+		     ) Pro: Less future prediction and simpler actions if VLM does some of the work
+			 ) Con: More complex 		 
+) DONE: Consmetics: Change door from red to wooden texture and the handle from gray to silver		 
+
+) DONE:Q/A: Fix below 2 Bugs:
+) Impl: In retry MAIN_PROMPT 
+  a) DONE: insert current ee_pos_for_prompt - add GET_ROBOT_STATE message and call it before retry
+  ) Problem: DONE: ee_pos_for_prompt (current gripper pos) used in retry MAIN_PROMPT is the initial one - not the current one  
+  b) Solution: DONE: main_prompt.py: Refactor the text starting with 'Here is an in context example of multiple LLM responses for each step' to a different constant. insert it into MAIN_PROMPT in initial prompt, but not at retry prompt 
+  c) main_prompt.py: AVAILABLE FUNCTIONS section: detect_object(...) Do not insert detect_object tool - replace it by text that you cannot call it and instead take the object positions from conversation history
+  
+  
+) ===== Metaworld door
+	     ) TODO:HIGH: cam_info - same iface as in env.py (no K_override anymore - must compute proj and view matrices from sim or manual)
+		 ) TODO:Depth: must conform to 0-1 opengl encoding - so decoding it correctly in utils.py
+	     ) see language-models-trajectory-generators\metaworld.md 
+	     ) TODO:HIGH: 3D seg+point cloud coords do not match the GT from Sim at all
+	       ) TODO: Revert some of the 3D z-axis new code (but keep the _get_object_pose refactor)
+		   ) TODO: Impl another mode (it is not a seg-provider) - simply get the pos and coords from the GET_STATE --> to workaround the 3D coordinates bugs --> and continue with traj code.
+	   
+	     ) TODO:HIGH: max-path-steps (500) - truncated Exception for env 
+    	     ) Solution: Instruct prompt to generate few points per trajectory 
+	    	 ) Problem: Prompt instruct change didn't work (why?)
+		       ) Ex: [traj] points_in=120 points_used=120 path_len=1.386m iters_per_point=5 max_step=0.03		   		 		 
+		      ) It did postpone the truncation exception until later parts of the task (now points_in=7)
+		   
+       	     ) Solution: New tools to calc create_linear_traj(start,target, target_pose), create_arc_traj (or more generalized)
+		   
+	   ) DONE: Problem: SAM3 text-prompt --> segmetation doesn't work for door handle in metaworld env top/head/side-front views  
+         ) Solution: Moondream - better than GPT-5.2 and Gemini 3 Pro in detection and segmentation 
+		
+	  		
+   
+	   ) Door of pybullet-planning - Con: no handle 
+	     ) Con: No handle physics - only push to open
+	     ) First time 
+	     conda create --prefix /mnt/robotics/envs/env_pybullet_planning python=3.11 -y
+	     conda activate /mnt/robotics/envs/env_pybullet_planning
+	     cd /mnt/robotics/
+	     git clone --recurse-submodules https://github.com/dekelcohen/pybullet_planning
+		 cd pybullet-planning
+		 pip install -r requirements.txt
+	     pip install "scipy<1.11"
+		 pip install "numpy<1.25"
+         vim examples/test_door.py # use_gui=False
+	     ) Every time
+         python -m examples.test_door	   
+	  
+) LOW: Load MJCF door into pybullet
+	       ) pybullet.loadMJCF(fileName, flags=…) OR
+	       ) pip install mjcf2urdf
+		   ) Then config joints and motors:
+		     setJointMotorControlArray, setJointMotorControl2 - see robot.py and other pybullet samples + LLM
+		   ) Ex: https://github.com/Farama-Foundation/Gymnasium-Robotics/blob/main/gymnasium_robotics/envs/assets/adroit_hand/adroit_door.xml	
+		        https://github.com/Farama-Foundation/Gymnasium-Robotics/blob/main/gymnasium_robotics/envs/adroit_hand/adroit_door.py
+	       ) TODO: USD Door --> convert to urdf 
+		   ) Download https://modelscope.cn/datasets/agibot_world/GenieSimAssets/file/view/master/objects%2Fbenchmark%2Fdoor%2Fbenchmark_door_000%2FAligned.usd?id=138157&status=0
+		  
+		  ) pip install nvidia-srl-usd-to-urdf		
+       	  
+		  
+	     ) DONE:Problem:Sim: The head camera (used for perception) doesn't see the door. It is occlluded by the robot gripper and 
+		   ) Solution: Fix camera pos to observe from above 		  
+		  
+) DONE: Integrate test_2d_pixel_coords_to_3d_world_coords.py (below) --> main.py flow  
+		   ) DONE: Status: code written but doesn't work, yet 
+		     ) DONE: Depth is 2.0 in main (.npy) vs 0.993040 in test - everthing else is OKKKKK !
+			   A: Not sure what was fixed (seems nothing), but the 3D world point in main == test 
+		     ) DONE: Camera/Object/Coordinates sim init bug - 3d_coords_bug branch vs metaworld branch (LKG)
+			   ) Repro: 
+			     ) test_2d_pixel_coords_to_3d_world_coords - succeeds in both branches + repro the different head_rgb_images.
+			     ) gui - doesn't repro (debug visualizer cam) - even in 3d_coords_bug branch
+			   ) 
+			   ) DONE: Door: The door is hang in the air. Grasp: the robot seems distant (compare to metaworld branch)
+			     A: proj_mat must be a tuple 16 flat and not np 4x4. This doesn't fix the main bug 
+			   ) TODO: Try to apply only parts of the changes to metaworld cleaner code (env+robot...) - if the distant-robot-image repro
+			   
+		   ) TODO: view and proj matrices: return in CAPTURE_IMAGES response and propagate them into api + utils 
+		     ) Note: Should be easy, since K_override from metaworld_server is already passed in --> add the view matrix and have get_intrinsics_extrinsics return it 
+			   
+		      
+		   ) DONE: Depth - pass as hires file (image or np)
+		     ) A: .npy file 
+			 ) DONE: 3d pos calc by api.detect (seg + 3D) is far from the GT get_state returned from pybullet 
+			   ) TODO: Depth is working well in test when taken directly from p.getCameraImage but not when saved as unit8 image and read back
+				 ) Problem: Using the image is more back-compat with util/api.py code 
+				 ) Solution: Convert to 16bit image - but need to normalize in api.py / 65535.0 + need to convert it to -1,1 
+				   ) Currently, the robot.py getCameraImage code saves it if GEMINI_TEST_DEPTH_IMAGE - raw_depth 65535 but the orig code 
+					  GEMINI_TEST_DEPTH_IMAGE == False, saves it in 255 (too low-res) but transforms it to OpenGL depth before saving 
+				   ) DONE: Save it as .npy and after loading it - Convert it like in  test_2d_pixel_coords_to_3d_world_coords.py
+				     ) DONE:LEGACY_NORMALIZE_DEPTH = True # TODO:False when moving to test like projection matrix     
+					 
+		   ) Unit test with same env (p.DIRECT) --> calc 2D --> 3D with Agent using 179,76 known pixel and world coords 
+		     ) Codex gpt-5 - failed, Gemini 3 Pro - success in codegen for pinhole 2D --> 3D proj test on door handle  			 
+			 python -m unittest tests\test_2d_pixel_coords_to_3d_world_coords.py
+			 # Results: 
+			   # 9 cm diff, but we don't exactly know which part of the door handle is reported in sim as x,y,z
+			   # 5 cm diff on blue box in 0,0,0			 
+			 # Overlay the pixel that the test calc from the world coordinate (its only input is world coord in sim and it calc the pixel)
+			 python "D:\Docs\test6\Projects\Vision\Object Detection\annotate_image\annotate_image.py" --image %ROBOTICS_HOME%\VLM_Robotics\language-models-trajectory-generators\outputs\bugs\door_can_head_img.png --bbox "141, 143, 143, 145"
+			 
+		   ) TODO:HIGH: Maybe the camera direction and the robot.py spherical view used door and not in task for head cam, breaks the api and utils 3d calc assumptions		   
+			 ) DONE: _view_and_pos_from_spherical::camera_position - complex and not needed calc 
+			   _view_and_pos_from_spherical camera_position == config.head_camera_position --> so it is not the problem 
+			 ) TODO: world_point_camera_frame = (np.linalg.inv(K) @ pixel_point) - make sure length 1 
+			   ) A: |(np.linalg.inv(K) @ pixel_point)| ~=1.05
+			 ) TODO: door handle pixel coordinates in 2D image (mean of handle)
+			   ) 179, 76
+			   python "D:\Docs\test6\Projects\Vision\Object Detection\annotate_image\annotate_image.py" --image seg_overlay_moondream_0.png --bbox "179, 75.5, 182, 77"
+		   ) TODO: Q: Does grasp task coords match ? If not, how does it succeeds ?
+		     
+		   ) TODO: Continue from Codex log: outputs\bugs\door_3d_coordinates_plus_code_gen.txt
+		   ) TODO: Try to temp-workaround by returning the GT coords from get_state instead of calc api.detect-3D 
+	     ) TODO:HIGH: Prompt [INSERT EE_ORIENTATION]		    
+		   ) Problem: Currently. end-effector is currently positioned at [INSERT EE POSITION], with the rotation value at 0 <<---- Bug 
+		   ) Solution: pass ee_orientation from env to main via handshake_ func  - as with ee_pos 		  
