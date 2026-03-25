@@ -100,13 +100,13 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
 
     bounding_cubes = []
     bounding_cubes_orientations = []
-    logger.info(PROGRESS + f"------------------ Enter get_bounding_cube_from_point_cloud(...)" + ENDC)
+    logger.info(PROGRESS + f"-- Enter get_bounding_cube_from_point_cloud(...)" + ENDC)
     if os.environ.get("DEBUG_PINHOLE", "0") == "1":
         px = 156
         py = 72
         pz = depth_array[py, px] # TODO: Fix: Correct depth as in test: 0.993040
         point=[px, py, pz]    
-        logger.info(PROGRESS + f"------------------ Test 2D Known pixel {point}--> 3D world" + ENDC)
+        logger.info(PROGRESS + f"--- Test 2D Known pixel {point}--> 3D world" + ENDC)
         get_world_point_world_frame(camera_position, camera_orientation_q, "head", image.size, point=point, cam_info=cam_info)
         return
         
@@ -124,7 +124,7 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
                 logger.info(PROGRESS + f"[Contour] mean pixel_point (u,v,depth)={[_mean_px[0], _mean_px[1], _mean_px[2]]}" + ENDC)
             else:
                 logger.info(PROGRESS + "[Contour] No pixels inside contour; mean undefined" + ENDC)
-            logger.info(PROGRESS + f"++++++++++++++++++ Before get_world_point_world_frame len(contour_pixel_points)={len(contour_pixel_points)}" + ENDC)            
+            logger.info(PROGRESS + f"*** Before get_world_point_world_frame len(contour_pixel_points)={len(contour_pixel_points)}" + ENDC)            
             contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image.size, pixel_point, cam_info=cam_info) for pixel_point in contour_pixel_points]
             # Optional depth statistics within the mask to probe Z handling
             if os.environ.get("DEBUG_DEPTH", "0") == "1":

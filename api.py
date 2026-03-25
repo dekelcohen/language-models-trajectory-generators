@@ -190,7 +190,7 @@ class API:
         masks = utils.get_segmentation_mask(model_predictions, config.segmentation_threshold)
 
 
-        self.logger.info(PROGRESS + f"************************ Before bounding_cubes_world_coordinates len(masks)={len(masks)}" + ENDC)
+        self.logger.info(PROGRESS + f"*** Before bounding_cubes_world_coordinates len(masks)={len(masks)}" + ENDC)
         bounding_cubes_world_coordinates, bounding_cubes_orientations = utils.get_bounding_cube_from_point_cloud(            
             rgb_image_head,
             masks,
@@ -346,8 +346,11 @@ class API:
         """
         from prompts.review_prompt import REVIEW_PROMPT
         import os
-        # Subsample every 5th frame from head RGB only
+        # Subsample every 5th frame from head RGB 
         frame_paths = list_file_paths(root=config.trajectory_folder, base_name=config.trajectory_image_base)
+        # Subsample every 7th frame from wrist RGB camera 
+        frame_paths += list_file_paths(root=config.trajectory_folder, base_name=config.trajectory_wrist_image_base, skip=7)
+        
                 
         # Build prompt with placeholders
         prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.command)) \

@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import math
 import openai
 import torch
@@ -50,6 +50,39 @@ def prepend_to_initial_command(command, args, logger):
             except Exception:
                 pass
     return first_command
+
+# --- LLM context helper -------------------------------------------------
+EEF_POS_SNIPPET = 'Current end-effector pos (x,y,z): {eef_pos}'
+def build_llm_context_images_and_pose(trajectory_step, logger):
+    """Collect current images (head/wrist and current-step frames) and EE pose.
+
+    - Returns tuple (image_paths, pose_snippet_str).
+    - Silently skips missing files; logs only lightweight warnings.
+    - If main_connection provided, tries call env to get freshe gripper ee pose;
+    """
+    image_paths = []
+
+    def _maybe_add(path):
+        if path and os.path.exists(path):
+            image_paths.append(path)
+        
+
+    # Current-step trajectory frames (head + wrist) if available
+    _maybe_add(config.rgb_image_trajectory_path.format(step=trajectory_step))
+    _maybe_add(config.wrist_rgb_image_trajectory_path.format(step=trajectory_step))
+
+    # Query current EE pose
+    eef_pos = None
+    if main_connection is not None:
+        try:
+            main_connection.send([config.GET_ROBOT_STATE, {}])
+            resp = main_connection.recv()
+            eef_pos = list(map(float, resp["eef_pos"]))
+        except Exception as e:
+            logger.info(PROGRESS + f"Warning: GET_ROBOT_STATE for LLM context failed: {e}" + ENDC)
+                
+    
+    return image_paths, eef_pos
 
 
 # --- Diagnostics helper -------------------------------------------------
@@ -276,7 +309,7 @@ if __name__ == "__main__":
     )
     # Accept both --viz-point (original) and --vis-point (alias)
     parser.add_argument("--viz-point", "--vis-point", dest="viz_point", type=str, default=None,
-                        help="Add permanent 3D world visualization point(s) as JSON: \"[x,y,z]\" or \"[[x1,y1,z1],[x2,y2,z2],ג€¦]\"")
+                        help="Add permanent 3D world visualization point(s) as JSON: \"[x,y,z]\" or \"[[x1,y1,z1],[x2,y2,z2],…]\"")
     parser.add_argument("--prepend-prompt", type=str, default=None, help="Path to a text file whose contents are prepended to the initial command (first MAIN_PROMPT only).",
     )
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
@@ -455,23 +488,12 @@ if __name__ == "__main__":
                         logger.info(PROGRESS + "RETRYING TASK..." + ENDC)
 
                         # Before composing the retry prompt, refresh the current robot state
-                        try:    
-                            main_connection.send([config.GET_ROBOT_STATE, {}])
-                            resp = main_connection.recv()                            
-                            ee_pos_for_prompt = list(map(float, resp["eef_pos"]))
-                            api.ee_pos_for_prompt = ee_pos_for_prompt
-                            logger.info(PROGRESS + f"Refreshed ee_pos_for_prompt before retry: {ee_pos_for_prompt}" + ENDC)
-                        except Exception as e:
-                            try:
-                                logger.info(PROGRESS + f"Warning: GET_ROBOT_STATE failed: {e}" + ENDC)
-                            except Exception:
-                                pass
-
+                        _, eef_pos = build_llm_context_images_and_pose(api.trajectory_step, logger)
                         # On retry, use the latest known EE position rather than static config, no in context example and 
                         # no detect_object tool, since robot arm usually occuluds the target object (use first attempt obj coords instead) 
                         new_prompt = MAIN_PROMPT.replace("[INSERT DETECT_OBJECT_TOOL]", NO_DETECT_OBJECT_TOOL) \
                                 .replace("[INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]", NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING) \
-                                .replace("[INSERT EE POSITION]", str(ee_pos_for_prompt)) \
+                                .replace("[INSERT EE POSITION]", str(eef_pos)) \
                                 .replace("[INSERT TASK]", command) \
                                 .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section) \
                                 .replace("[INSERT IN CONTEXT EXAMPLE]", '')
@@ -489,11 +511,17 @@ if __name__ == "__main__":
                         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
                         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
                         api.conversation_messages = messages
-                        logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
                         api.failed_task = False # After retry task --> reset api.failed_task flag to resume normal flow (retry)    
                     else:    
                         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
+                        # Attach current images and pose for better next-step context
+                        
+                        
+                        
+                        _imgs_paths, eef_pos = build_llm_context_images_and_pose(api.trajectory_step, logger)
+                        if False and eef_pos:
+                            new_prompt += f'\n{EEF_POS_SNIPPET}\n'.format(eef_pos=eef_pos)
+                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", image_paths=_imgs_paths)
                         api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
                         error = False

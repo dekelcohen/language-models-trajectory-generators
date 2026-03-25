@@ -114,7 +114,7 @@ Grasping strategy: close the gripper at mid-height, then lift vertically to conf
 
 Step-by-Step Trajectory Execution
 Step 1: Move to a safe hover pose above the can
-python
+```python
 
 # Perception-derived variables
 can_position = [pos_x, pos_y, pos_z]
@@ -135,21 +135,20 @@ hover_pose = [pos_x, pos_y, pre_grasp_z, grip_orientation]
 trajectory_1 = generate_linear_trajectory("hover to approach target", current_pose, hover_pose)
 execute_trajectory(trajectory_1)
 Step 2: Open the gripper
-python
-Copy code
+```python
 open_gripper()
+```
 Step 3: Descend to just above the top surface
-python
-Copy code
+```python
 z_above_top = top_z + clearance_top
 
 approach_pose = [pos_x, pos_y, z_above_top, grip_orientation]
 
 trajectory_2 = generate_linear_trajectory("descend to approach height", hover_pose, approach_pose)
 execute_trajectory(trajectory_2)
+```
 Step 4: Descend to pre-close height near grasp level
-python
-Copy code
+```python
 z_grasp = pos_z
 z_preclose = z_grasp + clearance_preclose
 
@@ -157,25 +156,25 @@ pre_close_pose = [pos_x, pos_y, z_preclose, grip_orientation]
 
 trajectory_3 = generate_linear_trajectory("descend to pre-close height", approach_pose, pre_close_pose)
 execute_trajectory(trajectory_3)
+```
 Step 5: Descend to grasp height
-python
-Copy code
+```python
 grasp_pose = [pos_x, pos_y, z_grasp, grip_orientation]
 
 trajectory_4 = generate_linear_trajectory("descend to grasp height", pre_close_pose, grasp_pose)
 execute_trajectory(trajectory_4)
+```
 Step 6: Close the gripper
-python
-Copy code
+```python
 close_gripper()
+```
 Step 7: Lift the object to a safe height
-python
-Copy code
-lift_pose = [pos_x, pos_y, pre_grasp_z, grip_orientation]
+```python
+lift_pose = [pos_x, pos_y, pre_grasp_z + 0.4, grip_orientation]
 
 trajectory_5 = generate_linear_trajectory("lift after grasp", grasp_pose, lift_pose)
 execute_trajectory(trajectory_5)
-
+```
 -------------------- End of Sample -----------------
 """
 

@@ -290,23 +290,14 @@ def init_loguru_logger(file_basename: str = "vlm_traj.log"):
         format="{time:DD/MM HH:mm} | {level:<8} | {message}",
     )
 
-    # File sink (strip ANSI)
-    def _file_log_format(record):
-        msg = str(record["message"])
-        msg = _ANSI_RE.sub("", msg)
-        msg = _BARE_ANSI_RE.sub("", msg)
-
-        # Escape braces so Loguru formatter doesn't treat them as placeholders
-        msg = msg.replace("{", "{{").replace("}", "}}")
-        return f"{record['time']:DD/MM HH:mm} | {record['level'].name:<8} | {msg}\n"
-
+    
     loguru_logger.add(
         log_file_path,
         level="INFO",
         enqueue=True,
         encoding="utf-8",
         colorize=False,
-        format=_file_log_format,
+        format="{time:DD/MM HH:mm} | {level:<8} | {message}\n",
     )
 
 

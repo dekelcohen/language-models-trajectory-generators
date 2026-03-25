@@ -46,7 +46,6 @@ def list_file_paths(
     """
 
     if not os.path.isdir(root):
-        print(f"[Error] Folder not found: {root}")
         return []
 
     paths = []
@@ -85,5 +84,4 @@ def list_file_paths(
 
         current_idx += int(skip)
 
-    print(f"[Info] Found {len(paths)} file(s) with skip={skip} (lookahead={lookahead_max}).")
     return paths
