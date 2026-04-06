@@ -32,6 +32,15 @@ The end-effector gripper has two fingers, and they are currently parallel to the
 The gripper can only grasp objects along sides which are shorter than 0.08.
 Negative rotation values represent clockwise rotation, and positive rotation values represent anticlockwise rotation. The rotation values should be in radians.
 
+GRIPPER ORIENTATION DEFINITION:
+- The rotation value specifies the direction of the gripper's CLOSING MOTION (i.e., the direction along which the fingers move when closing).
+- The gripper fingers themselves are perpendicular to this direction.
+- Therefore, to grasp an object along a given side, the rotation must be aligned with that side.
+
+Example:
+- To grasp the shorter side of an object, set rotation = angle_short.
+- To grasp the longer side, set rotation = angle_long.
+
 COLLISION AVOIDANCE:
 If the task requires interaction with multiple objects:
 1. Make sure to consider the object widths, lengths, and heights so that an object does not collide with another object or with the floor, unless necessary.
@@ -59,7 +68,9 @@ Then, output Python code to decide which object to interact with, if there are m
 Then, describe how best to approach the object (for example, approaching the midpoint of the object, or one of its edges, etc.), depending on the nature of the task, or the object dimensions, etc.
 Then, output a detailed step-by-step plan for the trajectory, including when to lower the gripper to make contact with the object, if necessary, rotation and position of the gripper, closing the gripper.
 Tasks:
-  pickup: after closing the gripper --> must lift the object up some distance - to be considered a successful grasp
+  pickup: after closing the gripper --> must lift the object up some distance to be considered a successful grasp 
+    ) default - 50cm above the object's top surface. Smaller lifts are failures. 
+    ) Special task requirements or collisions may dictate a different lift distance
   
 Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
 Stop generation after each code block to wait for it to finish executing before continuing with your plan.
@@ -125,6 +136,7 @@ grip_orientation = angle_short
 top_z = pos_z + can_height / 2
 hover_clearance = clearance_hover
 pre_grasp_z = top_z + hover_clearance
+lift_z = top_z + 50 cm up (or according to task reqs and collisions)
 
 # Current robot state
 current_pose = [ee_x, ee_y, ee_z, ee_theta]
@@ -170,11 +182,15 @@ close_gripper()
 ```
 Step 7: Lift the object to a safe height
 ```python
-lift_pose = [pos_x, pos_y, pre_grasp_z + 0.4, grip_orientation]
+
+lift_pose = [pos_x, pos_y, lift_z, grip_orientation]
 
 trajectory_5 = generate_linear_trajectory("lift after grasp", grasp_pose, lift_pose)
 execute_trajectory(trajectory_5)
 ```
 -------------------- End of Sample -----------------
+Instructions:
+Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
+Stop generation after each code block to wait for it to finish executing before continuing with your plan.
 """
 
