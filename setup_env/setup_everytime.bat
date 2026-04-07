@@ -24,6 +24,9 @@ echo Using ROBOTICS_HOME=%ROBOTICS_HOME%
 REM --- Navigate to project ---
 cd /d "%ROBOTICS_HOME%\VLM_Robotics\language-models-trajectory-generators"
 
+REM --- robotic_perception repo py path ---
+set PYTHONPATH=%ROBOTICS_HOME%\VLM_Robotics\robotic_perception;%ROBOTICS_HOME%\VLM_Robotics\language-models-trajectory-generators
+
 REM --- Activate conda environment ---
 call conda activate vlm_traj
 
