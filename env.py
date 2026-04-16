@@ -9,6 +9,7 @@ import time
 import config
 import math
 from robot import Robot
+from common_utils import Trajectory
 from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE
 # --- Debug helpers ------------------------------------------------------
@@ -674,10 +675,16 @@ def run_simulation_environment(args, env_connection, logger):
 
             elif env_connection_received[0] == EXECUTE_TRAJECTORY:
 
-                trajectory = env_connection_received[1]
+                trajectory_obj = env_connection_received[1]
+                if isinstance(trajectory_obj, Trajectory):
+                    trajectory = trajectory_obj.points
+                    desc = trajectory_obj.desc
+                else:
+                    trajectory = trajectory_obj
+                    desc = None
 
-                for point in trajectory:
-                    robot.move(env, point[:3], np.array(robot.ee_start_orientation_e) + np.array([0, 0, point[3]]), gripper_open=robot.gripper_open, is_trajectory=True)
+                for i, point in enumerate(trajectory):
+                    robot.move(env, point[:3], np.array(robot.ee_start_orientation_e) + np.array([0, 0, point[3]]), gripper_open=robot.gripper_open, is_trajectory=True, desc=desc if i == 0 else None)
 
                 for _ in range(100):
                     env.update()

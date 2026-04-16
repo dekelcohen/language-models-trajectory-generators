@@ -1,4 +1,15 @@
 import os
+from PIL import ImageDraw, ImageFont
+
+def draw_text_overlay_image(text, rgb_image):
+    draw = ImageDraw.Draw(rgb_image)
+    W, H = rgb_image.size
+    margin = 10
+    font = ImageFont.truetype("segoeui.ttf", 14)
+    x = margin
+    y = H - margin - 10
+    draw.text((x, y), text, font=font, fill=(0, 0, 0))
+                
 # Unified lookahead helper used at start and mid-sequence
 def find_available_frame(
     folder_path: str,

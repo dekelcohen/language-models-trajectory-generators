@@ -9,6 +9,7 @@ import models
 import segmentation_adapter
 from segmentation_adapter import get_segmentation_output
 import utils
+from common_utils import Trajectory
 from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC
@@ -277,7 +278,7 @@ class API:
                     pass
         except Exception:
             pass
-        self.trajectory_length += len(trajectory)
+        self.trajectory_length += len(trajectory.points)
 
 
 
@@ -325,7 +326,7 @@ class API:
                 sz + (ez - sz) * t,
                 s_theta + (e_theta - s_theta) * t,
             ])
-        return traj
+        return Trajectory(traj, desc)
     def open_gripper(self):
 
         self.logger.info(PROGRESS + "Opening gripper..." + ENDC)

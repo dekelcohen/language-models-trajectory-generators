@@ -4,6 +4,7 @@ import os
 import math
 import config
 from config import OK, PROGRESS, FAIL, ENDC
+from helpers.image_utils import draw_text_overlay_image
 from PIL import Image
 from config import fov, aspect, near_plane, far_plane
 
@@ -11,6 +12,7 @@ class Robot:
 
     def __init__(self, args, logger):
         self.logger = logger
+        self.desc = ""
         if args.robot == "sawyer":
             self.base_start_position = config.base_start_position_sawyer
             self.base_start_orientation_q = p.getQuaternionFromEuler(config.base_start_orientation_e_sawyer)
@@ -47,7 +49,10 @@ class Robot:
 
 
 
-    def move(self, env, ee_target_position, ee_target_orientation_e, gripper_open, is_trajectory):
+    def move(self, env, ee_target_position, ee_target_orientation_e, gripper_open, is_trajectory, desc=None):
+
+        if desc is not None:
+            self.desc = desc
 
         if self.robot == "sawyer":
             gripper1_index = self.gripper_motor
@@ -241,8 +246,8 @@ class Robot:
 
         # Ensure numpy arrays with correct shape
           # Q: How come is was working in main branch (azure linux) ? reviewed metaworld branch new changes and none explains it. A: Not sure 
-          #- PyBullet’s getCameraImage returns a tuple where the color buffer is a flat sequence (or a buffer with alpha) rather than a ready-to-use NumPy array.
-          #- robot.get_camera_image passed that tuple element directly into PIL: Image.fromarray(rgb_buffer). Since it wasn’t a NumPy array (nor an array-like with a valid array_interface), PIL raised AttributeError: 'tuple' object has no attribute 'array_interface'.
+          #- PyBulletâ€™s getCameraImage returns a tuple where the color buffer is a flat sequence (or a buffer with alpha) rather than a ready-to-use NumPy array.
+          #- robot.get_camera_image passed that tuple element directly into PIL: Image.fromarray(rgb_buffer). Since it wasnâ€™t a NumPy array (nor an array-like with a valid array_interface), PIL raised AttributeError: 'tuple' object has no attribute 'array_interface'.
                   
         try:
             rgb_array = np.array(rgb_buffer, dtype=np.uint8).reshape(img_h, img_w, 4)
@@ -263,6 +268,9 @@ class Robot:
         
         if save_camera_image:
             rgb_image = Image.fromarray(rgb_array, mode="RGB")
+            # Render desc text at the bottom
+            if self.desc:
+                draw_text_overlay_image(self.desc, rgb_image)                
             rgb_image.save(rgb_image_path)
             if depth_image_path:           
                 n = config.near_plane
