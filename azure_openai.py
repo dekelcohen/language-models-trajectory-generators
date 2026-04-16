@@ -114,7 +114,7 @@ def append_to_messages(new_prompt: str,
     return messages
 
 
-def post_with_retries(url, headers, payload, max_retries=5, timeout=(10,120)):
+def post_with_retries(url, headers, payload, max_retries=5, timeout=(10,220)):
     for attempt in range(max_retries):
         try:
             response = requests.post(
