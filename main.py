@@ -519,8 +519,10 @@ if __name__ == "__main__":
                         
                         
                         _imgs_paths, eef_pos = build_llm_context_images_and_pose(api.trajectory_step, logger)
-                        if False and eef_pos:
+                        if config.ENABLE_EEF_POS_IMAGE and eef_pos:                        
                             new_prompt += f'\n{EEF_POS_SNIPPET}\n'.format(eef_pos=eef_pos)
+                        else:
+                            _imgs_paths = None
                         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", image_paths=_imgs_paths)
                         api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)

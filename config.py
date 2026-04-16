@@ -171,3 +171,5 @@ three_d_coordinates_prompt_section = (
     "  3. The z-axis is in the vertical direction, increasing upwards."
 )
 
+# Prompts images and additional eef_pos 
+ENABLE_EEF_POS_IMAGE = False # Currently didn't help match 
