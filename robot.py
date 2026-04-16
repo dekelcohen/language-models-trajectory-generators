@@ -28,6 +28,7 @@ class Robot:
             self.base_start_orientation_q = p.getQuaternionFromEuler(config.base_start_orientation_e_franka)
             self.joint_start_positions = config.joint_start_positions_franka
             self.id = p.loadURDF("franka_robot/panda.urdf", self.base_start_position, self.base_start_orientation_q, useFixedBase=True)
+            self.gripper_id = self.id
             self.robot = "franka"
             self.ee_index = config.ee_index_franka
         self.ee_start_position = config.ee_start_position
@@ -48,7 +49,35 @@ class Robot:
                 self.joint_indices.append(j)
 
 
-
+    def get_joint_effort(self, joint_index, body_id=None):
+        """
+        Reads the 1D applied motor torque for a specific joint.
+        Real: This simulates reading the 'Present Current' or 'Present Load'
+        from a real Feetech STS3215 servo on the SO-101.
+        """
+        # Default to the main robot gripper id (could be the same as body id - franka) - if no gripper_id is provided
+        if body_id is None:
+            body_id = self.id
+            
+        # getJointState returns: (position, velocity, reactionForces, appliedJointMotorTorque)
+        # Index 3 is the torque the motor is applying to hold its target
+        state = p.getJointState(body_id, joint_index)
+        motor_torque = state[3]
+        
+        return abs(motor_torque)
+    
+    def get_gripper_effort(self, gripper1_index, gripper2_index):
+        """
+        Returns the total squeezing effort (torque) of the gripper.
+        """
+        effort = self.get_joint_effort(gripper1_index, body_id=self.gripper_id)
+        
+        # If 2 gripper motors (franka) --> Sum the effort of both independent finger motors    
+        if gripper1_index != gripper2_index:
+            effort += self.get_joint_effort(gripper2_index, body_id=self.gripper_id)
+            
+        return effort
+		
     def move(self, env, ee_target_position, ee_target_orientation_e, gripper_open, is_trajectory, desc=None):
 
         if desc is not None:
@@ -112,6 +141,12 @@ class Robot:
                 p.setJointMotorControl2(self.id, gripper2_index, p.POSITION_CONTROL, targetPosition=gripper_target_position, force=config.gripper_movement_force_franka)
 
             env.update()
+            # monitor torque of wrist joint motor (can replace with gripper1_index)
+            if True: # not gripper_open and is_trajectory:
+                actual_wrist_motor_index = self.joint_indices[-1]
+                wrist_torque = self.get_joint_effort(actual_wrist_motor_index, body_id=self.id)
+                gripper_torque = self.get_gripper_effort(gripper1_index, gripper2_index)
+                self.logger.info(OK + f'wrist_torque: {wrist_torque} gripper_torque: {gripper_torque}' + ENDC)
             self.get_camera_image("head", env, save_camera_image=is_trajectory, rgb_image_path=config.rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
             self.get_camera_image("wrist", env, save_camera_image=is_trajectory, rgb_image_path=config.wrist_rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
             if is_trajectory:
