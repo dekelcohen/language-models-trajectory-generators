@@ -8,6 +8,10 @@ import time
 import requests
 from dotenv import load_dotenv
 
+# Disable SSL verify=False warning 
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 # Load environment variables from .env
 load_dotenv()
 
@@ -121,7 +125,8 @@ def post_with_retries(url, headers, payload, max_retries=5, timeout=(10,220)):
                 url,
                 headers=headers,
                 json=payload,
-                timeout=timeout
+                timeout=timeout,
+                verify=False,
             )
             response.raise_for_status()
             return response  # ✅ success
