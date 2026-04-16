@@ -688,8 +688,7 @@ def run_simulation_environment(args, env_connection, logger):
 
                 for _ in range(100):
                     env.update()
-
-                logger.info(OK + "Finished executing generated trajectory!" + ENDC)
+                
                 env_connection.send([OK + "Finished executing generated trajectory!" + ENDC, robot.trajectory_step])
 
             elif env_connection_received[0] == OPEN_GRIPPER:
