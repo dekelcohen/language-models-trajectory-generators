@@ -17,12 +17,15 @@ AVAILABLE FUNCTIONS:
 You must remember that this conversation is a monologue, and that you are in control. I am not able to assist you with any questions, and you must output the final code yourself by making use of the available information, common sense, and general knowledge.
 You are, however, able to call any of the following Python functions, if required, as often as you want:
 [INSERT DETECT_OBJECT_TOOL]
-2. execute_trajectory(trajectory: list) -> None: This function will execute the list of trajectory points on the robot arm end-effector, and will also not return anything.
-3. open_gripper() -> None: This function will open the gripper on the robot arm, and will also not return anything.
-4. close_gripper() -> None: This function will close the gripper on the robot arm, and will also not return anything.
-5. task_completed() -> None: Call this function only when the task has been completed. This function will also not return anything.
-6. generate_linear_trajectory(desc: str, start_pose: list, end_pose: list, num_points: int = 20) -> list: Returns a straight-line end-effector trajectory between two 4D poses [x,y,z,theta]. This helper is provided by the environment and already logs motion details. do not call logger for trajectory/motion. desc is a short sentence to describe the motion and its end_pose
-
+2. open_gripper() -> None: This function will open the gripper on the robot arm, and will also not return anything.
+3. close_gripper() -> None: This function will close the gripper on the robot arm, and will also not return anything.
+4. task_completed() -> None: Call this function only when the task has been completed. This function will also not return anything.
+5. generate_linear_trajectory(desc: str, start_pose: list, end_pose: list, num_points: int = 20) -> Trajectory
+   class Trajectory:
+     self.points # a straight-line end-effector trajectory between two 4D poses [x,y,z,theta]
+     self.desc # short sentence to describe the motion and its end_pose
+   This helper is provided by the environment and already logs motion details. do not call logger for trajectory/motion. 
+6. execute_trajectory(trajectory: Trajectory) -> None: This function will execute the trajectory on the robot arm end-effector, and will also not return anything.
 ENVIRONMENT SET-UP:
 [INSERT 3D COORDINATES PROMPT SECTION]
 
@@ -72,8 +75,6 @@ Tasks:
     ) default - 50cm above the object's top surface. Smaller lifts are failures. 
     ) Special task requirements or collisions may dictate a different lift distance
   
-Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
-Stop generation after each code block to wait for it to finish executing before continuing with your plan.
 
 The user command is "[INSERT TASK]".
 
@@ -81,7 +82,7 @@ The user command is "[INSERT TASK]".
 
 Instructions:
 Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
-Stop generation after each code block to wait for it to finish executing before continuing with your plan.
+
 
 """
 
@@ -191,6 +192,6 @@ execute_trajectory(trajectory_5)
 -------------------- End of Sample -----------------
 Instructions:
 Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
-Stop generation after each code block to wait for it to finish executing before continuing with your plan.
+
 """
 
