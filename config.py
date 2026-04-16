@@ -173,3 +173,6 @@ three_d_coordinates_prompt_section = (
 
 # Prompts images and additional eef_pos 
 ENABLE_EEF_POS_IMAGE = False # Currently didn't help match 
+
+# GPT-5 in azure limits to 50 images in a request 
+max_allowed_vlm_images = 50

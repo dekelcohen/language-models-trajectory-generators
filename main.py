@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 import math
 import openai
 import torch
@@ -486,6 +486,8 @@ if __name__ == "__main__":
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
                         logger.info(PROGRESS + "RETRYING TASK..." + ENDC)
+                        # Mark the start of the new attempt for downstream reviewers
+                        api.start_attempt_trajectory_step = api.trajectory_step
 
                         # Before composing the retry prompt, refresh the current robot state
                         _, eef_pos = build_llm_context_images_and_pose(api.trajectory_step, logger)

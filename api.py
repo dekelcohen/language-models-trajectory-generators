@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 import sys
 import torch
 import math
@@ -12,7 +12,7 @@ import utils
 from common_utils import Trajectory
 from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
-from config import OK, PROGRESS, FAIL, ENDC
+from config import OK, PROGRESS, FAIL, ENDC, WARNING
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT
 from helpers.image_utils import list_file_paths
 
@@ -65,7 +65,10 @@ class API:
         self.xmem_model = xmem_model
         self.device = device
         self.conversation_messages = []
-        self.trajectory_step = 0
+        # Current trajectory step (the number on saved images)
+        self.trajectory_step = 1
+        # Start index of the current attempt (used for VLM review frame sampling)
+        self.start_attempt_trajectory_step = 1
         self.segmentation_texts = []
         self.segmentation_count = 0
         self.trajectory_length = 0
@@ -345,13 +348,26 @@ class API:
         Expects strict JSON: { "success": true/false, "reasoning": "..." }.
         Does not mutate the environment.
         """
-        from prompts.review_prompt import REVIEW_PROMPT
-        import os
-        # Subsample every 5th frame from head RGB 
-        frame_paths = list_file_paths(root=config.trajectory_folder, base_name=config.trajectory_image_base)
-        # Subsample every 7th frame from wrist RGB camera 
-        frame_paths += list_file_paths(root=config.trajectory_folder, base_name=config.trajectory_wrist_image_base, skip=7)
+        from prompts.review_prompt import REVIEW_PROMPT        
+        start_idx = self.start_attempt_trajectory_step
+        # Subsample every 5th frame from head RGB, starting at the attempt's first step
+        frame_paths = list_file_paths(
+            root=config.trajectory_folder,
+            base_name=config.trajectory_image_base,
+            start_idx=start_idx,
+        )
+        # Subsample every 7th frame from wrist RGB camera, aligned to the same start_idx
+        frame_paths += list_file_paths(
+            root=config.trajectory_folder,
+            base_name=config.trajectory_wrist_image_base,
+            start_idx=start_idx,
+            skip=7,
+        )
         
+        # GPT-5 in azure limits to 50 images in a request - test if it confuses the model (the cutoff of wrist images ....)
+        if len(frame_paths) > config.max_allowed_vlm_images:
+            self.logger.info(WARNING + f"Cutoff wrist frames from the end. frame_paths in preview > config.max_allowed_vlm_images ({config.max_allowed_vlm_images})" + ENDC)
+            frame_paths = frame_paths[:config.max_allowed_vlm_images]
                 
         # Build prompt with placeholders
         prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.command)) \
@@ -360,7 +376,7 @@ class API:
                               
         # Use conversation history; do not summarize
         messages = self.conversation_messages
-        self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5)." + ENDC)
+        self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}." + ENDC)
         messages = models.get_chatgpt_output(self.client, self.args.language_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, log_msgs=True)
         # Update shared conversation
         self.conversation_messages = messages
@@ -485,6 +501,7 @@ class API:
         """
         self.failed_task = True
         # Do not reset env or counters; retries will continue from current state
+
 
 
 
