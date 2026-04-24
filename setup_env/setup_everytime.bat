@@ -1,5 +1,24 @@
 REM create shortcut: cmd.exe /k "E:\Robotics\VLM_Robotics\language-models-trajectory-generators\setup_env\setup_everytime.bat"
-call "%USERPROFILE%\miniconda3\Scripts\activate.bat" vlm_traj
+
+REM Try common install locations
+if exist "%USERPROFILE%\miniconda3\Scripts\activate.bat" (
+    call "%USERPROFILE%\miniconda3\Scripts\activate.bat" vlm_traj
+    goto done
+)
+
+if exist "%LOCALAPPDATA%\miniconda3\Scripts\activate.bat" (
+    call "%LOCALAPPDATA%\miniconda3\Scripts\activate.bat" vlm_traj
+    goto done
+)
+
+
+echo ERROR: Could not find a Conda installation.
+echo Tried USERPROFILE, LOCALAPPDATA
+exit /b 1
+
+:done
+echo Activated vlm_traj
+
 
 @echo off
 
