@@ -367,7 +367,7 @@ class API:
         # GPT-5 in azure limits to 50 images in a request - test if it confuses the model (the cutoff of wrist images ....)
         if len(frame_paths) > config.max_allowed_vlm_images:
             self.logger.info(WARNING + f"Cutoff wrist frames from the end. frame_paths in preview > config.max_allowed_vlm_images ({config.max_allowed_vlm_images})" + ENDC)
-            frame_paths = frame_paths[:config.max_allowed_vlm_images]
+            frame_paths = frame_paths[:config.max_allowed_vlm_images - 1]
                 
         # Build prompt with placeholders
         prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.command)) \
