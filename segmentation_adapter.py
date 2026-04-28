@@ -179,16 +179,17 @@ def _moondream_predict(image_pil, prompts: List[str]):
             raise ValueError(f'bbox_pixels should be 4 ints {bbox_px}')
 
         label_str = str(p.get("class", ""))
+        m = p['seg_mask']
         # Apply override only when set and either regex not provided (apply all) or label matches regex
         if override_rect is not None and (_ovr_obj_regex is None or _ovr_obj_regex.search(label_str or "")):
             x1, y1, x2, y2 = override_rect
-
+            # Rectangle mask
+            m = np.zeros((H, W), dtype=np.uint8)
+            m[y1:y2, x1:x2] = 1
+            
         if x2 <= x1 or y2 <= y1:
             continue
-
-        # Rectangle mask
-        m = np.zeros((H, W), dtype=np.uint8)
-        m[y1:y2, x1:x2] = 1
+                
         masks_np.append(m)
         boxes_np.append([x1, y1, x2, y2])
         labels.append(str(p.get("class", "")))

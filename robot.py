@@ -142,7 +142,7 @@ class Robot:
 
             env.update()
             # monitor torque of wrist joint motor (can replace with gripper1_index)
-            if True: # not gripper_open and is_trajectory:
+            if False: # not gripper_open and is_trajectory:
                 actual_wrist_motor_index = self.joint_indices[-1]
                 wrist_torque = self.get_joint_effort(actual_wrist_motor_index, body_id=self.id)
                 gripper_torque = self.get_gripper_effort(gripper1_index, gripper2_index)

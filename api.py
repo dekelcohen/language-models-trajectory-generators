@@ -193,6 +193,8 @@ class API:
 
         masks = utils.get_segmentation_mask(model_predictions, config.segmentation_threshold)
 
+        if self.args.save_seg_mask:
+            self._save_seg_masks(masks, segmentation_texts)
 
         self.logger.info(PROGRESS + f"*** Before bounding_cubes_world_coordinates len(masks)={len(masks)}" + ENDC)
         bounding_cubes_world_coordinates, bounding_cubes_orientations = utils.get_bounding_cube_from_point_cloud(            
@@ -244,6 +246,17 @@ class API:
         self.segmentation_count += 1
 
 
+
+    def _save_seg_masks(self, masks, segmentation_texts):
+        """Save each binary segmentation mask to images_folder as <text>_seg_mask.npy."""
+        for i, mask in enumerate(masks):
+            label = segmentation_texts[i] if i < len(segmentation_texts) else f"mask_{i}"
+            try:
+                path = os.path.join(config.images_folder, f"{label}_seg_mask.npy")
+                np.save(path, mask)
+                self.logger.info(PROGRESS + f"Saved segmentation mask [{i}] ({label}) to {path}" + ENDC)
+            except Exception as e:
+                self.logger.info(PROGRESS + f"Warning: failed to save segmentation mask [{i}] ({label}): {e}" + ENDC)
 
     def execute_trajectory(self, trajectory):
 
