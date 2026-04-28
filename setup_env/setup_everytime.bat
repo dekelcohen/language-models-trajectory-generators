@@ -11,6 +11,12 @@ if exist "%LOCALAPPDATA%\miniconda3\Scripts\activate.bat" (
     goto done
 )
 
+REM Work PC
+if exist "C:\ProgramData\miniconda3\Scripts\activate.bat" (
+    call "C:\ProgramData\miniconda3\Scripts\activate.bat" vlm_traj
+    goto done
+)
+
 
 echo ERROR: Could not find a Conda installation.
 echo Tried USERPROFILE, LOCALAPPDATA
