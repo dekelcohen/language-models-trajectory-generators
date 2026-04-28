@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI & Robotic Manipulation</title>
+<style>
+  :root {
+    --a1: #00d4ff;
+    --a2: #a855f7;
+    --a3: #22d3a0;
+    --bg: #0a0e1a;
+    --card: rgba(255,255,255,0.06);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  html, body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── progress bar ──────────────────────────── */
+  #progress {
+    position: fixed; top:0; left:0; height:4px; z-index:300;
+    background: linear-gradient(90deg, var(--a1), var(--a2));
+    transition: width .4s ease;
+  }
+
+  /* ── deck / slides ─────────────────────────── */
+  .deck { position: relative; width:100vw; height:100vh; }
+
+  .slide {
+    position: absolute; inset:0;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    /* minimal padding: just enough to avoid nav bar + edges */
+    padding: 28px 48px 68px;
+    opacity: 0; transform: translateX(80px);
+    pointer-events: none;
+    transition: opacity .38s ease, transform .38s ease;
+  }
+  .slide.active { opacity:1; transform:translateX(0); pointer-events:all; }
+  .slide.exit   { opacity:0; transform:translateX(-80px); }
+
+  /* backgrounds */
+  .slide::before { content:''; position:absolute; inset:0; z-index:-1; }
+  .bg-1::before  { background: radial-gradient(ellipse at 20% 45%, #1a0535 0%, var(--bg) 65%), radial-gradient(ellipse at 80% 60%, #001a33 0%, transparent 55%); }
+  .bg-2::before  { background: radial-gradient(ellipse at 70% 30%, #0d1f42 0%, var(--bg) 65%); }
+  .bg-3::before  { background: radial-gradient(ellipse at 30% 70%, #001432 0%, var(--bg) 65%); }
+  .bg-4::before  { background: radial-gradient(ellipse at 80% 20%, #1a0032 0%, var(--bg) 65%); }
+  .bg-5::before  { background: radial-gradient(ellipse at 20% 80%, #1b1500 0%, var(--bg) 65%); }
+  .bg-6::before  { background: radial-gradient(ellipse at 60% 50%, #001b22 0%, var(--bg) 65%); }
+  .bg-7::before  { background: radial-gradient(ellipse at 40% 20%, #11001b 0%, var(--bg) 65%); }
+  .bg-8::before  { background: radial-gradient(ellipse at 80% 80%, #001b11 0%, var(--bg) 65%); }
+  .bg-9::before  { background: radial-gradient(ellipse at 50% 20%, #0b0022 0%, var(--bg) 65%); }
+  .bg-10::before { background: radial-gradient(ellipse at 30% 60%, #0e0032 0%, var(--bg) 65%); }
+
+  /* grid overlay */
+  .slide::after {
+    content:''; position:absolute; inset:0; z-index:-1;
+    background-image:
+      linear-gradient(rgba(0,212,255,.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,.022) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  /* slide number */
+  .sn {
+    position: absolute; top:16px; right:28px;
+    font-size: 1rem; color: var(--muted);
+    letter-spacing:.08em; text-transform:uppercase;
+  }
+
+  /* ── typography ────────────────────────────── */
+  h1 {
+    font-size: clamp(3.2rem, 6.5vw, 5.4rem);
+    font-weight: 900; line-height:1.08; text-align:center;
+  }
+  h2 {
+    font-size: clamp(2.2rem, 4vw, 3.2rem);
+    font-weight: 800; line-height:1.15; text-align:center;
+    margin-bottom: 2.2vh;
+  }
+
+  .gt  { background:linear-gradient(135deg,var(--a1),var(--a2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+  .gg  { background:linear-gradient(135deg,var(--a3),var(--a1)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+
+  .sub {
+    font-size: clamp(1.15rem, 2vw, 1.6rem);
+    color: var(--muted); margin-top:1.4vh; text-align:center; line-height:1.55;
+  }
+
+  /* ── shared content wrapper ────────────────── */
+  .wrap {
+    width: 96vw;
+    display: flex; flex-direction:column; align-items:center;
+  }
+
+  /* ── cards row ─────────────────────────────── */
+  .cards {
+    display: flex; gap:1.6vw; width:100%; flex-wrap:wrap; justify-content:center;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 1.2vw;
+    padding: 2vh 2vw;
+    flex: 1 1 0; min-width:220px;
+    backdrop-filter: blur(10px);
+    transition: border-color .2s;
+  }
+  .card:hover { border-color: rgba(0,212,255,.45); }
+  .ci   { font-size: clamp(1.8rem, 3vw, 2.6rem); margin-bottom:.6vh; }
+  .card h3 { font-size: clamp(1.1rem, 1.8vw, 1.55rem); font-weight:700; margin-bottom:.5vh; }
+  .card p, .card li { font-size: clamp(.95rem, 1.4vw, 1.2rem); color:var(--muted); line-height:1.6; }
+  .card ul { padding-left:1.1em; }
+
+  /* ── two-col ───────────────────────────────── */
+  .cols { display:flex; gap:1.6vw; width:100%; align-items:flex-start; }
+  .col {
+    flex:1;
+    background: var(--card);
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 1.2vw;
+    padding: 2vh 2vw;
+    backdrop-filter: blur(10px);
+  }
+  .col h3 { font-size: clamp(1.1rem, 1.7vw, 1.45rem); font-weight:700; margin-bottom:1.2vh; }
+
+  /* ── tags ──────────────────────────────────── */
+  .tags { display:flex; flex-wrap:wrap; gap:.6vw; margin-top:.8vh; }
+  .tag  {
+    font-size: clamp(.78rem, 1.1vw, 1rem);
+    padding: .35em .9em; border-radius:999px; font-weight:700; letter-spacing:.03em;
+  }
+  .tb { background:rgba(0,212,255,.14);  color:var(--a1); border:1px solid rgba(0,212,255,.3); }
+  .tp { background:rgba(168,85,247,.14); color:var(--a2); border:1px solid rgba(168,85,247,.3); }
+  .tg { background:rgba(34,211,160,.14); color:var(--a3); border:1px solid rgba(34,211,160,.3); }
+  .tr { background:rgba(248,113,113,.14);color:#f87171;   border:1px solid rgba(248,113,113,.3); }
+  .ta { background:rgba(251,191,36,.14); color:#fbbf24;   border:1px solid rgba(251,191,36,.3); }
+
+  /* ── pro / con ─────────────────────────────── */
+  .pc  { display:flex; flex-direction:column; gap:.7vh; margin-top:.6vh; }
+  .pro, .con {
+    font-size: clamp(.95rem, 1.45vw, 1.2rem);
+    padding: .55em .9em; border-radius:.6vw;
+    display:flex; align-items:flex-start; gap:.5em; line-height:1.55;
+  }
+  .pro { background:rgba(34,211,160,.1);  color:#6ee7b7; }
+  .con { background:rgba(248,113,113,.1); color:#fca5a5; }
+  .pro::before { content:'✓'; font-weight:900; flex-shrink:0; }
+  .con::before { content:'✗'; font-weight:900; flex-shrink:0; }
+  .cony { background:rgba(251,191,36,.08); color:#fde68a; }
+  .cony::before { content:'△'; font-weight:900; flex-shrink:0; }
+
+  /* ── pipeline row ──────────────────────────── */
+  .pipe { display:flex; align-items:stretch; width:100%; gap:.5vw; flex-wrap:wrap; justify-content:center; }
+  .ps {
+    background:var(--card); border:1px solid rgba(255,255,255,.1);
+    border-radius:1vw; padding:1.4vh 1.4vw;
+    text-align:center; flex:1 1 120px; backdrop-filter:blur(6px);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  .pi   { font-size: clamp(1.4rem, 2.2vw, 2rem); }
+  .ps h4 { font-size: clamp(.9rem, 1.4vw, 1.2rem); font-weight:700; margin-top:.4vh; }
+  .ps p  { font-size: clamp(.78rem, 1.1vw, .95rem); color:var(--muted); margin-top:.2vh; line-height:1.4; }
+  .pa    { font-size: clamp(1.2rem, 2vw, 1.7rem); color:var(--a1); padding:0 .2vw; flex-shrink:0; align-self:center; }
+
+  /* ── source list ───────────────────────────── */
+  .srcs { display:flex; flex-direction:column; gap:1vh; width:100%; }
+  .si {
+    display:flex; align-items:center; gap:1.4vw;
+    background:var(--card); border:1px solid rgba(255,255,255,.08);
+    border-radius:1vw; padding:1.4vh 2vw; backdrop-filter:blur(8px);
+  }
+  .sico { font-size: clamp(1.6rem, 2.4vw, 2.2rem); flex-shrink:0; }
+  .si h4 { font-size: clamp(.95rem, 1.5vw, 1.25rem); font-weight:700; margin-bottom:.2vh; }
+  .si p  { font-size: clamp(.85rem, 1.25vw, 1.05rem); color:var(--muted); line-height:1.5; }
+
+  /* ── variation grid ────────────────────────── */
+  .vg {
+    display:grid; grid-template-columns:repeat(3,1fr);
+    gap:1.2vw; width:100%;
+  }
+  .vc {
+    background:var(--card); border:1px solid rgba(255,255,255,.08);
+    border-radius:1vw; padding:1.6vh 1.6vw; backdrop-filter:blur(6px);
+  }
+  .vc h4 { font-size: clamp(.95rem, 1.5vw, 1.25rem); font-weight:700; margin-bottom:.5vh; }
+  .vc p  { font-size: clamp(.85rem, 1.25vw, 1.05rem); color:var(--muted); line-height:1.55; }
+
+  /* ── highlight box ─────────────────────────── */
+  .hbox {
+    background:var(--card); border-radius:1.2vw;
+    padding:1.6vh 2.4vw; width:100%;
+    backdrop-filter:blur(10px); text-align:center;
+    margin-bottom:1.6vh;
+  }
+  .hbox p { font-size: clamp(.95rem, 1.4vw, 1.2rem); color:var(--muted); margin-bottom:.8vh; }
+  .hrow { display:flex; align-items:center; justify-content:center; gap:1vw; flex-wrap:wrap; }
+
+  /* ── video slide ───────────────────────────── */
+  .vrow { display:flex; gap:1.8vw; width:100%; align-items:stretch; }
+  .vbox {
+    flex:1; background:var(--card);
+    border:1px solid rgba(255,255,255,.1);
+    border-radius:1.2vw; padding:1.8vh 2vw;
+    backdrop-filter:blur(10px);
+    display:flex; flex-direction:column; gap:1vh;
+  }
+  .vbox h3 { font-size: clamp(1.05rem, 1.7vw, 1.4rem); font-weight:700; }
+  .vbox p  { font-size: clamp(.85rem, 1.25vw, 1.05rem); color:var(--muted); line-height:1.5; }
+  .vbox video {
+    width:100%; border-radius:.8vw; background:#000;
+    flex:1; min-height:0; max-height:44vh; object-fit:contain;
+  }
+
+  /* ── icon-text list ────────────────────────── */
+  .ilist { display:flex; flex-direction:column; gap:1.2vh; margin-top:.4vh; }
+  .irow  { display:flex; gap:.8vw; align-items:flex-start; font-size: clamp(.95rem, 1.45vw, 1.2rem); }
+  .irow span:first-child { font-size:1.3em; flex-shrink:0; margin-top:.05em; }
+
+  /* ── nav ───────────────────────────────────── */
+  nav.nav {
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:1.4vw; z-index:100;
+  }
+  nav.nav button {
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.16);
+    color:var(--text); padding:.55em 2em;
+    border-radius:999px; cursor:pointer;
+    font-size: clamp(.85rem, 1.2vw, 1.1rem); font-weight:700;
+    transition:background .2s, border-color .2s; backdrop-filter:blur(8px);
+  }
+  nav.nav button:hover    { background:rgba(0,212,255,.16); border-color:var(--a1); }
+  nav.nav button:disabled { opacity:.3; cursor:default; }
+  .dots { display:flex; gap:.5vw; }
+  .dot  { width:.6vw; height:.6vw; min-width:7px; min-height:7px; border-radius:50%; background:rgba(255,255,255,.22); cursor:pointer; transition:background .2s, transform .2s; }
+  .dot.active { background:var(--a1); transform:scale(1.5); }
+
+  .kbh { position:fixed; bottom:20px; right:28px; font-size:.8rem; color:rgba(255,255,255,.18); }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div class="deck" id="deck">
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 1 · Title
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-1 active">
+  <span class="sn">1 / 10</span>
+  <div class="wrap" style="align-items:center; gap:2vh;">
+    <div style="font-size:clamp(3rem,6vw,5rem);">🤖</div>
+    <h1><span class="gt">AI-Powered<br>Robotic Manipulation</span></h1>
+    <p class="sub">From Vision-Language Models to end-to-end learning —<br>how AI is unlocking dexterous robot control</p>
+    <div class="tags" style="justify-content:center; margin-top:2vh;">
+      <span class="tag tb" style="font-size:clamp(.9rem,1.4vw,1.2rem); padding:.45em 1.2em;">VLMs</span>
+      <span class="tag tp" style="font-size:clamp(.9rem,1.4vw,1.2rem); padding:.45em 1.2em;">VLAs</span>
+      <span class="tag tg" style="font-size:clamp(.9rem,1.4vw,1.2rem); padding:.45em 1.2em;">World Models</span>
+      <span class="tag ta" style="font-size:clamp(.9rem,1.4vw,1.2rem); padding:.45em 1.2em;">Robotic Manipulation</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 2 · Three Pillars
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-2">
+  <span class="sn">2 / 10</span>
+  <div class="wrap" style="gap:2vh;">
+    <h2>The <span class="gt">Three Pillars</span> of Modern Robotics</h2>
+    <div class="cards">
+      <div class="card">
+        <div class="ci">🗺️</div>
+        <h3 style="color:var(--a1);">Navigation</h3>
+        <p>Moving through space — indoors, outdoors, structured or unstructured environments. Wheeled robots, drones, autonomous vehicles.</p>
+        <div class="tags"><span class="tag tb">SLAM</span><span class="tag tb">Path Planning</span></div>
+      </div>
+      <div class="card">
+        <div class="ci">🦿</div>
+        <h3 style="color:var(--a2);">Locomotion</h3>
+        <p>Moving the body — legged robots, humanoids, quadrupeds. Balance, gait, and adapting to terrain in the real world.</p>
+        <div class="tags"><span class="tag tp">RL</span><span class="tag tp">Whole-body Control</span></div>
+      </div>
+      <div class="card" style="border-color:rgba(34,211,160,.35);">
+        <div class="ci">🦾</div>
+        <h3 style="color:var(--a3);">Manipulation ★</h3>
+        <p>Interacting with objects — grasping, pushing, assembling. Requires precise 3D reasoning and physical intuition.</p>
+        <div class="tags"><span class="tag tg">Grasping</span><span class="tag tg">Dexterity</span><span class="tag tg">Assembly</span></div>
+      </div>
+    </div>
+    <p style="font-size:clamp(1rem,1.5vw,1.3rem); color:var(--muted); text-align:center; margin-top:.5vh;">
+      Modern systems increasingly <strong style="color:var(--text)">combine</strong> all three —
+      a humanoid that walks, navigates rooms, and picks up objects.
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 3 · VLMs in Robotics
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-3">
+  <span class="sn">3 / 10</span>
+  <div class="wrap" style="gap:2vh;">
+    <h2>Vision-Language Models Enter Robotics <span class="gt">2024 – 2026</span></h2>
+    <div class="cols">
+      <div class="col">
+        <h3 style="color:var(--a3);">✅ What VLMs Bring</h3>
+        <div class="ilist">
+          <div class="irow"><span style="color:var(--a3);">🧠</span><span>Rich high-level semantic understanding of scenes, objects, and instructions</span></div>
+          <div class="irow"><span style="color:var(--a3);">📋</span><span>Task decomposition: break "make coffee" into executable sub-steps</span></div>
+          <div class="irow"><span style="color:var(--a3);">💬</span><span>Natural language instruction following out-of-the-box, zero-shot</span></div>
+          <div class="irow"><span style="color:var(--a3);">🔄</span><span>Zero/few-shot generalization to unseen tasks and environments</span></div>
+        </div>
+      </div>
+      <div class="col">
+        <h3 style="color:#f87171;">⚠️ What VLMs Lack</h3>
+        <div class="ilist">
+          <div class="irow"><span style="color:#f87171;">📐</span><span>Precise 3D geometry — exact positions, angles, distances for manipulation</span></div>
+          <div class="irow"><span style="color:#f87171;">⚖️</span><span>Intuitive physics — forces, friction, deformable objects</span></div>
+          <div class="irow"><span style="color:#f87171;">⚡</span><span>Real-time speed — large VLMs too slow for closed-loop control (1–10 Hz)</span></div>
+          <div class="irow"><span style="color:#f87171;">🎯</span><span>Pixel-accurate affordance — "grasp exactly here" is still unreliable</span></div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:clamp(.95rem,1.4vw,1.2rem); color:var(--muted); text-align:center; max-width:80vw;">
+      <strong style="color:var(--text)">Key insight:</strong> VLMs excel at <em>what to do</em> and <em>why</em>,
+      but struggle with <em>how exactly to move</em>. Three complementary approaches address this gap →
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 4 · Approach 1: VLA
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-4">
+  <span class="sn">4 / 10</span>
+  <div class="wrap" style="gap:1.8vh;">
+    <h2>Approach 1 — <span class="gt">Vision-Language-Action (VLA)</span></h2>
+    <div class="hbox" style="border:1px solid rgba(0,212,255,.25);">
+      <p>Single end-to-end model — trained on millions of robot demonstrations</p>
+      <div class="hrow">
+        <span class="tag tb" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">📝 Task Prompt</span>
+        <span style="color:var(--a1); font-size:clamp(1.2rem,2vw,1.8rem);">+</span>
+        <span class="tag tp" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">📷 Camera Frame</span>
+        <span style="color:var(--a1); font-size:clamp(1.2rem,2vw,1.8rem);">+</span>
+        <span class="tag tg" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🦾 Robot State</span>
+        <span style="color:var(--a1); font-size:clamp(1.4rem,2.4vw,2.2rem);">→</span>
+        <span class="tag ta" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🎯 Actions</span>
+      </div>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <h3 style="color:var(--a3);">Pros</h3>
+        <div class="pc">
+          <div class="pro">End-to-end — no manual decomposition into perception, control, planning</div>
+          <div class="pro">Single (or few) models — simpler deployment pipeline</div>
+          <div class="pro">Strong on short dexterous tasks when well-trained</div>
+        </div>
+      </div>
+      <div class="col">
+        <h3 style="color:#f87171;">Cons</h3>
+        <div class="pc">
+          <div class="con">Black-box — hard to diagnose or debug failures</div>
+          <div class="con">Long-horizon multi-step sequences remain challenging</div>
+          <div class="con">Generalizes poorly outside training distribution</div>
+          <div class="con">Requires large, diverse, high-quality datasets per task</div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:clamp(.9rem,1.3vw,1.1rem); color:var(--muted); text-align:center;">
+      Examples: <strong style="color:var(--text)">π₀ (Physical Intelligence) · OpenVLA · Octo · ACT · Diffusion Policy</strong>
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 5 · Generalization Gap
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-5">
+  <span class="sn">5 / 10</span>
+  <div class="wrap" style="gap:1.8vh;">
+    <h2>The <span class="gt">Generalization Gap</span> — Why VLAs Are Brittle</h2>
+    <p style="font-size:clamp(.95rem,1.4vw,1.2rem); color:var(--muted); text-align:center; max-width:82vw; margin-bottom:.5vh;">
+      Each dimension below can cause a trained VLA policy to fail if not sufficiently covered in training data
+    </p>
+    <div class="vg">
+      <div class="vc">
+        <h4>📍 Object Positions</h4>
+        <p>Left, right, center, rotated, tilted — the robot must have seen every arrangement during training</p>
+      </div>
+      <div class="vc">
+        <h4>🎨 Visual Appearance</h4>
+        <p>Colors, textures, sizes, shapes — pixel-based policies over-fit to these low-level features</p>
+      </div>
+      <div class="vc">
+        <h4>💡 Lighting Conditions</h4>
+        <p>Bright, dark, reflections, shadows — dramatically affect image-based control signals</p>
+      </div>
+      <div class="vc">
+        <h4>🖼️ Backgrounds</h4>
+        <p>Tabletop, counter, floor — unrelated background pixels confuse pixel-space policies</p>
+      </div>
+      <div class="vc">
+        <h4>🔧 Robot Embodiment</h4>
+        <p>Arm design, gripper type, camera placement — transfer between robots is non-trivial</p>
+      </div>
+      <div class="vc">
+        <h4>🧩 Clutter &amp; Distractors</h4>
+        <p>Extra objects, occlusion, varying counts — harder perception and harder planning</p>
+      </div>
+    </div>
+    <p style="font-size:clamp(.9rem,1.3vw,1.1rem); color:var(--muted); text-align:center; max-width:85vw; margin-top:.4vh;">
+      <strong style="color:var(--a1)">Solutions:</strong>
+      Foundation encodings (DINOv2, CLIP) more invariant than raw pixels ·
+      Augmentation pipelines (DemoGen, MimicGen) auto-generate variation ·
+      3D representations reduce sensitivity to viewpoint
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 6 · Approach 2: VLM Agent + Tools
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-6">
+  <span class="sn">6 / 10</span>
+  <div class="wrap" style="gap:1.6vh;">
+    <h2>Approach 2 — <span class="gt">VLM Agent + Tools</span></h2>
+    <div class="pipe" style="margin-bottom:1.4vh;">
+      <div class="ps"><div class="pi">💬</div><h4>Task Prompt</h4><p>"Open drawer, grab mug"</p></div>
+      <div class="pa">→</div>
+      <div class="ps" style="border-color:rgba(168,85,247,.45);"><div class="pi">🧠</div><h4>VLM Planner</h4><p>High-level planning &amp; subtask decomposition</p></div>
+      <div class="pa">→</div>
+      <div class="ps" style="border-color:rgba(0,212,255,.45);"><div class="pi">🔧</div><h4>Tool Calls</h4><p>Perception · Grasp · 3D · <strong style="color:var(--a1)">VLA</strong></p></div>
+      <div class="pa">→</div>
+      <div class="ps" style="border-color:rgba(34,211,160,.45);"><div class="pi">🔁</div><h4>Verify &amp; Replan</h4><p>Detect success/failure, retry</p></div>
+      <div class="pa">→</div>
+      <div class="ps" style="border-color:rgba(34,211,160,.7);"><div class="pi">🦾</div><h4>Action</h4><p>Trajectory executed</p></div>
+    </div>
+    <div class="cards">
+      <div class="card" style="text-align:center;">
+        <div class="ci">👁️</div><h3>Perception</h3>
+        <p>Object detection, segmentation, pose estimation</p>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div class="ci">✋</div><h3>Grasping</h3>
+        <p>Grasp pose prediction, affordance detection</p>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div class="ci">📐</div><h3>3D Geometry</h3>
+        <p>Point clouds, articulation axes, spatial reasoning</p>
+      </div>
+      <div class="card" style="text-align:center; border-color:rgba(0,212,255,.4);">
+        <div class="ci">🦾</div>
+        <h3 style="color:var(--a1);">VLA (Tool)</h3>
+        <p>Low-level closed-loop control for simple subtasks — VLM delegates execution to a local VLA policy</p>
+      </div>
+    </div>
+    <p style="font-size:clamp(.9rem,1.3vw,1.1rem); color:var(--muted); text-align:center; margin-top:.2vh;">
+      <strong style="color:var(--a2)">Pro:</strong> Interpretable, modular, handles complex long-horizon tasks &nbsp;|&nbsp;
+      <strong style="color:#f87171;">Con:</strong> Slower; errors can cascade through the pipeline
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 7 · Data Problem
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-7">
+  <span class="sn">7 / 10</span>
+  <div class="wrap" style="gap:1.8vh;">
+    <h2>The <span class="gt">Data Problem</span> — Collecting Robot Trajectories</h2>
+    <div class="srcs">
+      <div class="si">
+        <div class="sico">🕹️</div>
+        <div style="flex:1;">
+          <h4>Teleoperation</h4>
+          <p>Human uses a controller to demonstrate tasks. Most common but slow and tiring. VR devices (Apple Vision Pro + ARKit) reduce collection time <strong style="color:var(--text)">4–5× vs. classic teleoperation</strong>.</p>
+        </div>
+        <div class="tags" style="margin-left:1vw; flex-shrink:0;"><span class="tag ta">Manual</span></div>
+      </div>
+      <div class="si">
+        <div class="sico">📹</div>
+        <div style="flex:1;">
+          <h4>Human Videos → Robot Data</h4>
+          <p>UMI sponge gripper, AirExo exoskeleton — humans perform tasks naturally, no robot needed. Video understanding transfers actions cross-embodiment. Fast, cheap, scalable to diverse environments.</p>
+        </div>
+        <div class="tags" style="margin-left:1vw; flex-shrink:0;"><span class="tag tb">Scalable</span></div>
+      </div>
+      <div class="si">
+        <div class="sico">🏭</div>
+        <div style="flex:1;">
+          <h4>Synthetic Pipelines (Sim)</h4>
+          <p>VLMs generate tasks, simulate with RL and path planning, record as datasets. Examples: <strong style="color:var(--text)">RoboGen, GenSim2, AutoRT</strong>. Cheap at scale; sim-to-real gap remains a challenge.</p>
+        </div>
+        <div class="tags" style="margin-left:1vw; flex-shrink:0;"><span class="tag tg">Automated</span></div>
+      </div>
+      <div class="si">
+        <div class="sico">✨</div>
+        <div style="flex:1;">
+          <h4>Data Augmentation</h4>
+          <p>Expert trajectories → variants with different object positions, colors, scenes. <strong style="color:var(--text)">DemoGen, DexMimicGen, Real2Render2Real</strong>. Multiplies dataset size cheaply.</p>
+        </div>
+        <div class="tags" style="margin-left:1vw; flex-shrink:0;"><span class="tag tp">Multiplier</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 8 · World Models
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-8">
+  <span class="sn">8 / 10</span>
+  <div class="wrap" style="gap:1.8vh;">
+    <h2>Approach 3 — <span class="gg">World Models</span></h2>
+    <div class="hbox" style="border:1px solid rgba(34,211,160,.25);">
+      <p>Fine-tuned video-generation model as the robot brain</p>
+      <div class="hrow">
+        <span class="tag tb" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">📝 Task Prompt</span>
+        <span style="color:var(--a1); font-size:clamp(1.2rem,2vw,1.8rem);">+</span>
+        <span class="tag tp" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🎞️ Recent Frames</span>
+        <span style="color:var(--a1); font-size:clamp(1.4rem,2.4vw,2.2rem);">→</span>
+        <span class="tag tg" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🔮 Future Frames</span>
+        <span style="color:var(--a1); font-size:clamp(1.2rem,2vw,1.8rem);">+</span>
+        <span class="tag ta" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🎯 Actions</span>
+      </div>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <h3 style="color:var(--a3);">Why It's Powerful</h3>
+        <div class="pc">
+          <div class="pro">Trained on massive internet video — rich physics prior for free</div>
+          <div class="pro">Predicts plausible futures → plan by imagining consequences</div>
+          <div class="pro">Naturally handles uncertainty and multi-step horizons</div>
+          <div class="pro">Actions grounded in predicted visual outcomes</div>
+        </div>
+      </div>
+      <div class="col">
+        <h3 style="color:#fbbf24;">Open Challenges</h3>
+        <div class="pc">
+          <div class="pro cony">Plausible video ≠ precise joint control — accuracy still limited</div>
+          <div class="pro cony">Compute-heavy — video generation expensive at inference time</div>
+          <div class="pro cony">Long-horizon temporal consistency still an active research area</div>
+        </div>
+        <div class="tags" style="margin-top:1.2vh;">
+          <span class="tag tb">Cosmos (NVIDIA)</span>
+          <span class="tag tp">JEPA-2 (Meta)</span>
+          <span class="tag tg">DreamZero</span>
+          <span class="tag ta">NovaFlow</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 9 · Experiments
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-9">
+  <span class="sn">9 / 10</span>
+  <div class="wrap" style="gap:2vh;">
+    <h2>🔬 <span class="gt">Experiments</span></h2>
+    <div class="vrow">
+      <div class="vbox" style="border-color:rgba(0,212,255,.35);">
+        <div>
+          <div class="tags" style="margin-bottom:.8vh;"><span class="tag tb">VLA — Trained Policy</span></div>
+          <h3>Pick Up Yellow Duck</h3>
+          <p>A VLA policy trained via imitation learning on ~100 demonstrations — the robot learns to detect, approach, and grasp a specific toy reliably.</p>
+        </div>
+        <video controls preload="metadata">
+          <source src="file:///D:/Docs/test6/Projects/Robotics/Tasks/PickAndPlace/pick_up_yellow_duck_1.mp4" type="video/mp4">
+          <p style="color:var(--muted); padding:1em; font-size:.9rem;">⚠️ Video not found at:<br><code style="font-size:.8rem; word-break:break-all;">D:\Docs\test6\Projects\Robotics\Tasks\PickAndPlace\pick_up_yellow_duck_1.mp4</code></p>
+        </video>
+      </div>
+      <div class="vbox" style="border-color:rgba(168,85,247,.35);">
+        <div>
+          <div class="tags" style="margin-bottom:.8vh;"><span class="tag tp">VLM Agent — Zero-Shot</span></div>
+          <h3>Open Door (GPT-5)</h3>
+          <p>A VLM agent with perception and control tools, operating <strong style="color:var(--text)">zero-shot</strong> — no task-specific training. The VLM plans, detects the handle, and executes the trajectory.</p>
+        </div>
+        <video controls preload="metadata">
+          <source src="outputs/videos/gpt-5/open_door/open_door_success_partial.mp4" type="video/mp4">
+          <p style="color:var(--muted); padding:1em; font-size:.9rem;">⚠️ Video not found at:<br><code style="font-size:.8rem; word-break:break-all;">outputs/videos/gpt-5/open_door/open_door_success_partial.mp4</code></p>
+        </video>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SLIDE 10 · Landscape & Outlook
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-10">
+  <span class="sn">10 / 10</span>
+  <div class="wrap" style="gap:2vh;">
+    <h2>The Landscape at a Glance</h2>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:1.4vw; width:100%; margin-bottom:.5vh;">
+      <div class="card" style="border-color:rgba(0,212,255,.4);">
+        <div class="ci">🦾 ⚡</div>
+        <h3 style="color:var(--a1);">VLA — End-to-End</h3>
+        <p>Fast, elegant, great on short tasks. Data-hungry and brittle outside training distribution. Best for well-scoped repeated tasks.</p>
+      </div>
+      <div class="card" style="border-color:rgba(168,85,247,.4);">
+        <div class="ci">🧠 🔧</div>
+        <h3 style="color:var(--a2);">VLM Agent + Tools</h3>
+        <p>Modular, interpretable, zero-shot on new tasks. Uses VLA as sub-tool for low-level control. Slower but composable.</p>
+      </div>
+      <div class="card" style="border-color:rgba(34,211,160,.4);">
+        <div class="ci">🎞️ 🔮</div>
+        <h3 style="color:var(--a3);">World Models</h3>
+        <p>Rich physics prior from internet video pre-training. Plan by imagining outcomes. Still maturing for precise joint control.</p>
+      </div>
+    </div>
+    <div style="background:var(--card); border:1px solid rgba(255,255,255,.09); border-radius:1.2vw; padding:1.8vh 2.4vw; width:100%; backdrop-filter:blur(10px);">
+      <h3 style="font-size:clamp(1.05rem,1.7vw,1.4rem); margin-bottom:1.2vh;">🚀 What's Driving Progress (2024 – 2026)</h3>
+      <div class="tags">
+        <span class="tag tb">Scalable data (UMI, VR teleoperation)</span>
+        <span class="tag tp">Cross-embodiment transfer</span>
+        <span class="tag tg">Sim-to-real augmentation</span>
+        <span class="tag ta">Closed-loop failure recovery</span>
+        <span class="tag tb">Foundation encodings (DINOv2, CLIP)</span>
+        <span class="tag tp">Human-in-the-loop active learning</span>
+        <span class="tag tg">Hybrid VLM + VLA architectures</span>
+      </div>
+    </div>
+    <p style="font-size:clamp(.95rem,1.4vw,1.2rem); color:var(--muted); text-align:center; max-width:80vw;">
+      The field is converging on <strong style="color:var(--text)">hybrid systems</strong> — VLMs plan long-horizon tasks,
+      VLAs handle precise low-level control, and world models enable planning under uncertainty.
+    </p>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<nav class="nav">
+  <button id="prev" disabled>← Prev</button>
+  <div class="dots" id="dots"></div>
+  <button id="next">Next →</button>
+</nav>
+<div class="kbh">← → keys to navigate</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const total  = slides.length;
+  let cur = 0;
+
+  const dotsEl = document.getElementById('dots');
+  const prevBtn= document.getElementById('prev');
+  const nextBtn= document.getElementById('next');
+  const prog   = document.getElementById('progress');
+
+  slides.forEach((_,i)=>{
+    const d=document.createElement('div');
+    d.className='dot'+(i===0?' active':'');
+    d.addEventListener('click',()=>goTo(i));
+    dotsEl.appendChild(d);
+  });
+
+  function goTo(idx){
+    if(idx<0||idx>=total||idx===cur) return;
+    slides[cur].classList.remove('active');
+    slides[cur].classList.add('exit');
+    const old=cur;
+    setTimeout(()=>slides[old].classList.remove('exit'),400);
+    cur=idx;
+    slides[cur].classList.add('active');
+    dotsEl.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('active',i===cur));
+    prevBtn.disabled=cur===0;
+    nextBtn.disabled=cur===total-1;
+    prog.style.width=((cur+1)/total*100)+'%';
+  }
+
+  prevBtn.addEventListener('click',()=>goTo(cur-1));
+  nextBtn.addEventListener('click',()=>goTo(cur+1));
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key==='ArrowDown') goTo(cur+1);
+    if(e.key==='ArrowLeft' ||e.key==='ArrowUp')   goTo(cur-1);
+  });
+  prog.style.width=(1/total*100)+'%';
+</script>
+</body>
+</html>

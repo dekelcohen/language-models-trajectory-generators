@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מניפולציה רובוטית מבוססת AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --a1: #00d4ff;
+    --a2: #a855f7;
+    --a3: #22d3a0;
+    --bg: #0a0e1a;
+    --card: rgba(255,255,255,0.06);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  html, body {
+    font-family: 'Heebo', 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── progress bar ──────────────────────────── */
+  #progress {
+    position: fixed; top:0; left:0; height:4px; z-index:300;
+    background: linear-gradient(90deg, var(--a1), var(--a2));
+    transition: width .4s ease;
+  }
+
+  /* ── deck / slides ─────────────────────────── */
+  .deck { position: relative; width:100vw; height:100vh; }
+
+  .slide {
+    position: absolute; inset:0;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    padding: 28px 48px 68px;
+    opacity: 0; transform: translateX(-80px);
+    pointer-events: none;
+    transition: opacity .38s ease, transform .38s ease;
+  }
+  .slide.active { opacity:1; transform:translateX(0); pointer-events:all; }
+  .slide.exit   { opacity:0; transform:translateX(80px); }
+
+  /* backgrounds */
+  .slide::before { content:''; position:absolute; inset:0; z-index:-1; }
+  .bg-1::before  { background: radial-gradient(ellipse at 80% 45%, #1a0535 0%, var(--bg) 65%), radial-gradient(ellipse at 20% 60%, #001a33 0%, transparent 55%); }
+  .bg-2::before  { background: radial-gradient(ellipse at 30% 30%, #0d1f42 0%, var(--bg) 65%); }
+  .bg-3::before  { background: radial-gradient(ellipse at 70% 70%, #001432 0%, var(--bg) 65%); }
+  .bg-4::before  { background: radial-gradient(ellipse at 20% 20%, #1a0032 0%, var(--bg) 65%); }
+  .bg-5::before  { background: radial-gradient(ellipse at 80% 80%, #1b1500 0%, var(--bg) 65%); }
+  .bg-6::before  { background: radial-gradient(ellipse at 40% 50%, #001b22 0%, var(--bg) 65%); }
+  .bg-7::before  { background: radial-gradient(ellipse at 60% 20%, #11001b 0%, var(--bg) 65%); }
+  .bg-8::before  { background: radial-gradient(ellipse at 20% 80%, #001b11 0%, var(--bg) 65%); }
+  .bg-9::before  { background: radial-gradient(ellipse at 50% 20%, #0b0022 0%, var(--bg) 65%); }
+  .bg-10::before { background: radial-gradient(ellipse at 70% 60%, #0e0032 0%, var(--bg) 65%); }
+
+  /* grid overlay */
+  .slide::after {
+    content:''; position:absolute; inset:0; z-index:-1;
+    background-image:
+      linear-gradient(rgba(0,212,255,.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,.022) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  /* slide number */
+  .sn {
+    position: absolute; top:16px; left:28px;
+    font-size: 1rem; color: var(--muted);
+    letter-spacing:.08em;
+  }
+
+  /* ── typography ────────────────────────────── */
+  h1 {
+    font-size: clamp(3.2rem, 6.5vw, 5.4rem);
+    font-weight: 900; line-height:1.12; text-align:center;
+  }
+  h2 {
+    font-size: clamp(2.2rem, 4vw, 3.2rem);
+    font-weight: 800; line-height:1.2; text-align:center;
+    margin-bottom: 2.2vh;
+  }
+
+  .gt { background:linear-gradient(135deg,var(--a1),var(--a2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+  .gg { background:linear-gradient(135deg,var(--a3),var(--a1)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+
+  .sub {
+    font-size: clamp(1.15rem, 2vw, 1.6rem);
+    color: var(--muted); margin-top:1.4vh; text-align:center; line-height:1.7;
+  }
+
+  /* ── shared content wrapper ────────────────── */
+  .wrap { width: 96vw; display: flex; flex-direction:column; align-items:center; }
+
+  /* ── cards row ─────────────────────────────── */
+  .cards { display: flex; gap:1.6vw; width:100%; flex-wrap:wrap; justify-content:center; }
+  .card {
+    background: var(--card);
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 1.2vw;
+    padding: 2vh 2vw;
+    flex: 1 1 0; min-width:220px;
+    backdrop-filter: blur(10px);
+    transition: border-color .2s;
+    text-align: right;
+  }
+  .card:hover { border-color: rgba(0,212,255,.45); }
+  .ci   { font-size: clamp(1.8rem, 3vw, 2.6rem); margin-bottom:.6vh; }
+  .card h3 { font-size: clamp(1.1rem, 1.8vw, 1.55rem); font-weight:700; margin-bottom:.5vh; }
+  .card p, .card li { font-size: clamp(.95rem, 1.4vw, 1.2rem); color:var(--muted); line-height:1.65; }
+  .card ul { padding-right:1.1em; padding-left:0; }
+
+  /* ── two-col ───────────────────────────────── */
+  .cols { display:flex; gap:1.6vw; width:100%; align-items:flex-start; }
+  .col {
+    flex:1;
+    background: var(--card);
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 1.2vw;
+    padding: 2vh 2vw;
+    backdrop-filter: blur(10px);
+    text-align: right;
+  }
+  .col h3 { font-size: clamp(1.1rem, 1.7vw, 1.45rem); font-weight:700; margin-bottom:1.2vh; }
+
+  /* ── tags ──────────────────────────────────── */
+  .tags { display:flex; flex-wrap:wrap; gap:.6vw; margin-top:.8vh; }
+  .tag  { font-size: clamp(.78rem, 1.1vw, 1rem); padding:.35em .9em; border-radius:999px; font-weight:700; letter-spacing:.03em; }
+  .tb { background:rgba(0,212,255,.14);  color:var(--a1); border:1px solid rgba(0,212,255,.3); }
+  .tp { background:rgba(168,85,247,.14); color:var(--a2); border:1px solid rgba(168,85,247,.3); }
+  .tg { background:rgba(34,211,160,.14); color:var(--a3); border:1px solid rgba(34,211,160,.3); }
+  .tr { background:rgba(248,113,113,.14);color:#f87171;   border:1px solid rgba(248,113,113,.3); }
+  .ta { background:rgba(251,191,36,.14); color:#fbbf24;   border:1px solid rgba(251,191,36,.3); }
+
+  /* ── pro / con ─────────────────────────────── */
+  .pc  { display:flex; flex-direction:column; gap:.7vh; margin-top:.6vh; }
+  .pro, .con {
+    font-size: clamp(.95rem, 1.45vw, 1.2rem);
+    padding: .55em .9em; border-radius:.6vw;
+    display:flex; align-items:flex-start; gap:.5em; line-height:1.6;
+    text-align: right;
+  }
+  .pro { background:rgba(34,211,160,.1);  color:#6ee7b7; }
+  .con { background:rgba(248,113,113,.1); color:#fca5a5; }
+  .pro::before { content:'✓'; font-weight:900; flex-shrink:0; }
+  .con::before { content:'✗'; font-weight:900; flex-shrink:0; }
+  .cony { background:rgba(251,191,36,.08); color:#fde68a; }
+  .cony::before { content:'△'; font-weight:900; flex-shrink:0; }
+
+  /* ── pipeline (kept LTR so arrows make sense) ── */
+  .pipe-wrap {
+    width: 100%;
+    direction: ltr;   /* pipeline flows left→right regardless of page RTL */
+  }
+  .pipe {
+    display:flex; align-items:stretch; width:100%; gap:.5vw;
+    flex-wrap:wrap; justify-content:center;
+  }
+  .ps {
+    background:var(--card); border:1px solid rgba(255,255,255,.1);
+    border-radius:1vw; padding:1.4vh 1.4vw;
+    text-align:center; flex:1 1 120px; backdrop-filter:blur(6px);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  .pi   { font-size: clamp(1.4rem, 2.2vw, 2rem); }
+  .ps h4 { font-size: clamp(.88rem, 1.35vw, 1.15rem); font-weight:700; margin-top:.4vh; direction:rtl; }
+  .ps p  { font-size: clamp(.76rem, 1.08vw, .93rem); color:var(--muted); margin-top:.2vh; line-height:1.45; direction:rtl; }
+  .pa    { font-size: clamp(1.2rem, 2vw, 1.7rem); color:var(--a1); padding:0 .2vw; flex-shrink:0; align-self:center; }
+
+  /* ── source list ───────────────────────────── */
+  .srcs { display:flex; flex-direction:column; gap:1vh; width:100%; }
+  .si {
+    display:flex; align-items:center; gap:1.4vw;
+    background:var(--card); border:1px solid rgba(255,255,255,.08);
+    border-radius:1vw; padding:1.4vh 2vw; backdrop-filter:blur(8px);
+  }
+  .sico { font-size: clamp(1.6rem, 2.4vw, 2.2rem); flex-shrink:0; }
+  .si h4 { font-size: clamp(.95rem, 1.5vw, 1.25rem); font-weight:700; margin-bottom:.2vh; }
+  .si p  { font-size: clamp(.85rem, 1.25vw, 1.05rem); color:var(--muted); line-height:1.55; }
+
+  /* ── variation grid ────────────────────────── */
+  .vg { display:grid; grid-template-columns:repeat(3,1fr); gap:1.2vw; width:100%; }
+  .vc {
+    background:var(--card); border:1px solid rgba(255,255,255,.08);
+    border-radius:1vw; padding:1.6vh 1.6vw; backdrop-filter:blur(6px);
+    text-align: right;
+  }
+  .vc h4 { font-size: clamp(.95rem, 1.5vw, 1.25rem); font-weight:700; margin-bottom:.5vh; }
+  .vc p  { font-size: clamp(.85rem, 1.25vw, 1.05rem); color:var(--muted); line-height:1.6; }
+
+  /* ── highlight box ─────────────────────────── */
+  .hbox {
+    background:var(--card); border-radius:1.2vw;
+    padding:1.6vh 2.4vw; width:100%;
+    backdrop-filter:blur(10px); text-align:center;
+    margin-bottom:1.6vh;
+  }
+  .hbox p { font-size: clamp(.95rem, 1.4vw, 1.2rem); color:var(--muted); margin-bottom:.8vh; }
+  /* hbox row keeps LTR for the formula arrows */
+  .hrow { display:flex; align-items:center; justify-content:center; gap:1vw; flex-wrap:wrap; direction:ltr; }
+
+  /* ── icon-text list ────────────────────────── */
+  .ilist { display:flex; flex-direction:column; gap:1.2vh; margin-top:.4vh; }
+  .irow  { display:flex; gap:.8vw; align-items:flex-start; font-size: clamp(.95rem, 1.45vw, 1.2rem); }
+  .irow span:first-child { font-size:1.3em; flex-shrink:0; margin-top:.05em; }
+
+  /* ── video slide ───────────────────────────── */
+  .vrow { display:flex; gap:1.8vw; width:100%; align-items:stretch; }
+  .vbox {
+    flex:1; background:var(--card);
+    border:1px solid rgba(255,255,255,.1);
+    border-radius:1.2vw; padding:1.8vh 2vw;
+    backdrop-filter:blur(10px);
+    display:flex; flex-direction:column; gap:1vh;
+    text-align: right;
+  }
+  .vbox h3 { font-size: clamp(1.05rem, 1.7vw, 1.4rem); font-weight:700; }
+  .vbox p  { font-size: clamp(.85rem, 1.25vw, 1.05rem); color:var(--muted); line-height:1.55; }
+  .vbox video {
+    width:100%; border-radius:.8vw; background:#000;
+    flex:1; min-height:0; max-height:44vh; object-fit:contain;
+  }
+
+  /* ── nav ───────────────────────────────────── */
+  nav.nav {
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:1.4vw; z-index:100;
+    direction: ltr; /* keep nav buttons in LTR order */
+  }
+  nav.nav button {
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.16);
+    color:var(--text); padding:.55em 2em;
+    border-radius:999px; cursor:pointer;
+    font-family: 'Heebo', sans-serif;
+    font-size: clamp(.85rem, 1.2vw, 1.1rem); font-weight:700;
+    transition:background .2s, border-color .2s; backdrop-filter:blur(8px);
+  }
+  nav.nav button:hover    { background:rgba(0,212,255,.16); border-color:var(--a1); }
+  nav.nav button:disabled { opacity:.3; cursor:default; }
+  .dots { display:flex; gap:.5vw; }
+  .dot  { width:.6vw; height:.6vw; min-width:7px; min-height:7px; border-radius:50%; background:rgba(255,255,255,.22); cursor:pointer; transition:background .2s, transform .2s; }
+  .dot.active { background:var(--a1); transform:scale(1.5); }
+
+  .kbh { position:fixed; bottom:20px; right:28px; font-size:.8rem; color:rgba(255,255,255,.18); direction:ltr; }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div class="deck" id="deck">
+
+<!-- ════════════════════════════════════════════════
+     שקף 1 · כותרת
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-1 active">
+  <span class="sn">1 / 10</span>
+  <div class="wrap" style="align-items:center; gap:2vh;">
+    <div style="font-size:clamp(3rem,6vw,5rem);">🤖</div>
+    <h1><span class="gt">מניפולציה רובוטית<br>מבוססת AI</span></h1>
+    <p class="sub">מ-Vision-Language Models ועד למידה מקצה לקצה —<br>כיצד AI פותח שליטה רובוטית מדויקת</p>
+    <div class="tags" style="justify-content:center; margin-top:2vh;">
+      <span class="tag tb" style="font-size:clamp(.9rem,1.4vw,1.2rem); padding:.45em 1.2em;">VLMs</span>
+      <span class="tag tp" style="font-size:clamp(.9rem,1.4vw,1.2rem); padding:.45em 1.2em;">VLAs</span>
+      <span class="tag tg" style="font-size:clamp(.9rem,1.4vw,1.2rem); padding:.45em 1.2em;">World Models</span>
+      <span class="tag ta" style="font-size:clamp(.9rem,1.4vw,1.2rem); padding:.45em 1.2em;">מניפולציה רובוטית</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     שקף 2 · שלושה עמודי תווך
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-2">
+  <span class="sn">2 / 10</span>
+  <div class="wrap" style="gap:2vh;">
+    <h2><span class="gt">שלושת המשימות העיקריות</span> של רובוטיקה מודרנית</h2>
+    <div class="cards">
+      <div class="card">
+        <div class="ci">🗺️</div>
+        <h3 style="color:var(--a1);">ניווט</h3>
+        <p>תנועה במרחב — בתוך ובחוץ, סביבות מובנות ולא מובנות. רובוטים על גלגלים, רחפנים, כלי רכב אוטונומיים.</p>
+        <div class="tags"><span class="tag tb">SLAM</span><span class="tag tb">Path Planning</span></div>
+      </div>
+      <div class="card">
+        <div class="ci">🦿</div>
+        <h3 style="color:var(--a2);">Locomotion</h3>
+        <p>תנועת הגוף — רובוטים עם רגליים, הומנואידים, quadrupeds. שיווי משקל, הליכה והתאמה לשטח.</p>
+        <div class="tags"><span class="tag tp">RL</span><span class="tag tp">Whole-body Control</span></div>
+      </div>
+      <div class="card" style="border-color:rgba(34,211,160,.35);">
+        <div class="ci">🦾</div>
+        <h3 style="color:var(--a3);">Manipulation ★</h3>
+        <p>אינטראקציה עם עצמים — אחיזה, דחיפה, הרכבה. דורש חשיבה תלת-ממדית מדויקת ואינטואיציה פיזית.</p>
+        <div class="tags"><span class="tag tg">אחיזה (Grasp)</span><span class="tag tg">Dexterity</span><span class="tag tg">הרכבה</span></div>
+      </div>
+    </div>
+    <p style="font-size:clamp(1rem,1.5vw,1.3rem); color:var(--muted); text-align:center; margin-top:.5vh;">
+      מערכות מודרניות משלבות יותר ויותר את שלושתם —
+      הומנואיד שהולך, מנווט בחדרים <strong style="color:var(--text)">ומרים עצמים</strong>.
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     שקף 3 · VLMs ברובוטיקה
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-3">
+  <span class="sn">3 / 10</span>
+  <div class="wrap" style="gap:2vh;">
+    <h2>Vision-Language Models נכנסים לרובוטיקה — <span class="gt">2024 – 2026</span></h2>
+    <div class="cols">
+      <div class="col">
+        <h3 style="color:var(--a3);">✅ יתרונות VLMs</h3>
+        <div class="ilist">
+          <div class="irow"><span style="color:var(--a3);">🧠</span><span>הבנה סמנטית עשירה ברמה גבוהה של סצנות, עצמים והוראות</span></div>
+          <div class="irow"><span style="color:var(--a3);">📋</span><span>פירוק משימות: פיצול "הכן קפה" לצעדי ביצוע מפורטים</span></div>
+          <div class="irow"><span style="color:var(--a3);">💬</span><span>מעקב אחר הוראות בשפה טבעית ללא אימון ספציפי — zero-shot</span></div>
+          <div class="irow"><span style="color:var(--a3);">🔄</span><span>הכללה zero/few-shot למשימות וסביבות שלא נראו באימון</span></div>
+        </div>
+      </div>
+      <div class="col">
+        <h3 style="color:#f87171;">⚠️ חסרונות VLMs</h3>
+        <div class="ilist">
+          <div class="irow"><span style="color:#f87171;">📐</span><span>גיאומטריה תלת-ממדית מדויקת — מיקומים, זוויות ומרחקים מדויקים</span></div>
+          <div class="irow"><span style="color:#f87171;">⚖️</span><span>פיזיקה אינטואיטיבית — כוחות, חיכוך, עצמים מתעוותים</span></div>
+          <div class="irow"><span style="color:#f87171;">⚡</span><span>מהירות real-time — VLMs גדולים איטיים לבקרת closed-loop (1–10 Hz)</span></div>
+          <div class="irow"><span style="color:#f87171;">🎯</span><span>זיהוי מדויק ברמת פיקסל — "אחוז בדיוק כאן" עדיין לא אמין</span></div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:clamp(.95rem,1.4vw,1.2rem); color:var(--muted); text-align:center; max-width:82vw;">
+      <strong style="color:var(--text)">תובנה מרכזית:</strong> VLMs מצטיינים ב"מה לעשות" ו"למה",
+      אך מתקשים ב"כיצד בדיוק לנוע". שלוש גישות משלימות מטפלות בפער זה ←
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     שקף 4 · גישה 1: VLA
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-4">
+  <span class="sn">4 / 10</span>
+  <div class="wrap" style="gap:1.8vh;">
+    <h2>גישה 1 — <span class="gt">Vision-Language-Action (VLA)</span></h2>
+    <div class="hbox" style="border:1px solid rgba(0,212,255,.25);">
+      <p>מודל אחד מקצה לקצה — מאומן על מיליוני הדגמות רובוטיות</p>
+      <div class="hrow">
+        <span class="tag tb" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">📝 הנחיית משימה</span>
+        <span style="color:var(--a1); font-size:clamp(1.2rem,2vw,1.8rem);">+</span>
+        <span class="tag tp" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">📷 פריים מצלמה</span>
+        <span style="color:var(--a1); font-size:clamp(1.2rem,2vw,1.8rem);">+</span>
+        <span class="tag tg" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🦾 מצב הרובוט</span>
+        <span style="color:var(--a1); font-size:clamp(1.4rem,2.4vw,2.2rem);">→</span>
+        <span class="tag ta" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🎯 פעולות</span>
+      </div>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <h3 style="color:var(--a3);">יתרונות</h3>
+        <div class="pc">
+          <div class="pro">מקצה לקצה — אין פירוק ידני לתפיסה, בקרה ותכנון</div>
+          <div class="pro">מודל אחד (או מעט) — pipeline פריסה פשוט יותר</div>
+          <div class="pro">חזק במשימות קצרות הדורשות Dexterity כשמאומן היטב</div>
+        </div>
+      </div>
+      <div class="col">
+        <h3 style="color:#f87171;">חסרונות</h3>
+        <div class="pc">
+          <div class="con">קופסה שחורה — קשה לאבחן ולנפות שגיאות</div>
+          <div class="con">רצפי multi-step ארוכי-טווח נותרים מאתגרים</div>
+          <div class="con">הכללה גרועה מחוץ להתפלגות האימון</div>
+          <div class="con">דורש datasets גדולים, מגוונים ואיכותיים לכל משימה</div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:clamp(.9rem,1.3vw,1.1rem); color:var(--muted); text-align:center;">
+      דוגמאות: <strong style="color:var(--text)">π₀.5 (Physical Intelligence) · OpenVLA · Octo · ACT · Diffusion Policy</strong>
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     שקף 5 · פער ההכללה
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-5">
+  <span class="sn">5 / 10</span>
+  <div class="wrap" style="gap:1.8vh;">
+    <h2><span class="gt">פער ההכללה</span> — מדוע VLAs שבירים</h2>
+    <p style="font-size:clamp(.95rem,1.4vw,1.2rem); color:var(--muted); text-align:center; max-width:82vw; margin-bottom:.5vh;">
+      כל וריאציה עלולה להיכשל אם לא מיוצגת מספיק בנתוני האימון
+    </p>
+    <div class="vg">
+      <div class="vc">
+        <h4>📍 מיקומי עצמים</h4>
+        <p>שמאל, ימין, מרכז, מסובב, מוטה — הרובוט חייב לראות כל סידור במהלך האימון</p>
+      </div>
+      <div class="vc">
+        <h4>🎨 מראה חזותי</h4>
+        <p>צבעים, מרקמים, גדלים, צורות — מדיניות מבוססת-פיקסל מבצעת over-fit לתכונות אלו</p>
+      </div>
+      <div class="vc">
+        <h4>💡 תנאי תאורה</h4>
+        <p>בהיר, חשוך, השתקפויות, צללים — משפיעים דרמטית על אותות הבקרה מבוססי תמונה</p>
+      </div>
+      <div class="vc">
+        <h4>🖼️ רקעים</h4>
+        <p>שולחן, דלפק, רצפה — פיקסלי רקע לא-רלוונטיים מבלבלים מדיניות מרחב-פיקסל</p>
+      </div>
+      <div class="vc">
+        <h4>🔧 התגלמות הרובוט</h4>
+        <p>עיצוב הזרוע, סוג הלפת, מיקום מצלמה — העברה בין רובוטים אינה טריוויאלית</p>
+      </div>
+      <div class="vc">
+        <h4>🧩 עומס ומסיחי דעת</h4>
+        <p>עצמים נוספים, חסימות, כמויות משתנות — תפיסה ותכנון קשים יותר</p>
+      </div>
+    </div>
+    <p style="font-size:clamp(.9rem,1.3vw,1.1rem); color:var(--muted); text-align:center; max-width:85vw; margin-top:.4vh;">
+      <strong style="color:var(--a1)">פתרונות:</strong>
+      קידודי Foundation (DINOv2, CLIP) אינווריאנטיים יותר מפיקסלים גולמיים ·
+      אוגמנטציה (DemoGen, MimicGen) מייצרת וריאציות אוטומטית ·
+      ייצוגים תלת-ממדיים מפחיתים רגישות לנקודת מבט
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     שקף 6 · גישה 2: VLM Agent + כלים
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-6">
+  <span class="sn">6 / 10</span>
+  <div class="wrap" style="gap:1.6vh;">
+    <h2>גישה 2 — <span class="gt">VLM Agent + כלים</span></h2>
+    <div class="pipe-wrap" style="margin-bottom:.6vh;">
+      <div class="pipe">
+        <div class="ps"><div class="pi">💬</div><h4>הנחיית משימה</h4><p>"פתח מגירה, קח ספל"</p></div>
+        <div class="pa">→</div>
+        <div class="ps" style="border-color:rgba(168,85,247,.45);"><div class="pi">🧠</div><h4>מתכנן VLM</h4><p>תכנון ברמה גבוהה ופירוק תת-משימות</p></div>
+        <div class="pa">→</div>
+        <div class="ps" style="border-color:rgba(0,212,255,.45);"><div class="pi">🔧</div><h4>קריאות לכלים</h4><p>תפיסה · אחיזה · 3D · <strong style="color:var(--a1)">VLA</strong></p></div>
+        <div class="pa">→</div>
+        <div class="ps" style="border-color:rgba(34,211,160,.45);" id="pipe-verify"><div class="pi">🔁</div><h4>אימות ותכנון מחדש</h4><p>זיהוי הצלחה/כישלון, ניסיון חוזר</p></div>
+        <div class="pa">→</div>
+        <div class="ps" style="border-color:rgba(34,211,160,.7);" id="pipe-action"><div class="pi">🦾</div><h4>בקרה</h4><p>מסלולי תנועה</p></div>
+      </div>
+      <!-- closed-loop back arrow -->
+      <div style="display:flex; justify-content:flex-end; align-items:center; gap:.4vw; margin-top:.3vh; padding-left:2vw;">
+        <span style="color:var(--a3); font-size:clamp(.8rem,1.1vw,.95rem); font-weight:700;">לולאה סגורה — כישלון מחזיר לאימות ←</span>
+        <span style="color:var(--a3); font-size:clamp(1rem,1.6vw,1.4rem);">↺</span>
+      </div>
+    </div>
+    <div class="cards">
+      <div class="card" style="text-align:center;">
+        <div class="ci">👁️</div><h3>תפיסה</h3>
+        <p>זיהוי עצמים, סגמנטציה, הערכת יציבה</p>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div class="ci">✋</div><h3>אחיזה (Grasp)</h3>
+        <p>חיזוי יציבת אחיזה, זיהוי affordance</p>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div class="ci">📐</div><h3>גיאומטריה 3D</h3>
+        <p>עננות נקודות, צירי ארטיקולציה, חשיבה מרחבית</p>
+      </div>
+      <div class="card" style="text-align:center; border-color:rgba(0,212,255,.4);">
+        <div class="ci">🦾</div>
+        <h3 style="color:var(--a1);">VLA (כלי)</h3>
+        <p>בקרת closed-loop ברמה נמוכה לתת-משימות פשוטות — ה-VLM מאציל ביצוע למדיניות VLA מקומית</p>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div class="ci">🤌</div><h3>חישת מגע וכוח</h3>
+        <p>חיישני מגע וכוח — קריטי כשהעצם מוסתר, ולמשימות הדורשות תחושה (עיצוב, הידוק)</p>
+      </div>
+    </div>
+    <p style="font-size:clamp(.9rem,1.3vw,1.1rem); color:var(--muted); text-align:center; margin-top:.2vh;">
+      <strong style="color:var(--a2)">יתרון:</strong> קל יותר לאבחון וניפוי שגיאות, מודולרי, מטפל במשימות מורכבות ארוכות-טווח &nbsp;|&nbsp;
+      <strong style="color:#f87171;">חיסרון:</strong> איטי יותר; שגיאות עלולות להתפשט לאורך ה-pipeline; מסובך ודורש יותר הנדסה
+    </p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     שקף 7 · בעיית הנתונים
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-7">
+  <span class="sn">7 / 10</span>
+  <div class="wrap" style="gap:1.8vh;">
+    <h2><span class="gt">בעיית הנתונים</span> — דוגמאות רובוטיות</h2>
+    <div class="srcs">
+      <div class="si">
+        <div class="sico">🕹️</div>
+        <div style="flex:1;">
+          <h4>Teleoperation</h4>
+          <p>שימוש בשלט או בזרוע רובוטית, להדגמת משימה על ידי אדם.הנפוץ ביותר אך איטי ומייגע. מכשירי VR (Apple Vision Pro + ARKit) מקצרים זמן איסוף <strong style="color:var(--text)">ב-4–5× לעומת טלה-אופרציה קלאסית</strong>.</p>
+        </div>
+        <div class="tags" style="margin-right:1vw; margin-left:0; flex-shrink:0;"><span class="tag ta">ידני</span></div>
+      </div>
+      <div class="si">
+        <div class="sico">📹</div>
+        <div style="flex:1;">
+          <h4>Human Videos → Robot Data</h4>
+          <p>לפת ספוג UMI, אקסו-שלד AirExo — בני אדם מבצעים משימות באופן טבעי, ללא רובוט. הבנת וידאו מעבירה פעולות cross-embodiment. מהיר וזול לסביבות מגוונות.</p>
+        </div>
+        <div class="tags" style="margin-right:1vw; flex-shrink:0;"><span class="tag tb">מדרגי</span></div>
+      </div>
+      <div class="si">
+        <div class="sico">🏭</div>
+        <div style="flex:1;">
+          <h4>Pipelines סינתטיים (סימולציה)</h4>
+          <p>VLMs מייצרים משימות, מדמים עם RL ותכנון מסלול, מתעדים כ-datasets. דוגמאות: <strong style="color:var(--text)">RoboGen, GenSim2, AutoRT</strong>. זול בגדול; פער sim-to-real נותר אתגר.</p>
+        </div>
+        <div class="tags" style="margin-right:1vw; flex-shrink:0;"><span class="tag tg">אוטומטי</span></div>
+      </div>
+      <div class="si">
+        <div class="sico">✨</div>
+        <div style="flex:1;">
+          <h4>הגדלת נתונים (Data Augmentation)</h4>
+          <p>טרייקטוריות מומחה → וריאנטים עם מיקומי עצמים, צבעים וסצנות שונים. <strong style="color:var(--text)">DemoGen, DexMimicGen, Real2Render2Real</strong>. מכפיל גודל ה-dataset בזול.</p>
+        </div>
+        <div class="tags" style="margin-right:1vw; flex-shrink:0;"><span class="tag tp">מכפיל</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     שקף 8 · מודלי עולם
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-8">
+  <span class="sn">8 / 10</span>
+  <div class="wrap" style="gap:1.8vh;">
+    <h2>גישה 3 — <span class="gg">מודלי עולם (World Models)</span></h2>
+    <div class="hbox" style="border:1px solid rgba(34,211,160,.25);">
+      <p>מודל יצירת וידאו fine-tuned בתור מוח הרובוט</p>
+      <div class="hrow">
+        <span class="tag tb" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">📝 הנחיית משימה</span>
+        <span style="color:var(--a1); font-size:clamp(1.2rem,2vw,1.8rem);">+</span>
+        <span class="tag tp" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🎞️ פריימים אחרונים</span>
+        <span style="color:var(--a1); font-size:clamp(1.4rem,2.4vw,2.2rem);">→</span>
+        <span class="tag tg" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🔮 פריימים עתידיים</span>
+        <span style="color:var(--a1); font-size:clamp(1.2rem,2vw,1.8rem);">+</span>
+        <span class="tag ta" style="font-size:clamp(.9rem,1.3vw,1.1rem); padding:.45em 1.1em;">🎯 פעולות</span>
+      </div>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <h3 style="color:var(--a3);">מדוע זה חזק</h3>
+        <div class="pc">
+          <div class="pro">מאומן על וידאו אינטרנט ענקי — prior פיזיקלי עשיר בחינם</div>
+          <div class="pro">מחזה עתידות סבירות → תכנון על ידי דמיון השלכות</div>
+          <div class="pro">מטפל באופן טבעי באי-ודאות ובאופקים multi-step</div>
+          <div class="pro">פעולות מעוגנות בתוצאות חזותיות צפויות</div>
+        </div>
+      </div>
+      <div class="col">
+        <h3 style="color:#fbbf24;">אתגרים פתוחים</h3>
+        <div class="pc">
+          <div class="pro cony">וידאו סביר ≠ שליטה מדויקת במפרקים — הדיוק עדיין מוגבל</div>
+          <div class="pro cony">דורש הרבה חישוב — יצירת וידאו יקרה בזמן inference</div>
+          <div class="pro cony">עקביות זמנית ארוכת-טווח עדיין תחום מחקר פעיל</div>
+        </div>
+        <div class="tags" style="margin-top:1.2vh;">
+          <span class="tag tb">Cosmos (NVIDIA)</span>
+          <span class="tag tp">JEPA-2 (Meta)</span>
+          <span class="tag tg">DreamZero</span>
+          <span class="tag ta">NovaFlow</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     שקף 9 · ניסויים
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-9">
+  <span class="sn">9 / 10</span>
+  <div class="wrap" style="gap:2vh;">
+    <h2>🔬 <span class="gt">ניסויים</span></h2>
+    <div class="vrow">
+      <div class="vbox" style="border-color:rgba(0,212,255,.35);">
+        <div>
+          <div class="tags" style="margin-bottom:.8vh;"><span class="tag tb">VLA — מדיניות מאומנת</span></div>
+          <h3>הרמת ברווז צהוב</h3>
+          <p>מדיניות VLA מאומנת באמצעות imitation learning על ~100 הדגמות — הרובוט לומד לזהות, להתקרב ולאחוז בצעצוע ספציפי באופן אמין.</p>
+        </div>
+        <video controls preload="metadata">
+          <source src="file:///D:/Docs/test6/Projects/Robotics/Tasks/PickAndPlace/pick_up_yellow_duck_1.mp4" type="video/mp4">
+          <p style="color:var(--muted); padding:1em; font-size:.9rem;">⚠️ הוידאו לא נמצא בנתיב:<br><code style="font-size:.78rem; direction:ltr; display:block;">D:\Docs\test6\Projects\Robotics\Tasks\PickAndPlace\pick_up_yellow_duck_1.mp4</code></p>
+        </video>
+      </div>
+      <div class="vbox" style="border-color:rgba(168,85,247,.35);">
+        <div>
+          <div class="tags" style="margin-bottom:.8vh;"><span class="tag tp">VLM Agent — Zero-Shot</span></div>
+          <h3>פתיחת דלת (GPT-5)</h3>
+          <p>VLM agent עם כלי תפיסה ובקרה, פועל <strong style="color:var(--text)">zero-shot</strong> — ללא אימון ספציפי למשימה. ה-VLM מתכנן, מזהה את הידית ומבצע את הטרייקטורי.</p>
+        </div>
+        <video controls preload="metadata">
+          <source src="outputs/videos/gpt-5/open_door/open_door_success_partial.mp4" type="video/mp4">
+          <p style="color:var(--muted); padding:1em; font-size:.9rem;">⚠️ הוידאו לא נמצא בנתיב:<br><code style="font-size:.78rem; direction:ltr; display:block;">outputs/videos/gpt-5/open_door/open_door_success_partial.mp4</code></p>
+        </video>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     שקף 10 · תמונה כללית
+     ════════════════════════════════════════════════ -->
+<div class="slide bg-10">
+  <span class="sn">10 / 10</span>
+  <div class="wrap" style="gap:2vh;">
+    <h2>התמונה הכללית במבט אחד</h2>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:1.4vw; width:100%; margin-bottom:.5vh;">
+      <div class="card" style="border-color:rgba(0,212,255,.4); text-align:right;">
+        <div class="ci">🦾 ⚡</div>
+        <h3 style="color:var(--a1);">VLA — מקצה לקצה</h3>
+        <p>מהיר, אלגנטי, מצוין במשימות קצרות. רעב לנתונים ושביר מחוץ לתפלוגת האימון. מתאים למשימות חוזרות ומוגדרות היטב.</p>
+      </div>
+      <div class="card" style="border-color:rgba(168,85,247,.4); text-align:right;">
+        <div class="ci">🧠 🔧</div>
+        <h3 style="color:var(--a2);">VLM Agent + כלים</h3>
+        <p>מודולרי, פרשני, zero-shot למשימות חדשות. משתמש ב-VLA ככלי-משנה לבקרה ברמה נמוכה. איטי יותר אך ניתן להרכבה.</p>
+      </div>
+      <div class="card" style="border-color:rgba(34,211,160,.4); text-align:right;">
+        <div class="ci">🎞️ 🔮</div>
+        <h3 style="color:var(--a3);">מודלי עולם</h3>
+        <p>prior פיזיקלי עשיר מ-pre-training על וידאו אינטרנט. תכנון על ידי דמיון תוצאות. עדיין מתבגר לשליטה מדויקת במפרקים.</p>
+      </div>
+    </div>
+    <div style="background:var(--card); border:1px solid rgba(255,255,255,.09); border-radius:1.2vw; padding:1.8vh 2.4vw; width:100%; backdrop-filter:blur(10px);">
+      <h3 style="font-size:clamp(1.05rem,1.7vw,1.4rem); margin-bottom:1.2vh;">🚀 מה מניע את ההתקדמות (2024 – 2026)</h3>
+      <div class="tags">
+        <span class="tag tb">נתונים מדרגיים (UMI, טלה-אופרציה VR)</span>
+        <span class="tag tp">העברה cross-embodiment</span>
+        <span class="tag tg">הגדלה sim-to-real</span>
+        <span class="tag ta">התאוששות מכישלון closed-loop</span>
+        <span class="tag tb">קידודי Foundation (DINOv2, CLIP)</span>
+        <span class="tag tp">למידה פעילה עם אדם בלולאה</span>
+        <span class="tag tg">ארכיטקטורות VLM + VLA היברידיות</span>
+      </div>
+    </div>
+    <p style="font-size:clamp(.95rem,1.4vw,1.2rem); color:var(--muted); text-align:center; max-width:80vw;">
+      התחום מתכנס לעבר <strong style="color:var(--text)">מערכות היברידיות</strong> — VLMs מתכננים משימות ארוכות-טווח,
+      VLAs מטפלים בבקרה מדויקת ברמה נמוכה, ומודלי עולם מאפשרים תכנון בתנאי אי-ודאות.
+    </p>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<nav class="nav">
+  <button id="prev" disabled>&#x25C4; הקודם</button>
+  <div class="dots" id="dots"></div>
+  <button id="next">הבא &#x25BA;</button>
+</nav>
+<div class="kbh">← → keys to navigate</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const total  = slides.length;
+  let cur = 0;
+
+  const dotsEl = document.getElementById('dots');
+  const prevBtn= document.getElementById('prev');
+  const nextBtn= document.getElementById('next');
+  const prog   = document.getElementById('progress');
+
+  slides.forEach((_,i)=>{
+    const d=document.createElement('div');
+    d.className='dot'+(i===0?' active':'');
+    d.addEventListener('click',()=>goTo(i));
+    dotsEl.appendChild(d);
+  });
+
+  function goTo(idx){
+    if(idx<0||idx>=total||idx===cur) return;
+    slides[cur].classList.remove('active');
+    slides[cur].classList.add('exit');
+    const old=cur;
+    setTimeout(()=>slides[old].classList.remove('exit'),400);
+    cur=idx;
+    slides[cur].classList.add('active');
+    dotsEl.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('active',i===cur));
+    prevBtn.disabled=cur===0;
+    nextBtn.disabled=cur===total-1;
+    prog.style.width=((cur+1)/total*100)+'%';
+  }
+
+  prevBtn.addEventListener('click',()=>goTo(cur-1));
+  nextBtn.addEventListener('click',()=>goTo(cur+1));
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key==='ArrowDown') goTo(cur+1);
+    if(e.key==='ArrowLeft' ||e.key==='ArrowUp')   goTo(cur-1);
+  });
+  prog.style.width=(1/total*100)+'%';
+</script>
+</body>
+</html>
