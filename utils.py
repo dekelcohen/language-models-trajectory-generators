@@ -9,6 +9,8 @@ from PIL import Image
 from shapely.geometry import MultiPoint, Polygon, polygon
 
 logger = None
+args = None
+_grasp_inputs_saved_cameras = set()  # tracks cameras whose matrices have already been saved
 def get_segmentation_mask(model_predictions, segmentation_threshold):
 
     masks = []
@@ -237,6 +239,15 @@ def get_world_point_world_frame(camera_position, camera_orientation_q, camera, i
     image_width, image_height = image_size
 
     K, Rt, projection_matrix, view_matrix = get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=cam_info)
+    if args is not None and getattr(args, "save_grasp_inputs", False) and camera not in _grasp_inputs_saved_cameras:
+        try:
+            if projection_matrix is not None:
+                np.save(os.path.join(config.images_folder, f"{camera}_projection_matrix.npy"), projection_matrix)
+            if view_matrix is not None:
+                np.save(os.path.join(config.images_folder, f"{camera}_view_matrix.npy"), view_matrix)
+            _grasp_inputs_saved_cameras.add(camera)
+        except Exception as e:
+            logger.info(PROGRESS + f"Warning: failed to save grasp input matrices: {e}" + ENDC)
     if os.environ.get("DEBUG_PINHOLE", "0") == "1":
         # Observability: log view/projection and pixel depth for this query
         try:

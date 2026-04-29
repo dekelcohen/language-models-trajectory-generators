@@ -56,6 +56,7 @@ class API:
         self.main_connection = main_connection
         self.logger = logger
         utils.logger = self.logger # injects logger into utils global scope 
+        utils.args = self.args     # injects args into utils global scope
         segmentation_adapter.logger = self.logger # injects logger into utils global scope         
         # Parse optional override bbox string "x1,y1,x2,y2"
         segmentation_adapter.set_override_bbox_from_string(args.ovr_bbox)
@@ -193,7 +194,7 @@ class API:
 
         masks = utils.get_segmentation_mask(model_predictions, config.segmentation_threshold)
 
-        if self.args.save_seg_mask:
+        if self.args.save_grasp_inputs:
             self._save_seg_masks(masks, segmentation_texts)
 
         self.logger.info(PROGRESS + f"*** Before bounding_cubes_world_coordinates len(masks)={len(masks)}" + ENDC)

@@ -313,7 +313,7 @@ if __name__ == "__main__":
     parser.add_argument("--prepend-prompt", type=str, default=None, help="Path to a text file whose contents are prepended to the initial command (first MAIN_PROMPT only).",
     )
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
-    parser.add_argument("--save-seg-mask", action="store_true", help="save binary segmentation mask (masks[0]) as .npy under images_folder after each detect_object call")
+    parser.add_argument("--save-grasp-inputs", action="store_true", help="save binary segmentation mask (masks[0]) as .npy and projection/view matrices as .npy under images_folder after each detect_object call")
     args = parser.parse_args()
 
     
