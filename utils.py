@@ -239,7 +239,7 @@ def get_world_point_world_frame(camera_position, camera_orientation_q, camera, i
     image_width, image_height = image_size
 
     K, Rt, projection_matrix, view_matrix = get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=cam_info)
-    if args is not None and getattr(args, "save_grasp_inputs", False) and camera not in _grasp_inputs_saved_cameras:
+    if args.save_grasp_inputs and camera not in _grasp_inputs_saved_cameras:
         try:
             if projection_matrix is not None:
                 np.save(os.path.join(config.images_folder, f"{camera}_projection_matrix.npy"), projection_matrix)
