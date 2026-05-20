@@ -2,6 +2,11 @@
 
 
 DETECT_OBJECT_TOOL = """1. detect_object(object_or_object_part: str) -> None: This function will not return anything, but only print the position, orientation, and dimensions of any object or object part in the environment. This information will be printed for as many instances of the queried object or object part in the environment. If there are multiple objects or object parts to detect, call one function for each object or object part, all before executing any trajectories. The unit is in metres.
+1b. get_grasp_poses(object_name: str) -> (poses, scores): Returns pre-computed grasp pose candidates as (N,4,4) homogeneous matrices and (N,) quality scores (higher=better), sorted by descending score. Also prints the top-5 candidates summary.
+Each pose is a 4x4 matrix: [[R_xx,R_yx,R_zx,T_x],[R_xy,R_yy,R_zy,T_y],[R_xz,R_yz,R_zz,T_z],[0,0,0,1]].
+Key indices: pose[2,3]=Z-height of gripper; pose[2,2]=alignment of gripper approach axis with world Z (negative means pointing down, -1.0=perfectly downward).
+To rank for top-down grasps above an object: select poses where pose[2,2] < -0.8 (close to  -1.0 - perfectly straight down) (gripper aimed downwards) and pose[2,3] > object_z (above target).
+1c. visualize_grasp_pose(poses) -> None: Draws the given grasp pose(s) in the 3D simulation (RGB axes + orange gripper fingers). Pass a single (4,4) matrix or an (N,4,4) array.
 """
 DETECT_OBJECT_TOOL_INITIAL_PLANNING = """Then, detect the necessary objects in the environment. Stop generation after this step to wait until you obtain the printed outputs from the detect_object function calls."""
 
@@ -58,6 +63,7 @@ When generating the code for the trajectory, do the following:
 1. Describe briefly the shape of the motion trajectory required to complete the task.
 2. The trajectory could be broken down into multiple steps. In that case, each trajectory step (at default speed) should contain at least 5 points. Define general functions which can be reused for the different trajectory steps whenever possible, but make sure to define new functions whenever a new motion is required. Output a step-by-step reasoning before generating the code.
 3. If the trajectory is broken down into multiple steps, make sure to chain them such that the start point of trajectory_2 is the same as the end point of trajectory_1 and so on, to ensure a smooth overall trajectory. Call the execute_trajectory function after each trajectory step.
+3b. For contact-rich manipulation tasks (for example handles, drawers, doors, switches, or articulated objects), prefer decomposing the motion into separate phases: high hover approach, lateral alignment at safe height, vertical descent, contact/grasp, articulation motion, and retreat. Avoid combining lateral insertion and vertical contact motions into a single diagonal approach whenever possible.
 4. When defining the functions, specify the required parameters, and document them clearly in the code. Make sure to include the orientation parameter in both definition and calls (use). make sure all dimensions of caller arguments match the function definition and body
 5. If you want to print the calculated value of a variable to use later, make sure to use the print function to three decimal places, instead of simply writing the variable name. Do not print any of the trajectory variables, since the output will be too long.
 6. Mark any code clearly with the ```python and ``` tags.\n7. Use the provided generate_linear_trajectory helper; do not redefine it. Use logger.info(PROGRESS + f"..." + ENDC) for concise status logs instead of print for routine status.
@@ -69,6 +75,9 @@ If the task requires interaction with an object part (as opposed to the object a
 INITIAL PLANNING 2:
 Then, output Python code to decide which object to interact with, if there are multiple instances of the same object.
 Then, describe how best to approach the object (for example, approaching the midpoint of the object, or one of its edges, etc.), depending on the nature of the task, or the object dimensions, etc.
+
+For thin handles or narrow gaps, prefer approaching above the object center first, then performing small lateral alignment motions at hover height before descending vertically. Avoid inferring insertion-side signs from ambiguous orientation vectors when a stable workspace-relative direction or fixed offset convention is sufficient.
+
 Then, output a detailed step-by-step plan for the trajectory, including when to lower the gripper to make contact with the object, if necessary, rotation and position of the gripper, closing the gripper.
 Tasks:
   pickup: after closing the gripper --> must lift the object up some distance to be considered a successful grasp 
@@ -87,7 +96,219 @@ Finally, perform each of these steps one by one. Name each trajectory variable w
 """
 
 
-IN_CONTEXT_EXAMPLE = """
+IN_CONTEXT_EXAMPLE_OPEN_DOOR = """
+Here is an in context example of opening a door
+--------------------------------------------------------------------------
+The user command is: Open the door using the lever handle
+Desc: It is a horizontal lever handle attached to a door
+ 
+Preception module outputs:
+
+Predicting 1 masks
+Predicted 1 masks
+
+Object detected: door handle lever
+
+Position of door handle lever: [handle_x, handle_y, handle_z]
+
+Dimensions:
+- Width: handle_width
+- Length: handle_length
+- Height: handle_height
+
+Orientation:
+- Orientation along shorter side (thickness): angle_short
+- Orientation along longer side (lever axis): angle_long
+
+Assistant (Reasoning and Plan):
+
+Approach decision and plan:
+
+Only one door handle lever is detected, so we will interact with that instance.
+
+Best approach:
+1. Move to a safe hover directly above the lever midpoint.
+2. Perform any small lateral alignment motions while remaining at the safe hover height.
+3. Descend vertically onto the lever.
+4. Apply a small downward press to unlatch.
+5. Pull outward in a stable workspace direction to open the door.
+
+For thin handles and narrow insertion gaps, separating hover alignment from vertical descent is more stable than approaching diagonally.
+
+Gripper orientation:
+The gripper fingers should become parallel to the lever’s long axis. Since the gripper closing direction defines the rotation axis and the fingers are perpendicular to the closing direction, set:
+
+rotation = angle_short
+
+This aligns the closing motion with the lever thickness axis while making the fingers parallel to the lever long axis.
+
+Insertion strategy:
+Use a small horizontal offset along the lever short-axis direction so one jaw can slide into the gap between the lever and the door plate during vertical descent.
+
+Use a fixed short-axis offset convention instead of dynamically flipping the offset sign from ambiguous orientation vectors.
+
+Collision avoidance:
+Perform all XY translation at high Z. Descend vertically near the handle. Keep articulation motions smooth and primarily along a single workspace direction.
+
+Step-by-Step Trajectory Execution
+
+Step 1: Move to a safe hover above the lever midpoint
+
+```python
+# Perception-derived variables
+handle_position = [handle_x, handle_y, handle_z]
+handle_height = handle_height
+handle_thickness = handle_length
+
+# Gripper orientation
+grip_orientation = angle_short
+
+# Current robot state
+current_pose = [ee_x, ee_y, ee_z, ee_theta]
+
+# Derived heights
+top_z = handle_z + handle_height / 2
+hover_clearance = hover_offset
+hover_z = top_z + hover_clearance
+
+# Hover pose directly above the handle midpoint
+hover_center_pose = [handle_x, handle_y, hover_z, grip_orientation]
+
+trajectory_1 = generate_linear_trajectory(
+    "move to safe hover above handle midpoint",
+    current_pose,
+    hover_center_pose
+)
+execute_trajectory(trajectory_1)
+
+Step 2: Translate laterally at hover height for jaw insertion alignment
+
+# Small insertion offset along the short-axis direction
+offset_distance = handle_thickness / 2 - insertion_margin
+
+short_axis_vector = [
+    cos(angle_short),
+    sin(angle_short)
+]
+
+offset_x = short_axis_vector[0] * offset_distance
+offset_y = short_axis_vector[1] * offset_distance
+
+hover_offset_pose = [
+    handle_x + offset_x,
+    handle_y + offset_y,
+    hover_z,
+    grip_orientation
+]
+
+trajectory_2 = generate_linear_trajectory(
+    "translate at hover height for handle insertion alignment",
+    hover_center_pose,
+    hover_offset_pose
+)
+execute_trajectory(trajectory_2)
+
+Step 3: Open the gripper
+
+open_gripper()
+
+Step 4: Descend to just above the handle
+
+approach_z = top_z + surface_clearance
+
+approach_pose = [
+    hover_offset_pose[0],
+    hover_offset_pose[1],
+    approach_z,
+    grip_orientation
+]
+
+trajectory_3 = generate_linear_trajectory(
+    "descend to approach height above handle",
+    hover_offset_pose,
+    approach_pose
+)
+execute_trajectory(trajectory_3)
+
+Step 5: Descend to grasp/contact height
+
+grasp_z = handle_z
+
+grasp_pose = [
+    hover_offset_pose[0],
+    hover_offset_pose[1],
+    grasp_z,
+    grip_orientation
+]
+
+trajectory_4 = generate_linear_trajectory(
+    "descend to handle grasp height",
+    approach_pose,
+    grasp_pose
+)
+execute_trajectory(trajectory_4)
+
+Step 6: Close the gripper
+
+close_gripper()
+
+Step 7: Apply a small downward press to unlatch
+
+pressed_pose = [
+    grasp_pose[0],
+    grasp_pose[1],
+    grasp_pose[2] - downward_press_distance,
+    grip_orientation
+]
+
+trajectory_5 = generate_linear_trajectory(
+    "apply downward pressure to unlatch handle",
+    grasp_pose,
+    pressed_pose
+)
+execute_trajectory(trajectory_5)
+
+Step 8: Pull outward to open the door
+
+pull_pose = [
+    pressed_pose[0],
+    pressed_pose[1] + pull_distance,
+    pressed_pose[2],
+    grip_orientation
+]
+
+trajectory_6 = generate_linear_trajectory(
+    "pull outward to open door",
+    pressed_pose,
+    pull_pose
+)
+execute_trajectory(trajectory_6)
+
+Step 9: Retreat upward and release
+
+open_gripper()
+
+retreat_pose = [
+    pull_pose[0],
+    pull_pose[1],
+    hover_z,
+    grip_orientation
+]
+
+trajectory_7 = generate_linear_trajectory(
+    "retreat upward after opening door",
+    pull_pose,
+    retreat_pose
+)
+execute_trajectory(trajectory_7)
+
+-------------------- End of Sample -----------------
+Instructions:
+Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
+
+"""
+
+IN_CONTEXT_EXAMPLE_GRASP = """
 Here is an in context example of multiple LLM responses for each step
 --------------------------------------------------------------------------
 The user command is: Pick up the blue can
@@ -195,3 +416,4 @@ Finally, perform each of these steps one by one. Name each trajectory variable w
 
 """
 
+IN_CONTEXT_EXAMPLE = IN_CONTEXT_EXAMPLE_OPEN_DOOR

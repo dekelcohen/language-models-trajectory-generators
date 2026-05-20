@@ -13,7 +13,7 @@ from common_utils import Trajectory
 from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC, WARNING
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, VISUALIZE_GRASP_POSE
 from helpers.image_utils import list_file_paths
 
 def create_trajectory_videos(logger):
@@ -246,6 +246,54 @@ class API:
 
         self.segmentation_count += 1
 
+
+    def get_grasp_poses(self, object_name):
+        """Return pre-computed grasp pose candidates for the given object.
+
+        Loads poses from outputs/graspgen/grasp_poses_{object_name}.npz and
+        prints a summary so the LLM can reason about them.
+
+        Returns:
+            poses: np.ndarray (N, 4, 4) – grasp candidate 4x4 matrices.
+            scores: np.ndarray (N,) – quality scores (higher is better).
+        """
+        from providers.grasp_provider import get_grasp_pose_candidates
+        poses, scores = get_grasp_pose_candidates(object_name)
+
+        # Sort by descending score
+        sorted_idx = np.argsort(-scores)
+        poses = poses[sorted_idx]
+        scores = scores[sorted_idx]
+
+        print(f"Grasp poses for '{object_name}': {len(poses)} candidates loaded.")
+        PRINT_TOP_GRASP_POSES = False
+        if PRINT_TOP_GRASP_POSES:
+            print(f"Top-5 scores: {scores[:5]}")
+            print(f"Top-5 poses (4x4 matrices):")
+            for i in range(min(5, len(poses))):
+                print(f"  Pose {i}: score={scores[i]:.4f}, position=({poses[i, 0, 3]:.4f}, {poses[i, 1, 3]:.4f}, {poses[i, 2, 3]:.4f}), R_zz={poses[i, 2, 2]:.4f}")
+
+        self.logger.info(PROGRESS + f"Loaded {len(poses)} grasp pose candidates for '{object_name}'." + ENDC)
+        return poses, scores
+
+    def visualize_grasp_pose(self, poses):
+        """Send grasp pose(s) to the simulation environment for 3D visualization.
+
+        Only active when --vis-grasp flag is set; otherwise a no-op.
+
+        Args:
+            poses: A single 4x4 matrix or an (N, 4, 4) array of grasp poses.
+        """
+        if not getattr(self.args, "vis_grasp", False):
+            self.logger.info(PROGRESS + "Skipping grasp visualization (--vis-grasp not set)." + ENDC)
+            return
+        poses = np.array(poses, dtype=float)
+        self.main_connection.send([VISUALIZE_GRASP_POSE, poses])
+        resp = self.main_connection.recv()
+        if isinstance(resp, list):
+            self.logger.info(resp[0])
+        else:
+            self.logger.info(str(resp))
 
 
     def _save_seg_masks(self, masks, segmentation_texts):

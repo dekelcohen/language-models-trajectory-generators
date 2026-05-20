@@ -11,7 +11,7 @@ import math
 from robot import Robot
 from common_utils import Trajectory
 from config import OK, PROGRESS, FAIL, ENDC
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE, VISUALIZE_GRASP_POSE
 # --- Debug helpers ------------------------------------------------------
 def add_debug_sphere(pos_xyz, radius=0.015, color=(1, 0, 0, 1)):
     """
@@ -99,6 +99,62 @@ def add_debug_cylinder_between(p1, p2, radius=0.004, color=(1, 0, 0, 1)):
         except Exception:
             pass
         return None
+
+
+def draw_grasp_pose(pose_4x4, axis_length=0.06, finger_length=0.04, finger_spread=0.02, cylinder_radius=0.003):
+    """Draw a gripper pose in 3D using visual MultiBody cylinders/spheres.
+
+    Works in both p.GUI and p.DIRECT modes (unlike addUserDebugLine).
+
+    Draws:
+      - RGB coordinate axes (X=red, Y=green, Z=blue) at the grasp origin.
+      - A simplified gripper: two finger lines extending along the local Y-axis
+        from the grasp origin, offset along the approach (Z) direction.
+
+    Args:
+        pose_4x4: 4x4 homogeneous transformation matrix (numpy array).
+        axis_length: length of each drawn axis (metres).
+        finger_length: length of each finger line.
+        finger_spread: half-distance between the two fingers (gripper opening).
+        cylinder_radius: radius of the drawn cylinders.
+
+    Returns:
+        list of body IDs (for optional removal later via p.removeBody).
+    """
+    pose = np.array(pose_4x4, dtype=float)
+    origin = pose[:3, 3]
+    x_axis = pose[:3, 0]
+    y_axis = pose[:3, 1]
+    z_axis = pose[:3, 2]  # approach direction
+
+    body_ids = []
+
+    # Draw coordinate frame axes
+    body_ids.append(add_debug_cylinder_between(origin, origin + x_axis * axis_length, radius=cylinder_radius, color=(1, 0, 0, 1)))
+    body_ids.append(add_debug_cylinder_between(origin, origin + y_axis * axis_length, radius=cylinder_radius, color=(0, 1, 0, 1)))
+    body_ids.append(add_debug_cylinder_between(origin, origin + z_axis * axis_length, radius=cylinder_radius, color=(0, 0, 1, 1)))
+
+    # Draw simplified gripper fingers
+    finger_base = origin + z_axis * 0.01  # slight offset along approach
+    finger_left_base = finger_base + y_axis * finger_spread
+    finger_right_base = finger_base - y_axis * finger_spread
+    finger_left_tip = finger_left_base + z_axis * finger_length
+    finger_right_tip = finger_right_base + z_axis * finger_length
+
+    gripper_color = (1, 0.6, 0, 1)  # orange
+    # Finger lines
+    body_ids.append(add_debug_cylinder_between(finger_left_base, finger_left_tip, radius=cylinder_radius, color=gripper_color))
+    body_ids.append(add_debug_cylinder_between(finger_right_base, finger_right_tip, radius=cylinder_radius, color=gripper_color))
+    # Crossbar connecting finger bases
+    body_ids.append(add_debug_cylinder_between(finger_left_base, finger_right_base, radius=cylinder_radius, color=gripper_color))
+    # Palm line (connecting origin to crossbar center)
+    body_ids.append(add_debug_cylinder_between(origin, finger_base, radius=cylinder_radius * 0.7, color=gripper_color))
+
+    # Origin sphere
+    body_ids.append(add_debug_sphere(origin.tolist(), radius=cylinder_radius * 2, color=gripper_color))
+
+    return [bid for bid in body_ids if bid is not None]
+
 
 # --- Trajectory visualization helpers ----------------------------------
 COLOR_TABLE = [
@@ -740,6 +796,20 @@ def run_simulation_environment(args, env_connection, logger):
                     env_connection.send({"eef_pos": eef_pos})
                 except Exception:
                     env_connection.send({})
+
+            elif env_connection_received[0] == VISUALIZE_GRASP_POSE:
+                grasp_poses = env_connection_received[1]
+                try:
+                    if isinstance(grasp_poses, np.ndarray) and grasp_poses.ndim == 3:
+                        # Multiple poses (N, 4, 4)
+                        for pose in grasp_poses:
+                            draw_grasp_pose(pose)
+                    else:
+                        # Single pose (4, 4)
+                        draw_grasp_pose(grasp_poses)
+                    env_connection.send([OK + f"Visualized {len(grasp_poses) if isinstance(grasp_poses, np.ndarray) and grasp_poses.ndim == 3 else 1} grasp pose(s)." + ENDC])
+                except Exception as e:
+                    env_connection.send([FAIL + f"Failed to visualize grasp pose: {e}" + ENDC])
 
         env.update()
 
