@@ -145,7 +145,7 @@ This aligns the closing motion with the lever thickness axis while making the fi
 Insertion strategy:
 Use a small horizontal offset along the lever short-axis direction so one jaw can slide into the gap between the lever and the door plate during vertical descent.
 
-Use a fixed short-axis offset convention instead of dynamically flipping the offset sign from ambiguous orientation vectors.
+Choose the short-axis offset sign so the gripper shifts toward the door plate / handle support side. This lets one jaw enter the gap between the lever and the plate and prevents the handle from sliding out during pulling.
 
 Collision avoidance:
 Perform all XY translation at high Z. Descend vertically near the handle. Keep articulation motions smooth and primarily along a single workspace direction.
@@ -191,8 +191,29 @@ short_axis_vector = [
     sin(angle_short)
 ]
 
-offset_x = short_axis_vector[0] * offset_distance
-offset_y = short_axis_vector[1] * offset_distance
+# Choose the sign so the offset moves toward the door plate side
+door_direction = [
+    door_x - handle_x,
+    door_y - handle_y
+]
+
+door_norm = sqrt(door_direction[0]**2 + door_direction[1]**2)
+
+if door_norm > 1e-6:
+    door_direction = [
+        door_direction[0] / door_norm,
+        door_direction[1] / door_norm
+    ]
+
+dot_product = (
+    short_axis_vector[0] * door_direction[0] +
+    short_axis_vector[1] * door_direction[1]
+)
+
+offset_sign = 1.0 if dot_product >= 0 else -1.0
+
+offset_x = short_axis_vector[0] * offset_distance * offset_sign
+offset_y = short_axis_vector[1] * offset_distance * offset_sign
 
 hover_offset_pose = [
     handle_x + offset_x,
@@ -416,4 +437,4 @@ Finally, perform each of these steps one by one. Name each trajectory variable w
 
 """
 
-IN_CONTEXT_EXAMPLE = IN_CONTEXT_EXAMPLE_OPEN_DOOR
+IN_CONTEXT_EXAMPLE = IN_CONTEXT_EXAMPLE_GRASP # IN_CONTEXT_EXAMPLE_OPEN_DOOR
