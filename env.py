@@ -813,6 +813,26 @@ def run_simulation_environment(args, env_connection, logger):
 
         env.update()
 
+def get_grasp_pose_candidates(object_name):
+    """Load pre-computed grasp pose candidates from an .npz file.
+
+    Args:
+        object_name: Name used to locate the file at ./outputs/graspgen/grasp_poses_{object_name}.npz
+
+    Returns:
+        poses: np.ndarray of shape (N, 4, 4) – 4x4 homogeneous transformation matrices.
+        scores: np.ndarray of shape (N,) – grasp quality scores (higher is better).
+    """
+    npz_path = './outputs/graspgen/grasp_poses_open_door.npz'
+    if not os.path.exists(npz_path):
+        raise FileNotFoundError(f"Grasp poses file not found: {npz_path}")
+
+    data = np.load(npz_path)
+    poses = data["poses"]   # (N, 4, 4)
+    scores = data["scores"] # (N,)
+    return poses, scores
+
+
 # --- Minimal GUI demo to interactively test door kinematics ---
 def run_sim_demo(task_p='door', disable_forces: bool = False,
                  connection_mode=p.GUI,
@@ -840,8 +860,21 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
 
         env = Environment(_Args)
         env.load()
-
-        GRASP_POSE = True 
+        
+        DRAW_GRASP_POST_MAT = True
+        if DRAW_GRASP_POST_MAT:
+            grasp_pose =   np.array([
+                [ 0.854062,   -0.5120964,   0.09129835, -0.34211737],
+                [-0.49542382, -0.7473097,   0.44281337, -0.12207034],
+                [-0.15853497, -0.42342147, -0.89195347,  0.76260877],
+                [ 0.0,         0.0,         0.0,         1.0]
+            ])
+            
+            poses, scores = get_grasp_pose_candidates("door handle")
+            
+        
+            draw_grasp_pose(grasp_pose)
+        GRASP_POSE = False 
         if GRASP_POSE:
             trajectory = [[-0.279, -0.126, 0.600],[-0.279, -0.126, 0.700],[-0.300, 0.100, 0.700],[-0.300, 0.100, 0.600]]
             trajectory_debug_marker_steps, permanent_marker_ids, color_cycle_idx = handle_add_trajectory_points(

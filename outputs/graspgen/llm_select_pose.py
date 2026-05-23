@@ -1,13 +1,37 @@
 # Gave GPT-5.5 (free webui) the conversation until after 'Approach decision and plan' (after detect_object(s) and before ```python code)
 # Prompt: Given the above task desc and data - call get_grasp_poses and select the best pose to grasp the target object - generate code to sort desc poses considering task requirements and grasp score
 # See https://chatgpt.com/c/6a0dc097-88c0-83eb-8b01-34ab5d383d93
+import os
 import math
 import numpy as np
+from loguru import logger  
 
-logger.info(PROGRESS + "Requesting grasp candidates for door handle lever..." + ENDC)
+logger.info("Requesting grasp candidates for door handle lever...")
+
+
+
+
+def get_grasp_pose_candidates(object_name):
+    """Load pre-computed grasp pose candidates from an .npz file.
+
+    Args:
+        object_name: Name used to locate the file at ./outputs/graspgen/grasp_poses_{object_name}.npz
+
+    Returns:
+        poses: np.ndarray of shape (N, 4, 4) – 4x4 homogeneous transformation matrices.
+        scores: np.ndarray of shape (N,) – grasp quality scores (higher is better).
+    """
+    npz_path = './grasp_poses_open_door.npz'
+    if not os.path.exists(npz_path):
+        raise FileNotFoundError(f"Grasp poses file not found: {npz_path}")
+
+    data = np.load(npz_path)
+    poses = data["poses"]   # (N, 4, 4)
+    scores = data["scores"] # (N,)
+    return poses, scores
 
 # Get candidate grasps
-poses, scores = get_grasp_poses("door handle lever")
+poses, scores = get_grasp_pose_candidates("door handle")
 
 # ------------------------------------------------------------------
 # Known perception outputs
@@ -55,6 +79,8 @@ print(f"Offset Y: {offset_xy[1]:.3f}")
 # ------------------------------------------------------------------
 # Rank grasp poses using task-aware metrics
 # ------------------------------------------------------------------
+
+
 
 ranked_candidates = []
 
@@ -145,7 +171,7 @@ ranked_candidates.sort(
 # ------------------------------------------------------------------
 
 best = ranked_candidates[0]
-
+second_best = ranked_candidates[1]
 best_pose_matrix = best["pose"]
 
 best_x = best_pose_matrix[0, 3]
@@ -160,14 +186,14 @@ best_yaw = math.atan2(
 print(f"Selected candidate index: {best['index']}")
 print(f"Raw grasp score: {best['score']:.3f}")
 print(f"Composite score: {best['composite_score']:.3f}")
+print(f"2nd rank Raw grasp score: {second_best['score']:.3f}")
+print(f"2nd rank Composite score: {second_best['composite_score']:.3f}")
 print(f"Selected X: {best_x:.3f}")
 print(f"Selected Y: {best_y:.3f}")
 print(f"Selected Z: {best_z:.3f}")
 print(f"Selected yaw: {best_yaw:.3f}")
-
-# ------------------------------------------------------------------
-# Final grasp pose used for trajectories
-# ------------------------------------------------------------------
+print(f"Selected grasp_pose_matrix: {best_pose_matrix}")
+print(f"cand_poses[0]: {poses[0]}")
 
 grasp_pose = [
     best_x,
@@ -184,4 +210,4 @@ hover_pose = [
     desired_theta
 ]
 
-logger.info(PROGRESS + "Best lever grasp pose selected successfully." + ENDC)
+logger.info("Best lever grasp pose selected successfully.")
