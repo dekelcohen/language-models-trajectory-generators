@@ -412,6 +412,12 @@ class API:
         """
         from prompts.review_prompt import REVIEW_PROMPT        
         start_idx = self.start_attempt_trajectory_step
+        # Determine review model: "vlm" uses main model, "vlm:<model>" uses specified model
+        review_provider = self.args.review_provider
+        if review_provider.startswith("vlm:"):
+            review_model = review_provider[len("vlm:"):]
+        else:
+            review_model = self.args.language_model
         # Subsample every 5th frame from head RGB, starting at the attempt's first step
         frame_paths = list_file_paths(
             root=config.trajectory_folder,
@@ -438,8 +444,8 @@ class API:
                               
         # Use conversation history; do not summarize
         messages = self.conversation_messages
-        self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}." + ENDC)
-        messages = models.get_chatgpt_output(self.client, self.args.language_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, log_msgs=True)
+        self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}, model={review_model}." + ENDC)
+        messages = models.get_chatgpt_output(self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, log_msgs=True)
         # Update shared conversation
         self.conversation_messages = messages
         # Parse assistant JSON

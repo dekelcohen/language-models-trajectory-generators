@@ -290,6 +290,7 @@ if __name__ == "__main__":
     # Parse args
     parser = argparse.ArgumentParser(description="Main Program.")
     parser.add_argument("-lm", "--language_model", default="azure-gpt-5", help="select language model (e.g. azure-gpt-5, gpt-4o, or-google/gemini-2.5-flash)")
+    parser.add_argument("--lm-images", action=argparse.BooleanOptionalAction, default=True, help="pass images to LLM prompts (default: True, use --no-lm-images to disable)")
     parser.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")
     parser.add_argument("-m", "--mode", choices=["default", "debug"], default="default", help="select mode to run")
     parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
@@ -299,7 +300,7 @@ if __name__ == "__main__":
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
     parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
-    parser.add_argument("--review-provider", choices=["vlm", "xmem"], default="vlm", help="review provider for success verification; vlm uses the vision-language (gpt) reviewer; xmem preserves the legacy tracking flow")
+    parser.add_argument("--review-provider", default="vlm", help="review provider for success verification: 'vlm' (uses main model), 'vlm:<model>' (e.g. vlm:or-openai/gpt-5.5), or 'xmem'")
     parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")    
     parser.add_argument("--ovr-obj",  type=str, default=None, help=(
             "Apply --ovr-bbox only to predictions whose text label (provider 'class') matches this regex. "
@@ -441,7 +442,7 @@ if __name__ == "__main__":
             pass
 
         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, role="system", image_paths=image_paths)
+        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, role="system", image_paths=image_paths if args.lm_images else None)
         api.conversation_messages = messages
         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
@@ -528,6 +529,8 @@ if __name__ == "__main__":
                         if config.ENABLE_EEF_POS_IMAGE and eef_pos:                        
                             new_prompt += f'\n{EEF_POS_SNIPPET}\n'.format(eef_pos=eef_pos)
                         else:
+                            _imgs_paths = None
+                        if not args.lm_images:
                             _imgs_paths = None
                         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", image_paths=_imgs_paths)
                         api.conversation_messages = messages
