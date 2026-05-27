@@ -145,6 +145,20 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         print(new_output, file=file)
         if not new_output or len(new_output) < 5:
             print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")        
+    # ----------------------------------------------------------------------
+    # 2. OpenRouter mode: model name starts with "or-"
+    # ----------------------------------------------------------------------
+    elif model.startswith("or-"):
+        from openrouter import call_openrouter
+        openrouter_model = model[len("or-"):]
+        print("assistant:", file=file)
+        new_output = call_openrouter(messages, model=openrouter_model)
+        print(new_output, file=file)
+        if not new_output or len(new_output) < 5:
+            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
+    # ----------------------------------------------------------------------
+    # 3. OpenAI direct mode (client-based)
+    # ----------------------------------------------------------------------
     else:
         completion = client.chat.completions.create(
             model=model,
