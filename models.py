@@ -119,13 +119,15 @@ def log_messages(messages, file, prefix):
     except Exception as e:
         print(f"Warning: failed to log messages JSON: {e}", file=file)
         
-def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, image_paths=None, log_msgs=False):
+def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, image_paths=None, log_msgs=False, max_tokens=60000, reasoning_effort=None):
     """
     Call LLM (model - for zure or client - openai client) with new_prompt, existing conversation messages, role, image_paths - to attach images.
     new_prompt - optional: can be None or empty (only if image_paths is also None/empty)
     image_paths - optional: can be None or empty 
     messages - existing conversation messages. will be updated with assistant response and returned.
       You can optionally add to messages before calling and pass new_prompt=None, image_paths=None
+    max_tokens - max completion tokens for the response
+    reasoning_effort - optional: "high", "medium", "low", etc. for reasoning models
     """
     if file is None:
         file = sys.stdout
@@ -141,7 +143,7 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         from azure_openai import call_llm
         deployment = model[len("azure-"):]
         print("assistant:", file=file)
-        new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=60000)
+        new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=max_tokens)
         print(new_output, file=file)
         if not new_output or len(new_output) < 5:
             print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")        
@@ -152,7 +154,7 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         from openrouter import call_openrouter
         openrouter_model = model[len("or-"):]
         print("assistant:", file=file)
-        new_output = call_openrouter(messages, model=openrouter_model)
+        new_output = call_openrouter(messages, model=openrouter_model, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
         print(new_output, file=file)
         if not new_output or len(new_output) < 5:
             print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")

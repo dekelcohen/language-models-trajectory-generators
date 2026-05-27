@@ -291,6 +291,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Main Program.")
     parser.add_argument("-lm", "--language_model", default="azure-gpt-5", help="select language model (e.g. azure-gpt-5, gpt-4o, or-google/gemini-2.5-flash)")
     parser.add_argument("--lm-images", action=argparse.BooleanOptionalAction, default=True, help="pass images to LLM prompts (default: True, use --no-lm-images to disable)")
+    parser.add_argument("--max-tokens", type=int, default=60000, help="max completion tokens for LLM responses")
+    parser.add_argument("--reasoning-effort", type=str, default=None, choices=["xhigh", "high", "medium", "low", "minimal", "none"], help="reasoning effort for reasoning models (OpenRouter)")
     parser.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")
     parser.add_argument("-m", "--mode", choices=["default", "debug"], default="default", help="select mode to run")
     parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
@@ -442,7 +444,7 @@ if __name__ == "__main__":
             pass
 
         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, role="system", image_paths=image_paths if args.lm_images else None)
+        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, role="system", image_paths=image_paths if args.lm_images else None, max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
         api.conversation_messages = messages
         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
@@ -486,7 +488,7 @@ if __name__ == "__main__":
                         new_prompt += "\n"
     
                         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
+                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
                         api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
@@ -516,7 +518,7 @@ if __name__ == "__main__":
                         error = False
     
                         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system")
+                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system", max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
                         api.conversation_messages = messages
                         api.failed_task = False # After retry task --> reset api.failed_task flag to resume normal flow (retry)    
                     else:    
@@ -532,7 +534,7 @@ if __name__ == "__main__":
                             _imgs_paths = None
                         if not args.lm_images:
                             _imgs_paths = None
-                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", image_paths=_imgs_paths)
+                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", image_paths=_imgs_paths, max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
                         api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
                         error = False
@@ -545,7 +547,7 @@ if __name__ == "__main__":
                 break
 
             logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-            messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user")
+            messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
             api.conversation_messages = messages
             logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     except KeyboardInterrupt:

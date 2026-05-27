@@ -9,7 +9,7 @@ load_dotenv()
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
-def call_openrouter(messages, model, max_tokens=60000, temperature=0):
+def call_openrouter(messages, model, max_tokens=60000, temperature=0, reasoning_effort=None):
     """
     Call OpenRouter chat completion endpoint.
 
@@ -18,6 +18,7 @@ def call_openrouter(messages, model, max_tokens=60000, temperature=0):
         model: OpenRouter model identifier (e.g. "google/gemini-2.5-flash").
         max_tokens: Maximum tokens for the response.
         temperature: Sampling temperature.
+        reasoning_effort: Optional reasoning effort level ("high", "medium", "low", etc.).
 
     Returns:
         str: The assistant message content.
@@ -50,6 +51,9 @@ def call_openrouter(messages, model, max_tokens=60000, temperature=0):
         "max_tokens": max_tokens,
         "temperature": temperature,        
     }
+
+    if reasoning_effort:
+        payload["reasoning"] = {"effort": reasoning_effort}
 
     response = post_with_retries(OPENROUTER_BASE_URL, headers=headers, payload=payload)
     result = response.json()

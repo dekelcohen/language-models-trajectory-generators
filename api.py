@@ -445,7 +445,7 @@ class API:
         # Use conversation history; do not summarize
         messages = self.conversation_messages
         self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}, model={review_model}." + ENDC)
-        messages = models.get_chatgpt_output(self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, log_msgs=True)
+        messages = models.get_chatgpt_output(self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, log_msgs=True, max_tokens=self.args.max_tokens, reasoning_effort=self.args.reasoning_effort)
         # Update shared conversation
         self.conversation_messages = messages
         # Parse assistant JSON
@@ -543,7 +543,7 @@ class API:
             self.attempted_task = True
             messages = []
             self.logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-            messages = models.get_chatgpt_output(self.client, self.args.language_model, new_prompt, messages, "system", file=sys.stderr)
+            messages = models.get_chatgpt_output(self.client, self.args.language_model, new_prompt, messages, "system", file=sys.stderr, max_tokens=self.args.max_tokens, reasoning_effort=self.args.reasoning_effort)
             self.logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
             code_block = messages[-1]["content"].split("```python")
             task_completed = self.task_completed
