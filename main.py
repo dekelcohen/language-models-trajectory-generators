@@ -315,6 +315,7 @@ if __name__ == "__main__":
                         help="Add permanent 3D world visualization point(s) as JSON: \"[x,y,z]\" or \"[[x1,y1,z1],[x2,y2,z2],…]\"")
     parser.add_argument("--prepend-prompt", type=str, default=None, help="Path to a text file whose contents are prepended to the initial command (first MAIN_PROMPT only).",
     )
+    parser.add_argument("--attempts", type=int, default=2, help="total number of task attempts (default: 2 = first attempt + 1 retry after VLM review). Values > 2 allow additional retries with VLM review between each.")
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
     parser.add_argument("--vis-grasp", action="store_true", help="visualize grasp pose candidates in the 3D sim environment (cylinder/sphere markers)")
     parser.add_argument("--save-grasp-inputs", action="store_true", help="save binary segmentation mask (masks[0]) as .npy and projection/view matrices as .npy under images_folder after each detect_object call")
@@ -329,6 +330,7 @@ if __name__ == "__main__":
 
     # Logging (Loguru): emit to console and to a file under images folder
     logger = init_loguru_logger("vlm_traj.log")
+    logger.info(PROGRESS + f"Args: {vars(args)}" + ENDC)
     # Also wire adapter-level logger for its internal warnings
     segmentation_adapter.logger = logger
 
@@ -421,6 +423,7 @@ if __name__ == "__main__":
         logger.info(PROGRESS + "STARTING TASK..." + ENDC)
     
         messages = []
+        attempt_summaries = []
     
         error = False
     
@@ -491,8 +494,11 @@ if __name__ == "__main__":
                         messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
                         api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
+
+                        # Accumulate this attempt's summary
+                        attempt_summaries.append(messages[-1]["content"])
     
-                        logger.info(PROGRESS + "RETRYING TASK..." + ENDC)
+                        logger.info(PROGRESS + f"RETRYING TASK (attempt {api.attempt_number + 1}/{args.attempts})..." + ENDC)
                         # Mark the start of the new attempt for downstream reviewers
                         api.start_attempt_trajectory_step = api.trajectory_step
 
@@ -512,8 +518,13 @@ if __name__ == "__main__":
                         except Exception:
                             pass
 
+                        # Build combined summary of ALL previous failed attempts
+                        combined_summary = "\n".join(
+                            f"--- Attempt {i+1} Summary ---\n{s}"
+                            for i, s in enumerate(attempt_summaries)
+                        )
                         new_prompt += "\n"
-                        new_prompt += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", messages[-1]["content"])
+                        new_prompt += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", combined_summary)
                         messages = []
                         error = False
     

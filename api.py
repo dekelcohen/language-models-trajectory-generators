@@ -73,7 +73,7 @@ class API:
         self.segmentation_texts = []
         self.segmentation_count = 0
         self.trajectory_length = 0
-        self.attempted_task = False
+        self.attempt_number = 0
         self.completed_task = False
         self.failed_task = False
         self.head_camera_position = None
@@ -473,9 +473,12 @@ class API:
     def task_completed(self):        
         create_trajectory_videos(self.logger)
         
-        if self.attempted_task:
+        self.attempt_number += 1
+        max_attempts = getattr(self.args, 'attempts', 2)
+        # On the final attempt, skip review and accept the result
+        if self.attempt_number >= max_attempts:
             self.completed_task = True
-            self.logger.info(PROGRESS + "task_completed second attempt (attempted_task=True)" + ENDC)
+            self.logger.info(PROGRESS + f"task_completed final attempt {self.attempt_number}/{max_attempts} -- accepting result" + ENDC)
             return
         self.logger.info(PROGRESS + "Waiting to execute all generated trajectories..." + ENDC)
         self.main_connection.send([TASK_COMPLETED])
@@ -540,7 +543,6 @@ class API:
                 new_prompt += "Orientations:\n"
                 new_prompt += str(np.around([orientation for o, orientation in enumerate(object_orientations) if o % config.xmem_lm_input_every == 0], 3)) + "\n"
             self.logger.info(OK + "Finished calculating object bounding cubes!" + ENDC)
-            self.attempted_task = True
             messages = []
             self.logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
             messages = models.get_chatgpt_output(self.client, self.args.language_model, new_prompt, messages, "system", file=sys.stderr, max_tokens=self.args.max_tokens, reasoning_effort=self.args.reasoning_effort)
@@ -554,13 +556,13 @@ class API:
                     exec(code)
             return
         # VLM review path
+        self.logger.info(PROGRESS + f"VLM review after attempt {self.attempt_number}/{max_attempts}..." + ENDC)
         try:
             self.run_vlm_review()
         except Exception as e:
             self.logger.info(FAIL + f"VLM review failed: {e}" + ENDC)
             # Fall back to marking failure; main loop will replan
             self.failed_task = True
-        self.attempted_task = True
         return
     
     def task_failed(self):
