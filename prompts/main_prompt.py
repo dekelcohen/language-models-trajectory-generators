@@ -437,4 +437,36 @@ Finally, perform each of these steps one by one. Name each trajectory variable w
 
 """
 
-IN_CONTEXT_EXAMPLE = IN_CONTEXT_EXAMPLE_GRASP # IN_CONTEXT_EXAMPLE_OPEN_DOOR
+OPEN_HINGED_DOOR_EXTRACT_PARAMS = """
+
+import math
+
+def get_llm_door_prompt_data(handle_pos , pivot_pos):
+    ###
+    handle_pos - the door handle pos that is pulled (or pushed)
+    pivot_pos - the pivot which around the rotate the door to open/close - usually door_hinge_pos 
+    ###
+    
+    
+    # 2. Calculate Radius in the XY plane (assuming door swings flat on the ground)
+    dx = handle_pos[0] - pivot_pos[0]
+    dy = handle_pos[1] - pivot_pos[1]
+    radius = math.hypot(dx, dy)
+    
+    # 3. Calculate Current Angle (in radians)
+    current_angle = math.atan2(dy, dx)
+    
+    # 4. Define target (e.g., open the door by 90 degrees / 1.57 radians)
+    target_angle = current_angle + 1.5708 # Change sign (-) if door opens the other way
+    
+    llm_prompt_data = {
+        "pivot_center_xy": [round(pivot_pos[0], 4), round(pivot_pos[1], 4)],
+        "handle_start_xyz": [round(handle_pos[0], 4), round(handle_pos[1], 4), round(handle_pos[2], 4)],
+        "radius_m": round(radius, 4),
+        "current_angle_rad": round(current_angle, 4),
+        "target_angle_rad": round(target_angle, 4)
+    }
+    
+    return llm_prompt_data
+"""
+IN_CONTEXT_EXAMPLE = IN_CONTEXT_EXAMPLE_GRASP  # IN_CONTEXT_EXAMPLE_OPEN_DOOR # + OPEN_HINGED_DOOR_EXTRACT_PARAMS

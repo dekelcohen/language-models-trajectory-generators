@@ -861,7 +861,7 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
         env = Environment(_Args)
         env.load()
         
-        DRAW_GRASP_POST_MAT = True
+        DRAW_GRASP_POST_MAT = False
         if DRAW_GRASP_POST_MAT:
             grasp_pose =   np.array([
                 [ 0.854062,   -0.5120964,   0.09129835, -0.34211737],
@@ -881,19 +881,28 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
                     trajectory = trajectory, color_spec='blue', permanent=True, marker_spec='line', logger=logger,
                     marker_steps = [], permanent_ids = [], color_cycle_idx = 0)
                 
-        OVERLAY_COORD_TEST = False
+        OVERLAY_COORD_TEST = True
         if OVERLAY_COORD_TEST:
             # Temp coordinates check 
-            door_handle_pos = [-0.07745519744833454, -0.00880230021590278, 0.672376]
-            object_pos = door_handle_pos
+            # door_handle_pos = [-0.07745519744833454, -0.00880230021590278, 0.672376] # from pybullet 
+            door_handle_pos = [-0.319, -0.127, 0.638] # From perception 
+            # hinge_pos = [-0.21654298331956742, -0.14765775679373436, 0.697376] # from pybullet
+            hinge_pos = [-0.09 + door_handle_pos[0], -0.2 + door_handle_pos[1], door_handle_pos[2] + 0.05] # moved manually in sim
+            print('hinge_pos', hinge_pos)
+            object_pos = hinge_pos # door_handle_pos
             # object_pos = [0,0,0] 
             object_start_orientation_q = p.getQuaternionFromEuler(config.object_start_orientation_e)
-            p.loadURDF(
-                "ycb_assets/002_master_chef_can.urdf",
-                object_pos,
-                object_start_orientation_q,
-                useFixedBase=False,
-                globalScaling=config.global_scaling)
+                        
+            add_debug_sphere(object_pos)
+            
+            
+            if False:
+                p.loadURDF(
+                    "ycb_assets/002_master_chef_can.urdf",
+                    object_pos,
+                    object_start_orientation_q,
+                    useFixedBase=False,
+                    globalScaling=config.global_scaling)
     
         # Print camera poses for debugging
         try:
