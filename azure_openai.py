@@ -158,7 +158,7 @@ def post_with_retries(url, headers, payload, max_retries=5, timeout=(10,220)):
             print(f"Retrying in {sleep_time} seconds...\n")
             time.sleep(sleep_time)    
             
-def call_llm(messages, azure_deployment_model = None, max_tokens=2048, temperature=0.1):
+def call_llm(messages, azure_deployment_model = None, max_tokens=2048, temperature=0.1, reasoning_effort=None):
     """
     Call Azure OpenAI's chat completion endpoint with the given messages and max_tokens.
 
@@ -167,7 +167,7 @@ def call_llm(messages, azure_deployment_model = None, max_tokens=2048, temperatu
         messages (list): List of message objects for the conversation.
         max_tokens (int): Maximum tokens for the response.
         temperature : 0-1
-        
+        reasoning_effort: Optional reasoning effort level ("high", "medium", "low").
 
     Returns:
         dict: The parsed JSON response from the LLM.
@@ -190,6 +190,9 @@ def call_llm(messages, azure_deployment_model = None, max_tokens=2048, temperatu
         "messages": messages,
         "max_completion_tokens": max_tokens,        
     }
+
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
 
     # Construct the Azure OpenAI endpoint URL
     GPT_ENDPOINT_URL = (

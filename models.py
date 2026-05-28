@@ -143,7 +143,7 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         from azure_openai import call_llm
         deployment = model[len("azure-"):]
         print("assistant:", file=file)
-        new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=max_tokens)
+        new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
         print(new_output, file=file)
         if not new_output or len(new_output) < 5:
             print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")        
