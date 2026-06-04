@@ -7,6 +7,7 @@ import config
 from config import OK, PROGRESS, FAIL, ENDC
 from PIL import Image
 from shapely.geometry import MultiPoint, Polygon, polygon
+from sklearn.cluster import DBSCAN
 
 logger = None
 args = None
@@ -94,26 +95,15 @@ def save_xmem_image(masks):
     norm = xmem_array / max_val if max_val > 0 else xmem_array
     Image.fromarray((norm * 255).astype(np.uint8)).save(config.xmem_input_path)
 
-
-
 def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_position, camera_orientation_q, segmentation_count, cam_info=None):
 
     image_width, image_height = image.size
-
     bounding_cubes = []
     bounding_cubes_orientations = []
+    
     logger.info(PROGRESS + f"-- Enter get_bounding_cube_from_point_cloud(...)" + ENDC)
-    if os.environ.get("DEBUG_PINHOLE", "0") == "1":
-        px = 156
-        py = 72
-        pz = depth_array[py, px] # TODO: Fix: Correct depth as in test: 0.993040
-        point=[px, py, pz]    
-        logger.info(PROGRESS + f"--- Test 2D Known pixel {point}--> 3D world" + ENDC)
-        get_world_point_world_frame(camera_position, camera_orientation_q, "head", image.size, point=point, cam_info=cam_info)
-        return
         
     for i, mask in enumerate(masks):
-
         save_mask_image(mask, config.bounding_cube_mask_image_path.format(object=segmentation_count, mask=i))
         mask_np = cv.imread(config.bounding_cube_mask_image_path.format(object=segmentation_count, mask=i), cv.IMREAD_GRAYSCALE)
 
@@ -121,37 +111,74 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
         if contour is not None:
             
             contour_pixel_points = [(c, r, depth_array[r][c]) for r in range(image_height) for c in range(image_width) if cv.pointPolygonTest(contour, (c, r), measureDist=False) >= 0]
-            if len(contour_pixel_points) > 0:
-                _mean_px = np.mean(np.array(contour_pixel_points, dtype=np.float64), axis=0)
-                logger.info(PROGRESS + f"[Contour] mean pixel_point (u,v,depth)={[_mean_px[0], _mean_px[1], _mean_px[2]]}" + ENDC)
-            else:
-                logger.info(PROGRESS + "[Contour] No pixels inside contour; mean undefined" + ENDC)
-            logger.info(PROGRESS + f"*** Before get_world_point_world_frame len(contour_pixel_points)={len(contour_pixel_points)}" + ENDC)            
+            
             contour_world_points = [get_world_point_world_frame(camera_position, camera_orientation_q, "head", image.size, pixel_point, cam_info=cam_info) for pixel_point in contour_pixel_points]
-            # Optional depth statistics within the mask to probe Z handling
-            if os.environ.get("DEBUG_DEPTH", "0") == "1":
-                try:
-                    _d = np.array([pt[2] for pt in contour_pixel_points], dtype=np.float32)
-                    if _d.size > 0:
-                        self_mean = float(_d.mean()); self_min = float(_d.min()); self_max = float(_d.max())
-                        print(f"[Depth] mask idx={i} min={self_min:.3f} max={self_max:.3f} mean={self_mean:.3f}")
-                except Exception:
-                    pass
-            max_z_coordinate = np.max(np.array(contour_world_points)[:, 2])
-            min_z_coordinate = np.min(np.array(contour_world_points)[:, 2])
-            top_surface_world_points = [world_point for world_point in contour_world_points if world_point[2] > max_z_coordinate - config.point_cloud_top_surface_filter]
+            
+            if len(contour_world_points) == 0:
+                continue
 
-            rect = MultiPoint([world_point[:2] for world_point in top_surface_world_points]).minimum_rotated_rectangle
+            contour_world_points_np = np.array(contour_world_points)
+
+            # ====================================================================
+            # FIX 1: DBSCAN CLUSTERING TO REMOVE MASK BLEEDING (BACKGROUND REMOVAL)
+            # ====================================================================
+            # eps=0.025 means any points further than 2.5cm apart belong to different clusters.
+            clustering = DBSCAN(eps=0.025, min_samples=5).fit(contour_world_points_np)
+            labels = clustering.labels_
+            
+            # Separate points into their distinct clusters (ignoring -1, which DBSCAN flags as noise)
+            clusters = [contour_world_points_np[labels == cluster_id] for cluster_id in set(labels) if cluster_id != -1]
+            
+            if len(clusters) > 0:
+                # The handle is the object protruding *closest* to the camera.
+                # We calculate the average Euclidean distance from the camera to each cluster and pick the minimum.
+                cam_pos_np = np.array(camera_position)
+                target_points = min(clusters, key=lambda c: np.mean(np.linalg.norm(c - cam_pos_np, axis=1)))
+            else:
+                # Fallback if clustering completely fails
+                target_points = contour_world_points_np
+
+            # ====================================================================
+            # FIX 2: HYBRID TOP-SURFACE AND VOLUME BOUNDING BOX
+            # ====================================================================
+            max_z_coordinate = np.max(target_points[:, 2])
+            min_z_coordinate = np.min(target_points[:, 2])
+            
+            # 1. Grasp rigid objects (top-down): Apply original top-surface filter to avoid table bleeding 
+            top_surface_world_points = target_points[target_points[:, 2] > (max_z_coordinate - config.point_cloud_top_surface_filter)]
+            
+            # Safety check in case the top surface filter removes too many points
+            if len(top_surface_world_points) < 3:
+                top_surface_world_points = target_points
+
+            rect = MultiPoint(top_surface_world_points[:, :2]).minimum_rotated_rectangle
+            
+            if isinstance(rect, Polygon):
+                temp_box = np.array(rect.exterior.coords[:-1])
+                width = np.linalg.norm(temp_box[1] - temp_box[0])
+                length = np.linalg.norm(temp_box[2] - temp_box[1])
+                
+                # 2. Check if the object got squashed flat (like a door handle ridge).
+                # If the footprint is thinner than 1.5cm, use ALL the clean cluster points!
+                if min(width, length) < 0.015:  
+                    rect = MultiPoint(target_points[:, :2]).minimum_rotated_rectangle
+
+            # ====================================================================
+            # BUILD FINAL 3D BOX
+            # ====================================================================
             if isinstance(rect, Polygon):
                 rect = polygon.orient(rect, sign=-1)
                 box = rect.exterior.coords
                 box = np.array(box[:-1])
                 box_min_x = np.argmin(box[:, 0])
+                
                 box = np.roll(box, -box_min_x, axis=0)
                 box_top = [list(point) + [max_z_coordinate] for point in box]
                 box_btm = [list(point) + [min_z_coordinate] for point in box]
+                
                 box_top.append(list(np.mean(box_top, axis=0)))
                 box_btm.append(list(np.mean(box_btm, axis=0)))
+                
                 bounding_cubes.append(box_top + box_btm)
 
                 # Calculating rotation in world frame
