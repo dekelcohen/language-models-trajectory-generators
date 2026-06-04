@@ -3,6 +3,7 @@ import sys
 import torch
 import math
 import os
+import re
 import config
 import json
 import models
@@ -13,7 +14,7 @@ from common_utils import Trajectory
 from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC, WARNING
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, VISUALIZE_GRASP_POSE
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
 from helpers.image_utils import list_file_paths
 
 def create_trajectory_videos(logger):
@@ -83,6 +84,28 @@ class API:
         self.head_image_size = None
         self.wrist_image_size = None
         self.command = None
+
+    def _visualize_matched_bounding_boxes(self, bounding_cubes_world_coordinates, segmentation_texts):
+        """Visualize matched 3D bounding boxes when --vis-box is enabled."""
+        vis_box_regex = getattr(self.args, "vis_box", None)
+        if not vis_box_regex or len(bounding_cubes_world_coordinates) == 0:
+            return
+
+        vis_box_pat = re.compile(vis_box_regex)
+        matched_cubes = [
+            bounding_cubes_world_coordinates[i]
+            for i, txt in enumerate(segmentation_texts)
+            if vis_box_pat.search(txt or "")
+        ]
+        if not matched_cubes:
+            return
+
+        self.logger.info(
+            PROGRESS + f"--vis-box: Visualizing {len(matched_cubes)} bounding box(es) matching '{vis_box_regex}'..." + ENDC
+        )
+        self.main_connection.send([VISUALIZE_BOUNDING_BOX, matched_cubes])
+        [vis_msg] = self.main_connection.recv()
+        self.logger.info(vis_msg)
 
 
     def detect_object(self, segmentation_text):
@@ -216,6 +239,8 @@ class API:
         self.main_connection.send([ADD_BOUNDING_CUBES, bounding_cubes_world_coordinates])
         [env_connection_message] = self.main_connection.recv()
         self.logger.info(env_connection_message)
+
+        self._visualize_matched_bounding_boxes(bounding_cubes_world_coordinates, segmentation_texts)
 
         for i, bounding_cube_world_coordinates in enumerate(bounding_cubes_world_coordinates):
 
@@ -571,7 +596,6 @@ class API:
         """
         self.failed_task = True
         # Do not reset env or counters; retries will continue from current state
-
 
 
 

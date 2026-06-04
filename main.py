@@ -318,6 +318,7 @@ if __name__ == "__main__":
     parser.add_argument("--attempts", type=int, default=2, help="total number of task attempts (default: 2 = first attempt + 1 retry after VLM review). Values > 2 allow additional retries with VLM review between each.")
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
     parser.add_argument("--vis-grasp", action="store_true", help="visualize grasp pose candidates in the 3D sim environment (cylinder/sphere markers)")
+    parser.add_argument("--vis-box", type=str, default=None, help="Visualize 3D bounding box in sim for objects whose label matches this regex (e.g. 'handle|knob'). Uses cylinder markers visible in camera captures.")
     parser.add_argument("--save-grasp-inputs", action="store_true", help="save binary segmentation mask (masks[0]) as .npy and projection/view matrices as .npy under images_folder after each detect_object call")
     args = parser.parse_args()
 

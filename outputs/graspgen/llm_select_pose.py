@@ -193,7 +193,7 @@ print(f"Selected Y: {best_y:.3f}")
 print(f"Selected Z: {best_z:.3f}")
 print(f"Selected yaw: {best_yaw:.3f}")
 print(f"Selected grasp_pose_matrix: {best_pose_matrix}")
-print(f"cand_poses[0]: {poses[0]}")
+print(f"cand_poses[9]: {poses[9]}")
 
 grasp_pose = [
     best_x,

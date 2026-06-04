@@ -10,8 +10,9 @@ import config
 import math
 from robot import Robot
 from common_utils import Trajectory
+from providers.env_sim_util import _rotmat_to_quat_xyzw
 from config import OK, PROGRESS, FAIL, ENDC
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE, VISUALIZE_GRASP_POSE
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
 # --- Debug helpers ------------------------------------------------------
 def add_debug_sphere(pos_xyz, radius=0.015, color=(1, 0, 0, 1)):
     """
@@ -100,16 +101,62 @@ def add_debug_cylinder_between(p1, p2, radius=0.004, color=(1, 0, 0, 1)):
             pass
         return None
 
+def draw_bounding_box(cube_coords, line_radius=0.002, sphere_radius=0.004, color=(0, 1, 0, 1)):
+    """Draw a 3D bounding box using visual MultiBody cylinders/spheres so it renders in camera captures.
 
-def draw_grasp_pose(pose_4x4, axis_length=0.06, finger_length=0.04, finger_spread=0.02, cylinder_radius=0.003):
+    Args:
+        cube_coords: List of 9 coordinates.
+                     Indices 0-3 are the bottom face corners.
+                     Indices 5-8 are the top face corners.
+                     Index 4 is typically the center point.
+        line_radius: Radius of the cylinders drawing the edges.
+        sphere_radius: Radius of the spheres at the corners and center.
+        color: RGBA color of the bounding box (default green).
+
+    Returns:
+        list of body IDs (for optional removal later via p.removeBody).
+    """
+    body_ids = []
+    
+    # Box edges defined by pairs of indices
+    edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),  # Bottom face
+        (5, 6), (6, 7), (7, 8), (8, 5),  # Top face
+        (0, 5), (1, 6), (2, 7), (3, 8)   # Vertical edges connecting the faces
+    ]
+    
+    # Draw cylindrical edges
+    for i, j in edges:
+        if i < len(cube_coords) and j < len(cube_coords):
+            bid = add_debug_cylinder_between(cube_coords[i], cube_coords[j], radius=line_radius, color=color)
+            if bid is not None:
+                body_ids.append(bid)
+
+    # Draw spheres at the corners and the center point (index 4)
+    for i in range(min(9, len(cube_coords))):
+        # Optional: Make the center sphere slightly larger or a different color if needed
+        # current_color = (1, 0, 0, 1) if i == 4 else color 
+        bid = add_debug_sphere(cube_coords[i], radius=sphere_radius, color=color)
+        if bid is not None:
+            body_ids.append(bid)
+
+    return body_ids
+    
+def draw_grasp_pose(pose_4x4, axis_length=0.06, finger_length=0.04, finger_spread=0.04, cylinder_radius=0.003, tcp_depth=0.08):
     """Draw a gripper pose in 3D using visual MultiBody cylinders/spheres.
 
     Works in both p.GUI and p.DIRECT modes (unlike addUserDebugLine).
 
+    Grasp pose convention (e.g. GraspNet / AnyGrasp):
+      - Origin: gripper base frame (between finger pivot points).
+      - X-axis: finger closing/opening direction.
+      - Z-axis: approach direction (from base toward fingertips/object).
+      - TCP (contact point) is at origin + Z * tcp_depth.
+
     Draws:
-      - RGB coordinate axes (X=red, Y=green, Z=blue) at the grasp origin.
-      - A simplified gripper: two finger lines extending along the local Y-axis
-        from the grasp origin, offset along the approach (Z) direction.
+      - RGB coordinate axes (X=red, Y=green, Z=blue) at the TCP.
+      - A simplified gripper: two fingers spread along X, extending
+        backward (-Z) from the TCP toward the wrist.
 
     Args:
         pose_4x4: 4x4 homogeneous transformation matrix (numpy array).
@@ -117,6 +164,7 @@ def draw_grasp_pose(pose_4x4, axis_length=0.06, finger_length=0.04, finger_sprea
         finger_length: length of each finger line.
         finger_spread: half-distance between the two fingers (gripper opening).
         cylinder_radius: radius of the drawn cylinders.
+        tcp_depth: distance from pose origin to fingertip contact point along Z.
 
     Returns:
         list of body IDs (for optional removal later via p.removeBody).
@@ -127,19 +175,23 @@ def draw_grasp_pose(pose_4x4, axis_length=0.06, finger_length=0.04, finger_sprea
     y_axis = pose[:3, 1]
     z_axis = pose[:3, 2]  # approach direction
 
+    # TCP (contact point) is ahead of the frame origin along approach
+    tcp = origin + z_axis * tcp_depth
+
     body_ids = []
 
-    # Draw coordinate frame axes
-    body_ids.append(add_debug_cylinder_between(origin, origin + x_axis * axis_length, radius=cylinder_radius, color=(1, 0, 0, 1)))
-    body_ids.append(add_debug_cylinder_between(origin, origin + y_axis * axis_length, radius=cylinder_radius, color=(0, 1, 0, 1)))
-    body_ids.append(add_debug_cylinder_between(origin, origin + z_axis * axis_length, radius=cylinder_radius, color=(0, 0, 1, 1)))
+    # Draw coordinate frame axes at TCP
+    body_ids.append(add_debug_cylinder_between(tcp, tcp + x_axis * axis_length, radius=cylinder_radius, color=(1, 0, 0, 1)))
+    body_ids.append(add_debug_cylinder_between(tcp, tcp + y_axis * axis_length, radius=cylinder_radius, color=(0, 1, 0, 1)))
+    body_ids.append(add_debug_cylinder_between(tcp, tcp + z_axis * axis_length, radius=cylinder_radius, color=(0, 0, 1, 1)))
 
     # Draw simplified gripper fingers
-    finger_base = origin + z_axis * 0.01  # slight offset along approach
-    finger_left_base = finger_base + y_axis * finger_spread
-    finger_right_base = finger_base - y_axis * finger_spread
-    finger_left_tip = finger_left_base + z_axis * finger_length
-    finger_right_tip = finger_right_base + z_axis * finger_length
+    # X-axis = finger closing/opening direction; Z-axis = approach direction
+    # Fingertips at TCP; fingers extend backward (-Z, toward wrist)
+    finger_left_tip = tcp + x_axis * finger_spread
+    finger_right_tip = tcp - x_axis * finger_spread
+    finger_left_base = finger_left_tip - z_axis * finger_length
+    finger_right_base = finger_right_tip - z_axis * finger_length
 
     gripper_color = (1, 0.6, 0, 1)  # orange
     # Finger lines
@@ -147,13 +199,17 @@ def draw_grasp_pose(pose_4x4, axis_length=0.06, finger_length=0.04, finger_sprea
     body_ids.append(add_debug_cylinder_between(finger_right_base, finger_right_tip, radius=cylinder_radius, color=gripper_color))
     # Crossbar connecting finger bases
     body_ids.append(add_debug_cylinder_between(finger_left_base, finger_right_base, radius=cylinder_radius, color=gripper_color))
-    # Palm line (connecting origin to crossbar center)
-    body_ids.append(add_debug_cylinder_between(origin, finger_base, radius=cylinder_radius * 0.7, color=gripper_color))
+    # Palm line (connecting crossbar center further back toward wrist)
+    crossbar_center = (finger_left_base + finger_right_base) / 2
+    palm_end = crossbar_center - z_axis * 0.01
+    body_ids.append(add_debug_cylinder_between(crossbar_center, palm_end, radius=cylinder_radius * 0.7, color=gripper_color))
 
-    # Origin sphere
-    body_ids.append(add_debug_sphere(origin.tolist(), radius=cylinder_radius * 2, color=gripper_color))
+    # TCP sphere (grasp contact point)
+    body_ids.append(add_debug_sphere(tcp.tolist(), radius=cylinder_radius * 2, color=gripper_color))
 
     return [bid for bid in body_ids if bid is not None]
+
+
 
 
 # --- Trajectory visualization helpers ----------------------------------
@@ -811,6 +867,17 @@ def run_simulation_environment(args, env_connection, logger):
                 except Exception as e:
                     env_connection.send([FAIL + f"Failed to visualize grasp pose: {e}" + ENDC])
 
+            elif env_connection_received[0] == VISUALIZE_BOUNDING_BOX:
+                box_cubes = env_connection_received[1]
+                try:
+                    count = 0
+                    for cube_coords in box_cubes:
+                        draw_bounding_box(cube_coords)
+                        count += 1
+                    env_connection.send([OK + f"Visualized {count} bounding box(es) (--vis-box)." + ENDC])
+                except Exception as e:
+                    env_connection.send([FAIL + f"Failed to visualize bounding box: {e}" + ENDC])
+
         env.update()
 
 def get_grasp_pose_candidates(object_name):
@@ -861,19 +928,21 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
         env = Environment(_Args)
         env.load()
         
-        DRAW_GRASP_POST_MAT = False
+        DRAW_GRASP_POST_MAT = True
         if DRAW_GRASP_POST_MAT:
             grasp_pose =   np.array([
-                [ 0.854062,   -0.5120964,   0.09129835, -0.34211737],
-                [-0.49542382, -0.7473097,   0.44281337, -0.12207034],
-                [-0.15853497, -0.42342147, -0.89195347,  0.76260877],
+                [ 0.854062,   -0.5120964,   0.09129835, -0.34211737], #-0.34211737
+                [-0.49542382, -0.7473097,   0.44281337,  -0.12207034], #-0.12207034
+                [-0.15853497, -0.42342147, -0.89195347,  0.9260877], # 0.9260877
                 [ 0.0,         0.0,         0.0,         1.0]
             ])
+            
+            # pose[9] - mid lever form above (not sure exactly perpedicular but close)
             
             poses, scores = get_grasp_pose_candidates("door handle")
             
         
-            draw_grasp_pose(grasp_pose)
+            draw_grasp_pose(poses[47])
         GRASP_POSE = False 
         if GRASP_POSE:
             trajectory = [[-0.279, -0.126, 0.600],[-0.279, -0.126, 0.700],[-0.300, 0.100, 0.700],[-0.300, 0.100, 0.600]]
@@ -1048,8 +1117,6 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
 if __name__ == "__main__":
     # Entry point for quick, no-code door kinematics testing in GUI mode.
     run_sim_demo(disable_forces=False, connection_mode=p.GUI)
-
-
 
 
 
