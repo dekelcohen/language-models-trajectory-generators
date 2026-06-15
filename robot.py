@@ -77,6 +77,68 @@ class Robot:
             effort += self.get_joint_effort(gripper2_index, body_id=self.gripper_id)
             
         return effort
+    
+    def step_env_and_record(self, env, force_record=False):
+        """
+        steps (adv) the env and captures image - only if robot moved + 1 frame per settele (inertia). anyway no more that 5 fps.
+        Pros:
+        No wasted frames: If the robot is waiting or taking 100 idle steps to settle, it will not generate 5 identical frames. It will capture the initial move, the motion, and precisely 1 frame when motion stops.
+        VLM Friendly: Because redundant frames are filtered out by the distance thresholds (0.01 m, 0.05 rad), the VLM gets a highly compressed, meaningful storyboard of the action (well under 50 frames per trajectory).
+        Debug Friendly: Because it drops frames only when the robot isn't moving, the resulting video remains visually perfectly contiguous.
+        Captures the Gripper: Gripper action (OPEN_GRIPPER) now natively generates frames because grip_changed > 0.005 triggers a keyframe recording.
+        """
+        env.update()
+        
+        # Initialize tracking variables on first run
+        if not hasattr(self, 'sim_step_counter'):
+            self.sim_step_counter = 0
+            self.last_record_step = -9999
+            self.last_record_eef_pos = None
+            self.last_record_eef_ori = None
+            self.last_record_gripper_pos = None
+
+        self.sim_step_counter += 1
+
+        # Rate limiter: max 5 FPS (48 steps at 240Hz). Ignore if we are forcing a keyframe.
+        steps_per_frame = int(1.0 / (config.control_dt * 5.0))
+        if not force_record and (self.sim_step_counter - self.last_record_step) < steps_per_frame:
+            return
+
+        # Get current state
+        eef_pos, eef_ori_q = p.getLinkState(self.id, self.ee_index, computeForwardKinematics=True)[:2]
+        eef_ori_e = p.getEulerFromQuaternion(eef_ori_q)
+        
+        # Get gripper state
+        if self.robot == "sawyer":
+            gripper_pos = p.getJointState(self.gripper_id, self.gripper_motor)[0]
+        else: # franka
+            gripper_pos = p.getJointState(self.id, 9)[0]
+
+        # Check if we moved significantly
+        moved_significantly = False
+        if self.last_record_eef_pos is None:
+            moved_significantly = True
+        else:
+            dist_moved = np.linalg.norm(np.array(eef_pos) - np.array(self.last_record_eef_pos))
+            ori_changed = np.linalg.norm(np.array(eef_ori_e) - np.array(self.last_record_eef_ori))
+            grip_changed = abs(gripper_pos - self.last_record_gripper_pos)
+
+            # Thresholds: 1cm movement, ~3 degrees rotation, or small gripper movement
+            if dist_moved > 0.01 or ori_changed > 0.05 or grip_changed > 0.005:
+                moved_significantly = True
+
+        # Save frame if motion detected or if it's a forced keyframe (settled)
+        if force_record or moved_significantly:
+            self.get_camera_image("head", env, save_camera_image=True, rgb_image_path=config.rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
+            self.get_camera_image("wrist", env, save_camera_image=True, rgb_image_path=config.wrist_rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
+            
+            # Update memory
+            self.last_record_eef_pos = eef_pos
+            self.last_record_eef_ori = eef_ori_e
+            self.last_record_gripper_pos = gripper_pos
+            self.last_record_step = self.sim_step_counter
+            
+            self.trajectory_step += 1    
 		
     def move(self, env, ee_target_position, ee_target_orientation_e, gripper_open, is_trajectory, desc=None):
 
@@ -140,15 +202,16 @@ class Robot:
                 p.setJointMotorControl2(self.id, gripper1_index, p.POSITION_CONTROL, targetPosition=gripper_target_position, force=config.gripper_movement_force_franka)
                 p.setJointMotorControl2(self.id, gripper2_index, p.POSITION_CONTROL, targetPosition=gripper_target_position, force=config.gripper_movement_force_franka)
 
-            env.update()
+            # steps env and capture cameras images 
+            self.step_env_and_record(env, force_record=False)
+            
             # monitor torque of wrist joint motor (can replace with gripper1_index)
             if False: # not gripper_open and is_trajectory:
                 actual_wrist_motor_index = self.joint_indices[-1]
                 wrist_torque = self.get_joint_effort(actual_wrist_motor_index, body_id=self.id)
                 gripper_torque = self.get_gripper_effort(gripper1_index, gripper2_index)
                 self.logger.info(OK + f'wrist_torque: {wrist_torque} gripper_torque: {gripper_torque}' + ENDC)
-            self.get_camera_image("head", env, save_camera_image=is_trajectory, rgb_image_path=config.rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
-            self.get_camera_image("wrist", env, save_camera_image=is_trajectory, rgb_image_path=config.wrist_rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
+            
             if is_trajectory:
                 self.trajectory_step += 1
 
@@ -188,7 +251,8 @@ class Robot:
             else:
                 if time_step > 99:
                     break
-
+        # Guarantee a frame exactly at the end of the movement
+        self.step_env_and_record(env, force_record=True)
 
 
     def get_camera_image(self, camera, env, save_camera_image, rgb_image_path, depth_image_path):

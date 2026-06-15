@@ -628,8 +628,12 @@ class Environment:
         p.stepSimulation()
         time.sleep(config.control_dt)
     
-
-
+def step_env_and_record_loop(env, robot):
+    for _ in range(100):
+        robot.step_env_and_record(env, force_record=False)
+    # Force one final frame after the 100-step settling period
+    robot.step_env_and_record(env, force_record=True)    
+                
 def run_simulation_environment(args, env_connection, logger):
 
     # Environment set-up
@@ -649,7 +653,7 @@ def run_simulation_environment(args, env_connection, logger):
     env.simenv.configure_robot_pose()
     env.load()
 
-    robot = Robot(args, logger)
+    robot = Robot(args, logger)    
     # Hold ids for visual debug spheres of trajectory points between requests
     trajectory_debug_marker_steps = []
     permanent_marker_ids = []
@@ -798,8 +802,7 @@ def run_simulation_environment(args, env_connection, logger):
                 for i, point in enumerate(trajectory):
                     robot.move(env, point[:3], np.array(robot.ee_start_orientation_e) + np.array([0, 0, point[3]]), gripper_open=robot.gripper_open, is_trajectory=True, desc=desc if i == 0 else None)
 
-                for _ in range(100):
-                    env.update()
+                step_env_and_record_loop(env, robot)                
                 
                 env_connection.send([OK + "Finished executing generated trajectory!" + ENDC, robot.trajectory_step])
 
@@ -837,8 +840,7 @@ def run_simulation_environment(args, env_connection, logger):
                 robot.gripper_open = True
                 robot.trajectory_step = 1
 
-                for _ in range(100):
-                    env.update()
+                step_env_and_record_loop(env, robot)
 
                 env_connection_message = OK + "Finished resetting environment!" + ENDC
                 env_connection.send([env_connection_message])
