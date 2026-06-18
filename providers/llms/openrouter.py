@@ -2,7 +2,7 @@
 import os
 import requests
 from dotenv import load_dotenv
-from azure_openai import post_with_retries
+from providers.llms.azure_openai import post_with_retries
 
 load_dotenv()
 
@@ -65,7 +65,7 @@ def call_openrouter(messages, model, max_tokens=60000, temperature=0, reasoning_
 
 
 if __name__ == "__main__":
-    from azure_openai import encode_image
+    from providers.llms.azure_openai import encode_image
 
     MODEL = 'openai/gpt-5.5' # "google/gemini-2.5-flash"
 

@@ -133,14 +133,14 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         file = sys.stdout
     print(role + ":", file=file)
     print(new_prompt, file=file)
-    from azure_openai import append_to_messages
+    from providers.llms.azure_openai import append_to_messages
     messages_before = list(messages) if messages is not None else []
     messages = append_to_messages(new_prompt, image_paths, messages, role)
     # ----------------------------------------------------------------------
     # 1. Azure OpenAI mode: model name starts with "azure-"
     # ----------------------------------------------------------------------
     if model.startswith("azure-"):
-        from azure_openai import call_llm
+        from providers.llms.azure_openai import call_llm
         deployment = model[len("azure-"):]
         print("assistant:", file=file)
         new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
@@ -151,7 +151,7 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
     # 2. OpenRouter mode: model name starts with "or-"
     # ----------------------------------------------------------------------
     elif model.startswith("or-"):
-        from openrouter import call_openrouter
+        from providers.llms.openrouter import call_openrouter
         openrouter_model = model[len("or-"):]
         print("assistant:", file=file)
         new_output = call_openrouter(messages, model=openrouter_model, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
