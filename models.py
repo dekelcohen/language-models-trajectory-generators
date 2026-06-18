@@ -159,7 +159,18 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         if not new_output or len(new_output) < 5:
             print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     # ----------------------------------------------------------------------
-    # 3. OpenAI direct mode (client-based)
+    # 3. AWS Bedrock mode: model name starts with "aws-"
+    # ----------------------------------------------------------------------
+    elif model.startswith("aws-"):
+        from providers.llms.aws_bedrock import call_llm as call_bedrock
+        bedrock_model_id = model[len("aws-"):]
+        print("assistant:", file=file)
+        new_output = call_bedrock(messages, bedrock_model_id=bedrock_model_id, max_tokens=max_tokens, temperature=0, reasoning_effort=reasoning_effort)
+        print(new_output, file=file)
+        if not new_output or len(new_output) < 5:
+            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
+    # ----------------------------------------------------------------------
+    # 4. OpenAI direct mode (client-based)
     # ----------------------------------------------------------------------
     else:
         completion = client.chat.completions.create(
