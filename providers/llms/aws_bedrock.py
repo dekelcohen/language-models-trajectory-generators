@@ -114,7 +114,7 @@ def call_llm(messages, bedrock_model_id=None, max_tokens=60000, temperature=0, r
 
     Returns:
         str: The assistant response text.
-    """
+    """    
     if bedrock_model_id is None:
         bedrock_model_id = os.environ.get("AWS_BEDROCK_MODEL_ID")
     if bedrock_model_id is None:
@@ -143,11 +143,22 @@ def call_llm(messages, bedrock_model_id=None, max_tokens=60000, temperature=0, r
                 "content": _oai_content_to_bedrock(content),
             })
 
+    # Bedrock requires at least one user message; if only system messages were
+    # provided (e.g. first-turn system-prompt-only calls), promote the combined
+    # system text to a user message so the API call is valid.
+    if not anthropic_messages and system_parts:
+        anthropic_messages = [{"role": "user", "content": [{"type": "text", "text": "\n".join(system_parts)}]}]
+        system_parts = []
+
+    # opus and openai models reject the temperature parameter entirely
+    _temperature_unsupported = "opus" in bedrock_model_id or "openai" in bedrock_model_id
+
     native_request = {
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "messages": anthropic_messages,
     }
+    if not _temperature_unsupported:
+        native_request["temperature"] = temperature
     if "anthropic" in bedrock_model_id:
         native_request["anthropic_version"] = "bedrock-2023-05-31"
     if system_parts:
@@ -204,7 +215,7 @@ def call_llm(messages, bedrock_model_id=None, max_tokens=60000, temperature=0, r
 if __name__ == "__main__":
     from providers.llms.azure_openai import encode_image
 
-    MODEL = os.environ.get("AWS_BEDROCK_MODEL_ID")
+    MODEL = os.environ.get("AWS_BEDROCK_MODEL_ID", "eu.anthropic.claude-sonnet-4-6")
     if MODEL is None:
         raise ValueError("Set AWS_BEDROCK_MODEL_ID environment variable to run tests.")
 
