@@ -134,7 +134,7 @@ def post_with_retries(url, headers, payload, max_retries=5, timeout=(10,220)):
         except requests.exceptions.RequestException as e:
             is_last_attempt = attempt == max_retries - 1
 
-            print(f"\nAttempt {attempt + 1} failed:")
+            print(f"\nModel Request {attempt + 1} failed:")
 
             # Print response details if available
             if hasattr(e, "response") and e.response is not None:

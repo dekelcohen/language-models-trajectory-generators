@@ -192,7 +192,7 @@ def call_llm(messages, bedrock_model_id=None, max_tokens=60000, temperature=0, r
                 raise
             error_code = e.response["Error"]["Code"]
             is_last = attempt == max_retries - 1
-            print(f"\nAttempt {attempt + 1} failed ({error_code}): {e}")
+            print(f"\nModel Request {attempt + 1} failed ({error_code}): {e}")
             if error_code not in _RETRYABLE_ERROR_CODES or is_last:
                 raise
             sleep_time = 2 ** attempt
