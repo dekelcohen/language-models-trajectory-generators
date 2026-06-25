@@ -36,9 +36,13 @@ def execute_blocks_from_log(log_path, api, logger):
         logger.error(FAIL + f"Failed to read replay log file '{log_path}': {e}" + ENDC)
         return
 
+    # Only consider content after the first 'assistant:' occurrence
+    assistant_marker = content.find('assistant:')
+    content_after_assistant = content[assistant_marker:] if assistant_marker != -1 else ""
+
     # Extract all content between ```python and ```
     pattern = re.compile(r'```python(.*?)```', re.DOTALL)
-    raw_blocks = pattern.findall(content)
+    raw_blocks = pattern.findall(content_after_assistant)
 
     if not raw_blocks:
         logger.info(WARNING + "No python blocks found in the provided log file." + ENDC)
