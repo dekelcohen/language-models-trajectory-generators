@@ -11,6 +11,7 @@ from debug.dbg_utils import init_loguru_logger
 import functools
 import models
 import config
+from dotenv import load_dotenv
 from numpy import pi
 # LangSAM imported lazily only if selected as provider
 from multiprocessing import Process, Pipe
@@ -25,9 +26,11 @@ from prompts.print_output_prompt import PRINT_OUTPUT_PROMPT
 from prompts.task_failure_prompt import TASK_FAILURE_PROMPT
 from prompts.task_summary_prompt import TASK_SUMMARY_PROMPT
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
-from helpers.main_utils import get_exec_locals, execute_blocks_from_log
+from helpers.main_utils import get_exec_locals, execute_blocks_from_log, learn_from_past_trajs
 
 print = functools.partial(print, flush=True)
+
+load_dotenv()
 
 # --- Prompt helper ------------------------------------------------------
 def prepend_to_initial_command(command, args, logger):
@@ -299,7 +302,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
     parser.add_argument("--transport", choices=["auto", "pipe", "ws"], default="auto", help="connection transport override; auto: pipe for pybullet, ws for metaworld")
     parser.add_argument("--task", type=str, default="sawyer_door_v3", help="task/environment name (metaworld only)")
-    parser.add_argument("--seg-provider", choices=["langsam", "sam3", "moondream"], default="langsam", help="select segmentation provider (LangSAM, RoboFlow SAM3, or Moondream)")
+    parser.add_argument("--seg-provider", choices=["langsam", "sam3", "moondream"], default="moondream", help="select segmentation provider (LangSAM, RoboFlow SAM3, or Moondream)")
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
     parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
@@ -322,6 +325,8 @@ if __name__ == "__main__":
     parser.add_argument("--vis-box", type=str, default=None, help="Visualize 3D bounding box in sim for objects whose label matches this regex (e.g. 'handle|knob'). Uses cylinder markers visible in camera captures.")
     parser.add_argument("--save-grasp-inputs", action="store_true", help="save binary segmentation mask (masks[0]) as .npy and projection/view matrices as .npy under images_folder after each detect_object call")
     parser.add_argument("--replay-log", type=str, default=None, help="Path to a log file of conversation with ```python blocks to execute. LLM-less execution")
+    parser.add_argument("--replay-vlm-review", action="store_true", default=False, help="When replaying a log, also execute VLM-review code blocks between attempts (default: False, skip VLM review)")
+    parser.add_argument("--learn-from-trajs", type=str, default=None, help="Path to a text file of past trajectories to learn from. Generates an improved in-context example via LLM and exits.")
     
     args = parser.parse_args()
 
@@ -393,6 +398,11 @@ if __name__ == "__main__":
 
     if coords_section is None:
         coords_section = config.three_d_coordinates_prompt_section
+
+    # --learn-from-trajs: LLM-based in-context example learning; exits before agent flow
+    if args.learn_from_trajs:
+        learn_from_past_trajs(client, args, coords_section, logger)
+        sys.exit(0)
 
     # API set-up
     api = API(args, main_connection, logger, client, langsam_model, xmem_model, device)

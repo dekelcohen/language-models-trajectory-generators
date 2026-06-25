@@ -2,6 +2,7 @@ import traceback
 import math 
 import os
 import re
+import sys
 import tempfile
 import numpy as np
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
@@ -101,3 +102,48 @@ def execute_blocks_from_log(log_path, api, logger):
                 pass
             
     logger.info(OK + "Finished replaying log blocks!" + ENDC)
+
+
+def learn_from_past_trajs(client, args, coords_section, logger):
+    """Learn improved in-context examples from past trajectory logs via LLM.
+
+    Reads past trajectories from the file given in args.learn_from_trajs,
+    fills in the LEARN_IN_CONTEXT_PROMPT placeholders, optionally appends an
+    interactive user prompt, calls the LLM, and returns.  Caller should exit
+    after this function returns (no regular agent flow).
+    """
+    import models
+    from prompts.learn_in_context_examples_from_past_attempts import LEARN_IN_CONTEXT_PROMPT
+
+    # Read past trajectories file
+    try:
+        with open(args.learn_from_trajs, "r", encoding="utf-8") as f:
+            past_trajs = f.read()
+    except Exception as e:
+        logger.error(FAIL + f"Failed to read --learn-from-trajs file '{args.learn_from_trajs}': {e}" + ENDC)
+        return
+    
+    # Fill in prompt placeholders
+    prompt = LEARN_IN_CONTEXT_PROMPT \
+        .replace("[INSERT PAST TRAJS]", past_trajs) \
+        .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)        
+
+    # Optional additional user instructions appended interactively
+    extra = input("Additional instructions (press Enter to skip): ").strip()
+    if extra:
+        prompt = prompt + "\n" + extra
+
+    # Call LLM
+    messages = []
+    logger.info(PROGRESS + "Calling LLM to learn in-context examples from past trajectories..." + ENDC)
+    messages = models.get_chatgpt_output(
+        client, args.language_model, prompt, messages,
+        role="user",
+        max_tokens=args.max_tokens,
+        reasoning_effort=args.reasoning_effort,
+    )
+    logger.info(OK + "Finished learning from past trajectories!" + ENDC)
+    # Print the last assistant response
+    last = next((m["content"] for m in reversed(messages) if m.get("role") == "assistant"), None)
+    if last:
+        print(last)

@@ -1,0 +1,251 @@
+python main.py --task door -lm azure-gpt-5 -r franka --learn-from-trajs "D:\NLP\Robotics\VLM_Robotics\language-models-trajectory-generators\outputs\videos\gpt-5\open_door\self_feedback_success_18_06\vlm_traj_18_06_feedback_fail_succeeds.log"
+
+Assistant Response
+- - - - - - - - - -
+
+25/06 17:03 | INFO     | Finished learning from past trajectories!
+Extracted user command (task description):
+“Open the door by operating its lever: 1) compute the mid-lever contact pose to press down and then pull, 2) approach safely from a high hover, 3) rotate the end-effector so the fingers themselves are parallel to the lever’s long axis (use the handle’s angle_long as rotation), 4) apply a small short-axis offset toward the door so one jaw slides into the lever–door gap on descent, 5) descend, grasp, apply a small downward press to unlatch, then pull along the hinge arc to open the door.”
+
+Generalized in-context example (reasoning + code; parameterized with object-relative ratios, no absolute magic numbers)
+
+Assistant (Reasoning and Plan):
+- Target part: midsection of the door handle lever.
+- Orientation: rotation = handle angle_long so the fingers are parallel to the lever’s long axis as requested.
+- Safe approach: perform lateral alignment only at hover height, then descend vertically.
+- Insertion strategy: shift along the lever’s short-axis toward the door plate so one jaw drops into the lever–door gap during descent. Determine the sign via dot product with the vector from handle to door plate.
+- Unlatch press: a small downward press scaled to the hinge radius (door pull radius) to avoid scraping, rather than a fixed value.
+- Pull to open: follow an XY arc centered at the hinge. Use multiple segments (bounded angular step) and update gripper rotation adaptively with the door swing so the closing axis remains aligned with the lever’s long axis.
+- Clearances and step heights: computed from lever height and hinge radius, rather than fixed distances.
+
+Key parameterization (all are object-relative):
+- offset_short = 0.75 × lever_short_axis_length
+- long_axis_micro_nudge = 0.07 × lever_long_axis_length
+- hover_clearance = max(5 × lever_height, 0.20 × hinge_radius)
+- pre_contact_clearance = max(3 × lever_height, 0.03 × hinge_radius)
+- press_depth = clamp(0.10 × hinge_radius, lower=0.06 × hinge_radius, upper=0.15 × hinge_radius)
+- pull_clearance_lift = max(2 × lever_height, 0.08 × hinge_radius)
+- total_arc = 0.70 × pi (≈ 126°) [tunable]
+- max_segment_angle = 0.15 rad (≈ 8.6°), segments = ceil(total_arc / max_segment_angle)
+- press_segments = ceil(0.20 × segments)  (press maintained for first 20% of the arc)
+- outward_clearance_nudge = 0.20 × offset_short along short-axis away from door
+
+```python #
+# Generalized, parameterized door-opening example (no absolute magic numbers).
+# Uses object-relative scales and adaptive arc pull around the hinge.
+
+import math
+
+# 1) Perception: obtain door, hinge, and handle/lever geometry and orientation
+detect_object("door")
+detect_object("door plate")
+detect_object("door hinge")
+detect_object("door handle lever")
+
+# Replace the following with values parsed from the printed perception results
+# (These variable names are filled from the detect_object outputs by the agent runtime.)
+door_pos = [door_x, door_y, door_z]
+door_plate_pos = [plate_x, plate_y, plate_z]
+hinge_pos = [hinge_x, hinge_y, hinge_z]
+
+lever_pos = [lever_x, lever_y, lever_z]
+lever_dims = {
+    "long": lever_long_len,    # along lever bar
+    "short": lever_short_len,  # lever thickness (normal to long axis, in-plane)
+    "height": lever_height     # vertical thickness
+}
+angle_long = lever_angle_long  # orientation along long axis (fingers parallel to lever long axis)
+angle_short = lever_angle_short
+
+# 2) Derived geometry and parameters (object-relative, no fixed magic numbers)
+hx, hy, hz = lever_pos
+hinge_radius = math.hypot(hx - hinge_pos[0], hy - hinge_pos[1])
+
+# Parameterization ratios
+offset_short = 0.75 * lever_dims["short"]
+long_axis_micro_nudge = 0.07 * lever_dims["long"]
+
+hover_clearance = max(5.0 * lever_dims["height"], 0.20 * hinge_radius)
+pre_contact_clearance = max(3.0 * lever_dims["height"], 0.03 * hinge_radius)
+
+press_depth = max(0.06 * hinge_radius, min(0.10 * hinge_radius, 0.15 * hinge_radius))
+pull_clearance_lift = max(2.0 * lever_dims["height"], 0.08 * hinge_radius)
+
+total_arc = 0.70 * math.pi
+max_segment_angle = 0.15
+arc_segments = max(6, int(math.ceil(total_arc / max_segment_angle)))
+press_segments = max(1, int(math.ceil(0.20 * arc_segments)))
+
+# Short- and long-axis unit vectors in XY
+s_uv = [math.cos(angle_short), math.sin(angle_short)]
+l_uv = [math.cos(angle_long),  math.sin(angle_long)]
+
+# Offset sign: toward door plate
+to_plate_vec = [door_plate_pos[0] - hx, door_plate_pos[1] - hy]
+sign_dir = 1.0 if (s_uv[0]*to_plate_vec[0] + s_uv[1]*to_plate_vec[1]) >= 0.0 else -1.0
+offset_xy = [hx + sign_dir * offset_short * s_uv[0], hy + sign_dir * offset_short * s_uv[1]]
+
+# Micro long-axis nudge at hover for centering
+offset_nudged_xy = [
+    offset_xy[0] + long_axis_micro_nudge * l_uv[0],
+    offset_xy[1] + long_axis_micro_nudge * l_uv[1]
+]
+
+# Outward clearance nudge, away from door plate, along short-axis
+outward_clearance_nudge = 0.20 * offset_short
+outward_xy = [
+    -sign_dir * outward_clearance_nudge * s_uv[0],
+    -sign_dir * outward_clearance_nudge * s_uv[1]
+]
+
+# Heights
+hover_z = hz + hover_clearance
+z_pre_contact = hz + pre_contact_clearance
+z_grasp = hz
+z_press = z_grasp - press_depth
+z_pull = z_grasp + pull_clearance_lift
+
+# Arc targets around hinge from start XY (offset_nudged_xy)
+def compute_arc_targets(center_xy, start_xy, total_delta_angle, segments):
+    cx, cy = center_xy
+    sx, sy = start_xy
+    rx, ry = sx - cx, sy - cy
+    r = math.hypot(rx, ry)
+    phi0 = math.atan2(ry, rx)
+    dphi = total_delta_angle / float(segments)
+    targets = []
+    for i in range(1, segments + 1):
+        phi_i = phi0 + i * dphi
+        x_i = cx + r * math.cos(phi_i)
+        y_i = cy + r * math.sin(phi_i)
+        targets.append([x_i, y_i, phi_i])
+    return targets, phi0, r, dphi
+
+arc_targets, phi0, arc_r, dphi = compute_arc_targets(
+    center_xy=[hinge_pos[0], hinge_pos[1]],
+    start_xy=offset_nudged_xy,
+    total_delta_angle=total_arc,
+    segments=arc_segments
+)
+
+# Print derived scalars for traceability (3 decimals)
+print(f"hinge_radius: {hinge_radius:.3f}")
+print(f"hover_z: {hover_z:.3f}  z_pre_contact: {z_pre_contact:.3f}  z_grasp: {z_grasp:.3f}")
+print(f"z_press: {z_press:.3f}  z_pull: {z_pull:.3f}")
+print(f"offset_short: {offset_short:.3f}  long_axis_micro_nudge: {long_axis_micro_nudge:.3f}")
+print(f"outward_nudge: {outward_clearance_nudge:.3f}")
+print(f"total_arc: {total_arc:.3f}  arc_segments: {arc_segments:d}  dphi: {dphi:.3f}  press_segments: {press_segments:d}")
+
+# 3) Motion execution (phase-by-phase)
+def exec_step(desc, start_pose, end_pose, num_points=8):
+    traj = generate_linear_trajectory(desc=desc, start_pose=start_pose, end_pose=end_pose, num_points=num_points)
+    execute_trajectory(traj)
+    return end_pose
+
+# Get current EE pose from environment
+current_pose = [ee_x, ee_y, ee_z, ee_theta]
+
+# Orientation to use (requested): angle_long
+grip_theta = angle_long
+
+# Ensure gripper is open
+open_gripper()
+
+# Step 1: High hover above the lever center
+p1 = exec_step(
+    "Hover above lever center (safe height)",
+    current_pose,
+    [hx, hy, hover_z, grip_theta],
+    num_points=8
+)
+
+# Step 2: Lateral alignment to inboard short-axis offset at hover height
+p2 = exec_step(
+    "Lateral align to inboard short-axis offset at hover",
+    p1,
+    [offset_xy[0], offset_xy[1], hover_z, grip_theta],
+    num_points=6
+)
+
+# Step 3: Micro long-axis nudge at hover height for centering
+p3 = exec_step(
+    "Micro long-axis nudge at hover to refine centering",
+    p2,
+    [offset_nudged_xy[0], offset_nudged_xy[1], hover_z, grip_theta],
+    num_points=5
+)
+
+# Step 4: Descend to pre-contact height
+p4 = exec_step(
+    "Descend to pre-contact above lever",
+    p3,
+    [offset_nudged_xy[0], offset_nudged_xy[1], z_pre_contact, grip_theta],
+    num_points=6
+)
+
+# Step 5: Descend to grasp height and close
+p5 = exec_step(
+    "Descend to grasp height",
+    p4,
+    [offset_nudged_xy[0], offset_nudged_xy[1], z_grasp, grip_theta],
+    num_points=5
+)
+close_gripper()
+
+# Step 6: Small downward press to unlatch (scaled to hinge radius)
+p6 = exec_step(
+    "Small downward press to unlatch",
+    p5,
+    [offset_nudged_xy[0], offset_nudged_xy[1], z_press, grip_theta],
+    num_points=5
+)
+
+# Step 7+: Arc pull around hinge
+curr = p6
+# First fraction of arc at press height
+for i in range(press_segments):
+    xi, yi, phii = arc_targets[i]
+    rot_i = angle_long + (phii - phi0)  # adaptive rotation with door swing
+    curr = exec_step(
+        f"Arc pull segment {i+1} (maintain press)",
+        curr,
+        [xi, yi, z_press, rot_i],
+        num_points=6
+    )
+
+# Raise to pull clearance at current XY, then apply tiny outward nudge
+curr = exec_step(
+    "Relieve press to pull clearance height",
+    curr,
+    [curr[0], curr[1], z_pull, curr[3]],
+    num_points=5
+)
+curr = exec_step(
+    "Outward short-axis clearance nudge",
+    curr,
+    [curr[0] + outward_xy[0], curr[1] + outward_xy[1], z_pull, curr[3]],
+    num_points=5
+)
+
+# Remaining arc segments at clearance height
+for i in range(press_segments, arc_segments):
+    xi, yi, phii = arc_targets[i]
+    rot_i = angle_long + (phii - phi0)
+    curr = exec_step(
+        f"Arc pull segment {i+1}",
+        curr,
+        [xi, yi, z_pull, rot_i],
+        num_points=6
+    )
+
+# Retreat upward and release
+curr = exec_step(
+    "Retreat to safe hover at final XY",
+    curr,
+    [curr[0], curr[1], hover_z, curr[3]],
+    num_points=6
+)
+
+open_gripper()
+task_completed()
+```

@@ -499,9 +499,11 @@ class API:
         create_trajectory_videos(self.logger)
         
         self.attempt_number += 1
-        max_attempts = getattr(self.args, 'attempts', 2)
+        max_attempts = self.args.attempts
+        is_replay = bool(self.args.replay_log)
         # On the final attempt, skip review and accept the result
-        if self.attempt_number >= max_attempts:
+        # (in replay mode, ignore max_attempts so all blocks execute)
+        if not is_replay and self.attempt_number >= max_attempts:
             self.completed_task = True
             self.logger.info(PROGRESS + f"task_completed final attempt {self.attempt_number}/{max_attempts} -- accepting result" + ENDC)
             return
@@ -509,6 +511,12 @@ class API:
         self.main_connection.send([TASK_COMPLETED])
         [env_connection_message] = self.main_connection.recv()
         self.logger.info(env_connection_message)
+
+        # Skip review entirely when replaying without --replay-vlm-review
+        if is_replay and not self.args.replay_vlm_review:
+            self.logger.info(PROGRESS + f"Replay mode: skipping VLM review (attempt {self.attempt_number})" + ENDC)
+            self.failed_task = True
+            return
 
         # Dispatch review provider
         if self.args.review_provider == "xmem":
