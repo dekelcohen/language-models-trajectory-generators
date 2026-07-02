@@ -1,0 +1,626 @@
+02/07 14:50 | INFO     | [97mArgs: {'language_model': 'azure-gpt-5', 'lm_images': True, 'max_tokens': 60000, 'reasoning_effort': None, 'robot': 'franka', 'mode': 'default', 'sim': 'pybullet', 'transport': 'auto', 'task': 'door', 'seg_provider': 'moondream', 'depth_format': 'norm_1m', 'timeout': 15.0, 'delete_images': True, 'review_provider': 'vlm', 'ovr_bbox': '177, 71, 186, 75', 'ovr_obj': 'handle|knob|lever', 'viz_point': None, 'prepend_prompt': None, 'attempts': 9, 'vis_traj': False, 'vis_grasp': False, 'vis_box': None, 'save_grasp_inputs': False, 'replay_log': None, 'replay_vlm_review': False, 'learn_from_trajs': None}[0m
+
+02/07 14:50 | INFO     | CUDA not available. using CPU for local models - if any
+
+02/07 14:50 | INFO     | [92mFinished setting up environment! sim=pybullet conn=p.DIRECT head_debug_view=False dbg_cam_available=True dbg_tuple_len=12 dbg(yaw=0.0, pitch=0.0, dist=0.0, target=[0.0, 0.0, 0.0]) cfg(yaw=190.0, pitch=-40.0, dist=1.0, target=[0.0, 0.64, 0.7]) head_img(size=[256, 256, 3], mean=204.94364420572916, var=1978.735776661171) [0m
+
+02/07 14:50 | INFO     | [97mEnv state: {"door_id": 1, "door_hinge_index": 1, "latch_index": 2, "door_handle_latch": 2, "door_handle_pos": [-0.07745519744833454, -0.00880230021590278, 0.672376], "latch_pos": [-0.07745519744833454, -0.00880230021590278, 0.672376], "hinge_pos": [-0.21654298331956742, -0.14765775679373436, 0.697376]}[0m
+
+02/07 14:50 | INFO     | Enter a command: 
+
+02/07 14:50 | INFO     | [97mSTARTING TASK...[0m
+
+02/07 14:50 | INFO     | [97mEnv state: {"door_id": 1, "door_hinge_index": 1, "latch_index": 2, "door_handle_latch": 2, "door_handle_pos": [-0.07745519744833454, -0.00880230021590278, 0.672376], "latch_pos": [-0.07745519744833454, -0.00880230021590278, 0.672376], "hinge_pos": [-0.21654298331956742, -0.14765775679373436, 0.697376]}[0m
+
+02/07 14:50 | INFO     | [97mGenerating ChatGPT output...[0m
+
+02/07 14:50 | INFO     | system:
+
+02/07 14:50 | INFO     | 
+You are a sentient AI that can control a robot arm by generating Python code which outputs a list of trajectory points for the robot arm end-effector to follow to complete a given user command.
+Each element in the trajectory list is an end-effector pose, and should be of length 4, comprising a 3D position and a rotation value.
+
+AVAILABLE FUNCTIONS:
+You must remember that this conversation is a monologue, and that you are in control. I am not able to assist you with any questions, and you must output the final code yourself by making use of the available information, common sense, and general knowledge.
+You are, however, able to call any of the following Python functions, if required, as often as you want:
+1. detect_object(object_or_object_part: str) -> None: This function will not return anything, but only print the position, orientation, and dimensions of any object or object part in the environment. This information will be printed for as many instances of the queried object or object part in the environment. If there are multiple objects or object parts to detect, call one function for each object or object part, all before executing any trajectories. The unit is in metres.
+1b. get_grasp_poses(object_name: str) -> (poses, scores): Returns pre-computed grasp pose candidates as (N,4,4) homogeneous matrices and (N,) quality scores (higher=better), sorted by descending score. Also prints the top-5 candidates summary.
+Each pose is a 4x4 matrix: [[R_xx,R_yx,R_zx,T_x],[R_xy,R_yy,R_zy,T_y],[R_xz,R_yz,R_zz,T_z],[0,0,0,1]].
+Key indices: pose[2,3]=Z-height of gripper; pose[2,2]=alignment of gripper approach axis with world Z (negative means pointing down, -1.0=perfectly downward).
+To rank for top-down grasps above an object: select poses where pose[2,2] < -0.8 (close to  -1.0 - perfectly straight down) (gripper aimed downwards) and pose[2,3] > object_z (above target).
+1c. visualize_grasp_pose(poses) -> None: Draws the given grasp pose(s) in the 3D simulation (RGB axes + orange gripper fingers). Pass a single (4,4) matrix or an (N,4,4) array.
+
+2. open_gripper() -> None: This function will open the gripper on the robot arm, and will also not return anything.
+3. close_gripper() -> None: This function will close the gripper on the robot arm, and will also not return anything.
+4. task_completed() -> None: Call this function only when the task has been completed. This function will also not return anything.
+5. generate_linear_trajectory(desc: str, start_pose: list, end_pose: list, num_points: int = 20) -> Trajectory
+   class Trajectory:
+     self.points # a straight-line end-effector trajectory between two 4D poses [x,y,z,theta]
+     self.desc # short sentence to describe the motion and its end_pose
+   This helper is provided by the environment and already logs motion details. do not call logger for trajectory/motion. 
+6. execute_trajectory(trajectory: Trajectory) -> None: This function will execute the trajectory on the robot arm end-effector, and will also not return anything.
+ENVIRONMENT SET-UP:
+The 3D coordinate system of the environment is as follows:
+  1. The x-axis is in the horizontal direction, increasing to the left.
+  2. The y-axis is in the depth direction, decreasing away from you.
+  3. The z-axis is in the vertical direction, increasing upwards.
+
+The robot arm end-effector is currently positioned at [-0.3887993829569245, 0.6538050429520935, 0.9597697721155961], with the rotation value at 0, and the gripper open.
+The robot arm is in a top-down set-up, with the end-effector facing down onto a floor. The end-effector is therefore able to rotate about the z-axis, from -pi to pi radians.
+The end-effector gripper has two fingers, and they are currently parallel to the x-axis.
+The gripper can only grasp objects along sides which are shorter than 0.08.
+Negative rotation values represent clockwise rotation, and positive rotation values represent anticlockwise rotation. The rotation values should be in radians.
+
+GRIPPER ORIENTATION DEFINITION:
+- The rotation value specifies the direction of the gripper's CLOSING MOTION (i.e., the direction along which the fingers move when closing).
+- The gripper fingers themselves are perpendicular to this direction.
+- Therefore, to grasp an object along a given side, the rotation must be aligned with that side.
+
+Example:
+- To grasp the shorter side of an object, set rotation = angle_short.
+- To grasp the longer side, set rotation = angle_long.
+
+COLLISION AVOIDANCE:
+If the task requires interaction with multiple objects:
+1. Make sure to consider the object widths, lengths, and heights so that an object does not collide with another object or with the floor, unless necessary.
+2. It may help to generate additional trajectories and add specific waypoints (calculated from the given object information) to clear objects and the floor and avoid collisions, if necessary.
+
+VELOCITY CONTROL:
+1. The default speed of the robot arm end-effector is 20 points per trajectory. If the total distance covered is small, keep the number of points low, as the task in sim-env has max-number-of-steps (~500-700) and each point is translated to several steps.
+2. If you need to make the end-effector follow a particular trajectory more quickly, then generate fewer points for the trajectory, and vice versa.
+
+CODE GENERATION:
+When generating the code for the trajectory, do the following:
+1. Describe briefly the shape of the motion trajectory required to complete the task.
+2. The trajectory could be broken down into multiple steps. In that case, each trajectory step (at default speed) should contain at least 5 points. Define general functions which can be reused for the different trajectory steps whenever possible, but make sure to define new functions whenever a new motion is required. Output a step-by-step reasoning before generating the code.
+3. If the trajectory is broken down into multiple steps, make sure to chain them such that the start point of trajectory_2 is the same as the end point of trajectory_1 and so on, to ensure a smooth overall trajectory. Call the execute_trajectory function after each trajectory step.
+3b. For contact-rich manipulation tasks (for example handles, drawers, doors, switches, or articulated objects), prefer decomposing the motion into separate phases: high hover approach, lateral alignment at safe height, vertical descent, contact/grasp, articulation motion, and retreat. Avoid combining lateral insertion and vertical contact motions into a single diagonal approach whenever possible.
+4. When defining the functions, specify the required parameters, and document them clearly in the code. Make sure to include the orientation parameter in both definition and calls (use). make sure all dimensions of caller arguments match the function definition and body
+5. If you want to print the calculated value of a variable to use later, make sure to use the print function to three decimal places, instead of simply writing the variable name. Do not print any of the trajectory variables, since the output will be too long.
+6. Mark any code clearly with the ```python #and ``` tags.
+7. Use the provided generate_linear_trajectory helper; do not redefine it. Use logger.info(PROGRESS + f"..." + ENDC) for concise status logs instead of print for routine status.
+7. No need to import any of the above AVAILABLE FUNCTIONS. these are already injected into the python interpreter context
+
+INITIAL PLANNING 1:
+If the task requires interaction with an object part (as opposed to the object as a whole), describe which part of the object would be most suitable for the gripper to interact with.
+Then, detect the necessary objects in the environment. Stop generation after this step to wait until you obtain the printed outputs from the detect_object function calls.
+INITIAL PLANNING 2:
+Then, output Python code to decide which object to interact with, if there are multiple instances of the same object.
+Then, describe how best to approach the object (for example, approaching the midpoint of the object, or one of its edges, etc.), depending on the nature of the task, or the object dimensions, etc.
+
+For thin handles or narrow gaps, prefer approaching above the object center first, then performing small lateral alignment motions at hover height before descending vertically. Avoid inferring insertion-side signs from ambiguous orientation vectors when a stable workspace-relative direction or fixed offset convention is sufficient.
+
+Then, output a detailed step-by-step plan for the trajectory, including when to lower the gripper to make contact with the object, if necessary, rotation and position of the gripper, closing the gripper.
+Tasks:
+  pickup: after closing the gripper --> must lift the object up some distance to be considered a successful grasp 
+    ) default - 50cm above the object's top surface. Smaller lifts are failures. 
+    ) Special task requirements or collisions may dictate a different lift distance
+  
+
+The user command is "open the door: 1) Calc the pos to push down and pull level - in the middle of the door handle lever. 2) safely approach from high above. 3) Rotate the end-effector so the fingers themselves are parallel to the lever's long axis (set rotation = handle angle_long). 4) Calculate a small horizontal offset along the lever's short-axis vector toward the door, so that when the gripper moves down, 1 jaw slides into the gap between the lever and the door itself. 5) Descend, close to grasp the lever thickness, apply a small downward pressure to unlatch, and pull a large dist using perpendicular vector math to fully open the door.".
+
+
+Here is an in context example of multiple LLM responses for each step
+--------------------------------------------------------------------------
+The user command is: Pick up the blue can
+Desc: It is a blue near-cylindrical object
+ 
+Preception module outputs:
+
+Predicting 1 masks
+Predicted 1 masks
+
+Object detected: blue can
+
+Position of blue can: [pos_x, pos_y, pos_z]
+
+Dimensions:
+- Width: dim_width
+- Length: dim_length
+- Height: dim_height
+
+Orientation:
+- Orientation along shorter side (length): angle_short
+- Orientation along longer side (width): angle_long
+Assistant (Reasoning and Plan):
+
+Approach decision and plan:
+
+Only one blue can is detected, so we will interact with that instance.
+
+Best approach: move the end-effector directly above the can’s center, maintain a safe hover height above the top surface, then descend vertically to the mid-height of the can body to grasp the side walls.
+
+The gripper orientation is aligned with the can’s shorter side orientation (angle_short). For a near-cylindrical object this alignment is not strictly required, but it provides consistency.
+
+Collision avoidance: perform all XY motion above the object; descend strictly along the Z-axis.
+
+Grasping strategy: close the gripper at mid-height, then lift vertically to confirm a stable grasp.
+
+Step-by-Step Trajectory Execution
+Step 1: Move to a safe hover pose above the can
+```python
+
+# Perception-derived variables
+can_position = [pos_x, pos_y, pos_z]
+can_height = dim_height
+grip_orientation = angle_short
+
+# Derived heights
+top_z = pos_z + can_height / 2
+hover_clearance = clearance_hover
+pre_grasp_z = top_z + hover_clearance
+lift_z = top_z + 50 cm up (or according to task reqs and collisions)
+
+# Current robot state
+current_pose = [ee_x, ee_y, ee_z, ee_theta]
+
+# Target hover pose
+hover_pose = [pos_x, pos_y, pre_grasp_z, grip_orientation]
+
+trajectory_1 = generate_linear_trajectory("hover to approach target", current_pose, hover_pose)
+execute_trajectory(trajectory_1)
+Step 2: Open the gripper
+```python
+open_gripper()
+```
+Step 3: Descend to just above the top surface
+```python
+z_above_top = top_z + clearance_top
+
+approach_pose = [pos_x, pos_y, z_above_top, grip_orientation]
+
+trajectory_2 = generate_linear_trajectory("descend to approach height", hover_pose, approach_pose)
+execute_trajectory(trajectory_2)
+```
+Step 4: Descend to pre-close height near grasp level
+```python
+z_grasp = pos_z
+z_preclose = z_grasp + clearance_preclose
+
+pre_close_pose = [pos_x, pos_y, z_preclose, grip_orientation]
+
+trajectory_3 = generate_linear_trajectory("descend to pre-close height", approach_pose, pre_close_pose)
+execute_trajectory(trajectory_3)
+```
+Step 5: Descend to grasp height
+```python
+grasp_pose = [pos_x, pos_y, z_grasp, grip_orientation]
+
+trajectory_4 = generate_linear_trajectory("descend to grasp height", pre_close_pose, grasp_pose)
+execute_trajectory(trajectory_4)
+```
+Step 6: Close the gripper
+```python
+close_gripper()
+```
+Step 7: Lift the object to a safe height
+```python
+
+lift_pose = [pos_x, pos_y, lift_z, grip_orientation]
+
+trajectory_5 = generate_linear_trajectory("lift after grasp", grasp_pose, lift_pose)
+execute_trajectory(trajectory_5)
+```
+-------------------- End of Sample -----------------
+Instructions:
+Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
+
+
+
+Instructions:
+Finally, perform each of these steps one by one. Name each trajectory variable with the trajectory number.
+
+
+
+02/07 14:50 | INFO     | 
+
+02/07 14:50 | INFO     | assistant:
+
+02/07 14:51 | INFO     | Assistant (Reasoning and Plan):
+- Target interaction part: the middle of the door handle’s lever. This provides maximum clearance from the rosette/shaft, room for one jaw to slide between lever and door face, and a stable line of action to push down, unlatch, and then pull.
+- I will now query the scene for the door and its handle/lever so we can compute approach, orientation (handle angle_long/short), safe offsets toward the door face, and a pull vector relative to the hinge.
+
+I will stop after issuing detection calls to read their printed outputs.
+
+```python
+# Detect relevant objects and parts for the door-opening task
+detect_object("door")
+detect_object("door handle")
+detect_object("door handle lever")
+
+02/07 14:51 | INFO     | ```
+
+02/07 14:51 | INFO     | [92mFinished generating ChatGPT output![0m
+
+02/07 14:51 | INFO     | [97mCapturing head and wrist camera images...[0m
+
+02/07 14:51 | INFO     | [92mFinished capturing head camera image![0m
+
+02/07 14:51 | INFO     | [97mSegmenting head camera image...[0m
+
+02/07 14:51 | INFO     | [93mUsing --ovr-bbox manual override instead of segmentation results: x1=177 y1=71 x2=186 y2=75[0m
+
+02/07 14:51 | INFO     | [92mFinished segmenting head camera image![0m
+
+02/07 14:51 | INFO     | [92mSaved segmentation overlay to ./images\seg_overlay_moondream_0.png[0m
+
+02/07 14:51 | INFO     | [97m*** Before bounding_cubes_world_coordinates len(masks)=1[0m
+
+02/07 14:51 | INFO     | [97m-- Enter get_bounding_cube_from_point_cloud(...)[0m
+
+02/07 14:51 | INFO     | [97mAdding bounding cubes to the environment...[0m
+
+02/07 14:51 | INFO     | [92mFinished adding bounding cubes to the environment![0m
+
+02/07 14:51 | INFO     | [97mProjected 2D pixel of door Position: [131, 75][0m
+
+02/07 14:51 | INFO     | [97mAdding bounding cubes to the environment...[0m
+
+02/07 14:51 | INFO     | [97mCapturing head and wrist camera images...[0m
+
+02/07 14:51 | INFO     | [92mFinished capturing head camera image![0m
+
+02/07 14:51 | INFO     | [97mSegmenting head camera image...[0m
+
+02/07 14:51 | INFO     | [93mUsing --ovr-bbox manual override instead of segmentation results: x1=177 y1=71 x2=186 y2=75[0m
+
+02/07 14:51 | INFO     | [92mFinished segmenting head camera image![0m
+
+02/07 14:51 | INFO     | [92mSaved segmentation overlay to ./images\seg_overlay_moondream_1.png[0m
+
+02/07 14:51 | INFO     | [97m*** Before bounding_cubes_world_coordinates len(masks)=1[0m
+
+02/07 14:51 | INFO     | [97m-- Enter get_bounding_cube_from_point_cloud(...)[0m
+
+02/07 14:51 | INFO     | [97mAdding bounding cubes to the environment...[0m
+
+02/07 14:51 | INFO     | [92mFinished adding bounding cubes to the environment![0m
+
+02/07 14:51 | INFO     | [97mProjected 2D pixel of door handle Position: [181, 79][0m
+
+02/07 14:51 | INFO     | [97mAdding bounding cubes to the environment...[0m
+
+02/07 14:51 | INFO     | [97mCapturing head and wrist camera images...[0m
+
+02/07 14:51 | INFO     | [92mFinished capturing head camera image![0m
+
+02/07 14:51 | INFO     | [97mSegmenting head camera image...[0m
+
+02/07 14:51 | INFO     | [93mUsing --ovr-bbox manual override instead of segmentation results: x1=177 y1=71 x2=186 y2=75[0m
+
+02/07 14:51 | INFO     | [92mFinished segmenting head camera image![0m
+
+02/07 14:51 | INFO     | [92mSaved segmentation overlay to ./images\seg_overlay_moondream_2.png[0m
+
+02/07 14:51 | INFO     | [97m*** Before bounding_cubes_world_coordinates len(masks)=1[0m
+
+02/07 14:51 | INFO     | [97m-- Enter get_bounding_cube_from_point_cloud(...)[0m
+
+02/07 14:51 | INFO     | [97mAdding bounding cubes to the environment...[0m
+
+02/07 14:51 | INFO     | [92mFinished adding bounding cubes to the environment![0m
+
+02/07 14:51 | INFO     | [97mProjected 2D pixel of door handle lever Position: [181, 79][0m
+
+02/07 14:51 | INFO     | [97mAdding bounding cubes to the environment...[0m
+
+02/07 14:51 | INFO     | [97mGenerating ChatGPT output...[0m
+
+02/07 14:51 | INFO     | user:
+
+02/07 14:51 | INFO     | Print statement output:
+Position of door: [0.089, 0.038, 0.658]
+Dimensions:
+Width: 0.033
+Length: 0.061
+Height: 0.077
+Orientation along shorter side (width): 0.169
+Orientation along longer side (length): -1.402 
+
+Position of door handle: [-0.241, 0.053, 0.667]
+Dimensions:
+Width: 0.084
+Length: 0.018
+Height: 0.034
+Orientation along shorter side (length): -0.692
+Orientation along longer side (width): 0.878 
+
+Position of door handle lever: [-0.241, 0.053, 0.667]
+Dimensions:
+Width: 0.084
+Length: 0.018
+Height: 0.034
+Orientation along shorter side (length): -0.692
+Orientation along longer side (width): 0.878 
+
+
+
+
+02/07 14:51 | INFO     | 
+
+02/07 14:51 | INFO     | assistant:
+
+02/07 14:53 | INFO     | Assistant (Approach decision and plan):
+- Only one door handle lever is detected; we will interact with that instance at [-0.241, 0.053, 0.667].
+- Best approach: perform all XY motions at a high hover above the handle center, align the gripper so its fingers are parallel to the lever’s long axis, then apply a small horizontal offset toward the door along the lever’s short-axis direction so that one jaw slides into the gap during the vertical descent.
+- Note on orientation: because rotation specifies the closing-motion direction and the fingers are perpendicular to that direction, to make the fingers parallel to the lever’s long axis we must set rotation = handle angle_short (-0.692 rad). This aligns the gripper’s closing motion with the lever thickness (short side 0.018 m), which is within the 0.08 m grasp limit.
+- Contact-rich plan phases:
+  1) High hover approach above lever center.
+  2) Lateral alignment along lever short-axis toward the door (offset ~1 cm).
+  3) Vertical descent to pre-contact.
+  4) Vertical descent to grasp height, close gripper.
+  5) Small downward push (unlatch).
+  6) Pull to open along a pull vector pointing from the door center toward the robot (computed from current EE and door positions).
+  7) Retreat upward and release.
+
+Step-by-Step Trajectory Execution and Code
+```python
+# Utilities and parameters for the door-handle opening task
+from math import cos, sin, sqrt, pi
+
+# Scene data from perception (copied for clarity)
+door_pos = [0.089, 0.038, 0.658]
+door_angle_long = -1.402
+
+lever_pos = [-0.241, 0.053, 0.667]
+lever_dims = {"width": 0.084, "length": 0.018, "height": 0.034}  # long ~ 0.084 (lever), short/thickness ~ 0.018
+lever_angle_short = -0.692  # along lever thickness
+lever_angle_long = 0.878    # along lever length (visual long axis)
+
+# Current robot state (given)
+current_pose = [-0.3887993829569245, 0.6538050429520935, 0.9597697721155961, 0.0]
+
+# Derived grasp/orientation settings
+# To keep the fingers parallel to the lever’s long axis, the closing-motion (rotation) aligns with the short axis.
+grip_theta = lever_angle_short  # -0.692 rad
+print(f"Chosen rotation (rad): {grip_theta:.3f}")
+
+# Heights
+lever_center_z = lever_pos[2]
+lever_top_z = lever_center_z + lever_dims["height"] / 2.0
+z_high = lever_top_z + 0.20           # high hover ~20 cm above the top of the lever
+z_approach = lever_top_z + 0.05       # ~5 cm above top before final descent
+z_preclose = lever_center_z + 0.010   # just above center before final close
+z_grasp = lever_center_z              # grasp at the lever mid-height
+z_unlatch = lever_center_z - 0.015    # push down ~1.5 cm to unlatch
+print(f"z_high: {z_high:.3f}, z_approach: {z_approach:.3f}, z_preclose: {z_preclose:.3f}, z_grasp: {z_grasp:.3f}, z_unlatch: {z_unlatch:.3f}")
+
+# Horizontal offset along lever short-axis toward the door
+sx, sy = cos(lever_angle_short), sin(lever_angle_short)  # short-axis direction (in XY)
+door_vec = [door_pos[0] - lever_pos[0], door_pos[1] - lever_pos[1]]
+door_vec_len = max(1e-6, sqrt(door_vec[0]**2 + door_vec[1]**2))
+door_dir = [door_vec[0] / door_vec_len, door_vec[1] / door_vec_len]
+
+# Determine sign so the offset goes "toward the door"
+sign_toward_door = 1.0 if (sx * door_dir[0] + sy * door_dir[1]) >= 0.0 else -1.0
+offset_mag = 0.010  # 1 cm
+offset_xy = [sign_toward_door * offset_mag * sx, sign_toward_door * offset_mag * sy]
+print(f"Offset toward door (m): dx={offset_xy[0]:.3f}, dy={offset_xy[1]:.3f}")
+
+# Pull vector to open the door:
+# Use a workspace-stable heuristic: pull from door center toward the robot's current EE XY.
+ee_xy = [current_pose[0], current_pose[1]]
+door_xy = [door_pos[0], door_pos[1]]
+pull_vec = [ee_xy[0] - door_xy[0], ee_xy[1] - door_xy[1]]
+pull_len = max(1e-6, sqrt(pull_vec[0]**2 + pull_vec[1]**2))
+pull_dir = [pull_vec[0] / pull_len, pull_vec[1] / pull_len]
+pull_distance = 0.25  # 25 cm pull to swing the door open substantially
+print(f"Pull dir: ux={pull_dir[0]:.3f}, uy={pull_dir[1]:.3f}, L={pull_distance:.3f}")
+
+# Helper for linear motion
+def move_linear(desc: str, start_pose: list, end_pose: list, num_points: int = 10):
+    """
+    Generate and execute a straight-line trajectory between two 4D poses.
+    Parameters:
+      desc: short description
+      start_pose: [x,y,z,theta]
+      end_pose: [x,y,z,theta]
+      num_points: trajectory resolution (>=5 recommended)
+    """
+    traj = generate_linear_trajectory(desc, start_pose, end_pose, num_points)
+    execute_trajectory(traj)
+    return end_pose  # new current pose
+
+# Step 1: Move to a high hover directly above the lever center
+hover_pose = [lever_pos[0], lever_pos[1], z_high, grip_theta]
+trajectory_1_end = move_linear("T1: move to high hover above lever center", current_pose, hover_pose, num_points=12)
+
+# Step 2: Lateral alignment at hover: shift along short-axis toward the door (so one jaw will slide into the gap during descent)
+hover_offset_pose = [lever_pos[0] + offset_xy[0], lever_pos[1] + offset_xy[1], z_high, grip_theta]
+trajectory_2_end = move_linear("T2: lateral align along short-axis toward door at hover", trajectory_1_end, hover_offset_pose, num_points=8)
+
+# Ensure gripper is open before approach
+open_gripper()
+
+# Step 3: Descend to approach height (safe, above top surface)
+approach_pose = [hover_offset_pose[0], hover_offset_pose[1], z_approach, grip_theta]
+trajectory_3_end = move_linear("T3: descend to approach height", trajectory_2_end, approach_pose, num_points=8)
+
+# Step 4: Descend to pre-close height
+preclose_pose = [hover_offset_pose[0], hover_offset_pose[1], z_preclose, grip_theta]
+trajectory_4_end = move_linear("T4: descend to pre-close height", trajectory_3_end, preclose_pose, num_points=8)
+
+# Step 5: Descend to grasp height (lever mid-height) and close the gripper on the lever thickness
+grasp_pose = [hover_offset_pose[0], hover_offset_pose[1], z_grasp, grip_theta]
+trajectory_5_end = move_linear("T5: descend to grasp height", trajectory_4_end, grasp_pose, num_points=6)
+close_gripper()
+
+# Step 6: Apply a small downward push to unlatch
+unlatch_pose = [grasp_pose[0], grasp_pose[1], z_unlatch, grip_theta]
+trajectory_6_end = move_linear("T6: small downward push to unlatch", trajectory_5_end, unlatch_pose, num_points=6)
+
+# Step 7: Pull to open the door along the computed pull direction (large distance)
+pull_target_xy = [unlatch_pose[0] + pull_dir[0] * pull_distance,
+                  unlatch_pose[1] + pull_dir[1] * pull_distance]
+pull_pose = [pull_target_xy[0], pull_target_xy[1], unlatch_pose[2], grip_theta]
+trajectory_7_end = move_linear("T7: pull to open the door", trajectory_6_end, pull_pose, num_points=25)
+
+# Step 8: Retreat upward to a safe hover above the new location and release
+retreat_hover_pose = [pull_pose[0], pull_pose[1], z_high, grip_theta]
+trajectory_8_end = move_linear("T8: retreat upward to safe hover", trajectory_7_end, retreat_hover_pose, num_points=10)
+open_gripper()
+
+# Task completed
+task_completed()
+
+02/07 14:53 | INFO     | ```
+
+02/07 14:53 | INFO     | [92mFinished generating ChatGPT output![0m
+
+02/07 14:53 | INFO     | [97mgenerate_linear_trajectory desc='T1: move to high hover above lever center' start=[-0.3887993829569245, 0.6538050429520935, 0.9597697721155961, 0.0] end=[-0.241, 0.053, 0.8840000000000001, -0.692] end_px=[186, 45][0m
+
+02/07 14:53 | INFO     | [97mExecuting generated trajectory...[0m
+
+02/07 14:53 | INFO     | [92mFinished executing generated trajectory![0m
+
+02/07 14:53 | INFO     | [97mgenerate_linear_trajectory desc='T2: lateral align along short-axis toward door at hover' start=[-0.241, 0.053, 0.8840000000000001, -0.692] end=[-0.23330028601010136, 0.04661921599850306, 0.8840000000000001, -0.692] end_px=[185, 44][0m
+
+02/07 14:53 | INFO     | [97mExecuting generated trajectory...[0m
+
+02/07 14:53 | INFO     | [92mFinished executing generated trajectory![0m
+
+02/07 14:53 | INFO     | [97mOpening gripper...[0m
+
+02/07 14:53 | INFO     | [97mgenerate_linear_trajectory desc='T3: descend to approach height' start=[-0.23330028601010136, 0.04661921599850306, 0.8840000000000001, -0.692] end=[-0.23330028601010136, 0.04661921599850306, 0.7340000000000001, -0.692] end_px=[181, 68][0m
+
+02/07 14:53 | INFO     | [97mExecuting generated trajectory...[0m
+
+02/07 14:53 | INFO     | [92mFinished executing generated trajectory![0m
+
+02/07 14:53 | INFO     | [97mgenerate_linear_trajectory desc='T4: descend to pre-close height' start=[-0.23330028601010136, 0.04661921599850306, 0.7340000000000001, -0.692] end=[-0.23330028601010136, 0.04661921599850306, 0.677, -0.692] end_px=[180, 77][0m
+
+02/07 14:53 | INFO     | [97mExecuting generated trajectory...[0m
+
+02/07 14:53 | INFO     | [92mFinished executing generated trajectory![0m
+
+02/07 14:53 | INFO     | [97mgenerate_linear_trajectory desc='T5: descend to grasp height' start=[-0.23330028601010136, 0.04661921599850306, 0.677, -0.692] end=[-0.23330028601010136, 0.04661921599850306, 0.667, -0.692] end_px=[179, 78][0m
+
+02/07 14:53 | INFO     | [97mExecuting generated trajectory...[0m
+
+02/07 14:53 | INFO     | [92mFinished executing generated trajectory![0m
+
+02/07 14:53 | INFO     | [97mClosing gripper...[0m
+
+02/07 14:53 | INFO     | [97mgenerate_linear_trajectory desc='T6: small downward push to unlatch' start=[-0.23330028601010136, 0.04661921599850306, 0.667, -0.692] end=[-0.23330028601010136, 0.04661921599850306, 0.652, -0.692] end_px=[179, 80][0m
+
+02/07 14:53 | INFO     | [97mExecuting generated trajectory...[0m
+
+02/07 14:53 | INFO     | [92mFinished executing generated trajectory![0m
+
+02/07 14:53 | INFO     | [97mgenerate_linear_trajectory desc='T7: pull to open the door' start=[-0.23330028601010136, 0.04661921599850306, 0.652, -0.692] end=[-0.38655348770237163, 0.24413745862704692, 0.652, -0.692] end_px=[206, 98][0m
+
+02/07 14:53 | INFO     | [97mExecuting generated trajectory...[0m
+
+02/07 14:53 | INFO     | [92mFinished executing generated trajectory![0m
+
+02/07 14:53 | INFO     | [97mgenerate_linear_trajectory desc='T8: retreat upward to safe hover' start=[-0.38655348770237163, 0.24413745862704692, 0.652, -0.692] end=[-0.38655348770237163, 0.24413745862704692, 0.8840000000000001, -0.692] end_px=[216, 60][0m
+
+02/07 14:53 | INFO     | [97mExecuting generated trajectory...[0m
+
+02/07 14:53 | INFO     | [92mFinished executing generated trajectory![0m
+
+02/07 14:53 | INFO     | [97mOpening gripper...[0m
+
+02/07 14:53 | INFO     | [Info] Writing: rgb_image_0_inf.mp4 | Size: 256x256
+
+02/07 14:53 | INFO     | [Info] Sequence ended at 186.
+
+02/07 14:53 | INFO     | [Warning] Skipped 83 gap(s) due to missing frames (lookahead <= 50).
+
+02/07 14:53 | INFO     | [Success] Saved ./images/trajectory\..\rgb_image_0_inf.mp4 (103 frames).
+
+02/07 14:53 | INFO     | [92mSaved trajectory video from captured frames.[0m
+
+02/07 14:53 | INFO     | [Info] Writing: wrist_image_0_inf.mp4 | Size: 256x256
+
+02/07 14:53 | INFO     | [Info] Sequence ended at 187.
+
+02/07 14:53 | INFO     | [Warning] Skipped 83 gap(s) due to missing frames (lookahead <= 50).
+
+02/07 14:53 | INFO     | [Success] Saved ./images/trajectory\..\wrist_image_0_inf.mp4 (104 frames).
+
+02/07 14:53 | INFO     | [92mSaved wrist trajectory video from captured frames.[0m
+
+02/07 14:53 | INFO     | [97mWaiting to execute all generated trajectories...[0m
+
+02/07 14:53 | INFO     | [92mFinished executing all generated trajectories![0m
+
+02/07 14:53 | INFO     | [97mVLM review after attempt 1/9...[0m
+
+02/07 14:53 | INFO     | [93mCutoff wrist frames from the end. frame_paths in preview > config.max_allowed_vlm_images (50)[0m
+
+02/07 14:53 | INFO     | [97m==================== VLM review using 49 frames (stride=5), start_idx=1, model=azure-gpt-5.[0m
+
+02/07 14:53 | INFO     | user:
+
+02/07 14:53 | INFO     | You are a robotics VLM reviewer. Use the full conversation history you just saw (planning and execution). verify whether the robot executed the task as planned by inspecting the provided key frames.
+
+Task: open the door: 1) Calc the pos to push down and pull level - in the middle of the door handle lever. 2) safely approach from high above. 3) Rotate the end-effector so the fingers themselves are parallel to the lever's long axis (set rotation = handle angle_long). 4) Calculate a small horizontal offset along the lever's short-axis vector toward the door, so that when the gripper moves down, 1 jaw slides into the gap between the lever and the door itself. 5) Descend, close to grasp the lever thickness, apply a small downward pressure to unlatch, and pull a large dist using perpendicular vector math to fully open the door.
+
+3D Coordinates Context:
+The 3D coordinate system of the environment is as follows:
+  1. The x-axis is in the horizontal direction, increasing to the left.
+  2. The y-axis is in the depth direction, decreasing away from you.
+  3. The z-axis is in the vertical direction, increasing upwards.
+
+Key frame file paths (chronological):
+./images/trajectory\rgb_image_1.png
+./images/trajectory\rgb_image_7.png
+./images/trajectory\rgb_image_11.png
+./images/trajectory\rgb_image_17.png
+./images/trajectory\rgb_image_21.png
+./images/trajectory\rgb_image_26.png
+./images/trajectory\rgb_image_31.png
+./images/trajectory\rgb_image_37.png
+./images/trajectory\rgb_image_41.png
+./images/trajectory\rgb_image_47.png
+./images/trajectory\rgb_image_51.png
+./images/trajectory\rgb_image_57.png
+./images/trajectory\rgb_image_61.png
+./images/trajectory\rgb_image_67.png
+./images/trajectory\rgb_image_71.png
+./images/trajectory\rgb_image_77.png
+./images/trajectory\rgb_image_81.png
+./images/trajectory\rgb_image_87.png
+./images/trajectory\rgb_image_91.png
+./images/trajectory\rgb_image_96.png
+./images/trajectory\rgb_image_102.png
+./images/trajectory\rgb_image_106.png
+./images/trajectory\rgb_image_112.png
+./images/trajectory\rgb_image_116.png
+./images/trajectory\rgb_image_122.png
+./images/trajectory\rgb_image_126.png
+./images/trajectory\rgb_image_132.png
+./images/trajectory\rgb_image_136.png
+./images/trajectory\rgb_image_142.png
+./images/trajectory\rgb_image_146.png
+./images/trajectory\rgb_image_152.png
+./images/trajectory\rgb_image_156.png
+./images/trajectory\rgb_image_161.png
+./images/trajectory\rgb_image_166.png
+./images/trajectory\rgb_image_172.png
+./images/trajectory\rgb_image_176.png
+./images/trajectory\rgb_image_182.png
+./images/trajectory\rgb_image_186.png
+./images/trajectory\wrist_image_1.png
+./images/trajectory\wrist_image_9.png
+./images/trajectory\wrist_image_15.png
+./images/trajectory\wrist_image_23.png
+./images/trajectory\wrist_image_29.png
+./images/trajectory\wrist_image_37.png
+./images/trajectory\wrist_image_43.png
+./images/trajectory\wrist_image_51.png
+./images/trajectory\wrist_image_57.png
+./images/trajectory\wrist_image_65.png
+./images/trajectory\wrist_image_71.png
+
+Instructions:
+
+
+02/07 14:53 | INFO     | Carefully compare the plan and execution in the conversation history with the visual evidence in the provided frames. focus on positions and orientation of robot arm gripper in relation to the target object(s). Only use the rendered text on the image as the plan desc, it should match actual visual stateDid all executed trajectories succeeded as planned ?If grasping: Did the gripper actually grasped the target object ?If grasping: Did the grasp pose ensured a stable post-grasp actions / trajectory (object moved?) or can it be improved ?Articulation and Post grasp traj: Did the trajectories opened/rotated/pulled/pushed/operated the obj/affordances in the desired axis/directions ?Target object final pose: Did the object ended up in desired end-pose ? Ex: door opened enough ? Ex: grapsed object lifted enough height ?Decide if the task was achieved. If uncertain or inconsistent, set success=false.if success=False (and even if its succeeded), Reason to suggest global improvement_steps: positions, poses, orientations in gen code. for each trajectory - determine success : true/false and its local improvement_steps (or suggest to delete/replace/add new trajs)Output exactly one JSON object with keys success, reasoning, correction steps and nothing else.Output strictly one JSON object with exactly these keys: success (true/false), reasoning (string), improvement_steps (list of strings for trajectories - inc new/delete/update)Output JSON only with no surrounding text.
+
+02/07 14:53 | INFO     | assistant:
+
+02/07 14:54 | INFO     | {"success": true, "reasoning": "The robot followed the planned multi-phase sequence. T1 shows a high hover above the lever center; T2 aligns laterally toward the door along the lever’s short-axis; T3–T5 descend above the lever and then to grasp height with the lever visibly between the jaws; closing occurs before T6. A small downward motion is seen in T6 to unlatch. In T7 a long in-plane pull is executed: the door panel clearly swings open across subsequent frames, confirming a stable grasp and correct pull direction. T8 retreats upward and releases. The final state shows the door opened widely; therefore the articulation objective was achieved.", "improvement_steps": ["T1 (hover): increase safety margin to 0.25–0.30 m above the lever top to reduce collision risk with the door edge during approach.", "T2 (lateral offset): slightly increase the offset toward the door (e.g., 0.015–0.020 m) and compute its sign using the door surface normal rather than the vector to door center for more reliable jaw insertion.", "Orientation: to match the user’s explicit instruction, set rotation = handle angle_long (0.878 rad). Given the environment’s rotation definition (closing-motion direction), also verify that this still makes the fingers parallel to the lever long axis; otherwise adjust by adding +/- pi/2 accordingly.", "T3–T5 (descent and grasp): add a tiny XY centering nudge (2–3 mm) at z_preclose using visual or geometric feedback before closing to improve grasp quality.", "T6 (unlatch): increase downward push distance to 0.02–0.03 m and hold briefly (or add a second small push) to ensure the latch fully disengages in case of stiffer springs.", "T7 (pull): compute the pull vector explicitly as away from the door hinge (perpendicular to the door plane) using door orientation; add a small outward normal component to prevent scraping the handle/door."]}
+
+02/07 14:54 | INFO     | [92mReview: success=True. See details in above json[0m
