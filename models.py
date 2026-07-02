@@ -170,7 +170,18 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         if not new_output or len(new_output) < 5:
             print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     # ----------------------------------------------------------------------
-    # 4. OpenAI direct mode (client-based)
+    # 4. Gemini mode: model name starts with "gemini-"
+    #    (prefix is kept — it is also part of the model name)
+    # ----------------------------------------------------------------------
+    elif model.startswith("gemini-"):
+        from providers.llms.gemini import call_gemini
+        print("assistant:", file=file)
+        new_output = call_gemini(messages, model=model, max_tokens=max_tokens, temperature=0, reasoning_effort=reasoning_effort)
+        print(new_output, file=file)
+        if not new_output or len(new_output) < 5:
+            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
+    # ----------------------------------------------------------------------
+    # 5. OpenAI direct mode (client-based)
     # ----------------------------------------------------------------------
     else:
         completion = client.chat.completions.create(
