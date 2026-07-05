@@ -437,6 +437,7 @@ class SimEnvDoor(SimEnvBase):
         self.door_hinge_index = None
         self.latch_index = None
         self.door_handle_latch = None
+        self.pole_id = None
 
         # Compute head camera pose identical to GUI spherical camera
         # and use it statically in DIRECT (no dynamic debug mirroring).
@@ -520,9 +521,39 @@ class SimEnvDoor(SimEnvBase):
 
             if self.latch_index is not None:
                 p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
+
+            self._load_pole()
         except Exception as e:
             print("[Env] Failed to load or initialize adroit_door URDF:", e)
             traceback.print_exc()
+
+    def _load_pole(self):
+        """Add a vertical pole standing between the robot arm and the door.
+
+        The pole has mass and a collision shape, so the robot arm can push it
+        over and make it fall to the ground.
+        """
+        # Robot base ~[-0.3, 0.5, 0.0], door ~[-0.11, 0.04, 0.25]; place pole between them.
+        pole_height = 1.0
+        pole_radius = 0.03
+        pole_position = [-0.42, -0.10, pole_height / 2.0]
+        pole_collision = p.createCollisionShape(
+            p.GEOM_CYLINDER, radius=pole_radius, height=pole_height
+        )
+        pole_visual = p.createVisualShape(
+            p.GEOM_CYLINDER,
+            radius=pole_radius,
+            length=pole_height,
+            rgbaColor=[0.5, 0.5, 0.55, 1.0],
+        )
+        self.pole_id = p.createMultiBody(
+            baseMass=1.0,
+            baseCollisionShapeIndex=pole_collision,
+            baseVisualShapeIndex=pole_visual,
+            basePosition=pole_position,
+        )
+        p.changeDynamics(self.pole_id, -1, lateralFriction=1.0, spinningFriction=0.5)
+        return self.pole_id
 
     def get_state(self):
         """Return door-related indices and world positions for diagnostics.       
