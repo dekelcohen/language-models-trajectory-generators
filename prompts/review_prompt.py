@@ -12,8 +12,8 @@ REVIEW_PROMPT = (
     "Articulation and Post grasp traj: Did the trajectories opened/rotated/pulled/pushed/operated the obj/affordances in the desired axis/directions ?"
     "Target object final pose: Did the object ended up in desired end-pose ? Ex: door opened enough ? Ex: grapsed object lifted enough height ?"
     "Decide if the task was achieved. If uncertain or inconsistent, set success=false."
-    "if success=False (and even if its succeeded), Reason to suggest improvement_steps: positions, poses, orientations in gen code"
-    "Output exactly one JSON object with keys success, reasoning, correction steps and nothing else."
-    "Output strictly one JSON object with exactly these keys: success (true/false), reasoning (string), improvement_steps (string)"
+    "if success=False (and even if its succeeded), Reason to suggest global improvement_steps: positions, poses, orientations in gen code. for each trajectory - determine success : true/false and its local improvement_steps (or suggest to delete/replace/add new trajs)"
+    "Output exactly one JSON object with keys success, reasoning, correction steps and nothing else."    
+    "Output strictly one JSON object with exactly these keys: success (true/false), reasoning (string), improvement_steps (list of strings for trajectories - inc new/delete/update)"
     "Output JSON only with no surrounding text."
 )
