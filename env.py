@@ -522,13 +522,46 @@ class SimEnvDoor(SimEnvBase):
             if self.latch_index is not None:
                 p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
             
-            HIDE_DOOR_WITH_BOARD = True    
-            if HIDE_DOOR_WITH_BOARD:
-                self._load_board()
+            HIDE_DOOR_WITH_OBJECT = True    
+            if HIDE_DOOR_WITH_OBJECT:
+                self._load_pole()
+                #self._load_board()
         except Exception as e:
             print("[Env] Failed to load or initialize adroit_door URDF:", e)
             traceback.print_exc()
 
+    def _load_pole(self):
+        """Add a vertical pole standing between the robot arm and the door.
+
+        The pole has mass and a collision shape, so the robot arm can push it
+        over and make it fall to the ground.
+        """
+        # Robot base ~[-0.3, 0.5, 0.0], door ~[-0.11, 0.04, 0.25]; place pole between
+        # them WITHOUT overlapping the door. Overlapping the door at spawn causes a
+        # large contact/penetration force that ejects the pole and topples it at
+        # sim start. This clear position spawns upright and stable, yet the robot
+        # arm can still push it over later.
+        pole_height = 1.0
+        pole_radius = 0.15
+        pole_position = [-0.15, 0.30, pole_height / 2.0]
+        pole_collision = p.createCollisionShape(
+            p.GEOM_CYLINDER, radius=pole_radius, height=pole_height
+        )
+        pole_visual = p.createVisualShape(
+            p.GEOM_CYLINDER,
+            radius=pole_radius,
+            length=pole_height,
+            rgbaColor=[0.5, 0.5, 0.55, 1.0],
+        )
+        self.pole_id = p.createMultiBody(
+            baseMass=1.0,
+            baseCollisionShapeIndex=pole_collision,
+            baseVisualShapeIndex=pole_visual,
+            basePosition=pole_position,
+        )
+        p.changeDynamics(self.pole_id, -1, lateralFriction=1.0, spinningFriction=0.5)
+        return self.pole_id
+        
     def _load_board(self):
         """Add a vertical board leaning against the door.
 
@@ -537,7 +570,7 @@ class SimEnvDoor(SimEnvBase):
         the door panel (it may settle/fall onto the door when the sim starts).
         """
         # Robot base ~[-0.3, 0.5, 0.0], door ~[-0.11, 0.04, 0.25]; lean board on the door.
-        board_height = 1.0
+        board_height = 0.6
         board_width = 0.6   # 10x the previous pole width (0.06)
         board_depth = 0.06
         half_extents = [board_width / 2.0, board_depth / 2.0, board_height / 2.0]
