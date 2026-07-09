@@ -55,12 +55,15 @@ OBSERVATION AND PLANNING GUIDANCE (use these to reason about each subtask; do NO
 
 [INSERT COLLISION AVOIDANCE]
 
+SCENE ANALYSIS (produced by a separate perception VLM from the current head-camera image; use it as your observation of the scene):
+[INSERT SCENE ANALYSIS]
+
 DECOMPOSITION RULES:
-1. Inspect the image and the command. Decide whether the command is a single action or must be broken into multiple ordered subtasks.
-2. Identify occlusions: Do you see in the provided image the objects/affordances required for completing the task ? It is very important to observe the target objects before planning a manipulation (or other) subtask(s).
-   Think step by step:
+1. Read the SCENE ANALYSIS section above and the command. Decide whether the command is a single action or must be broken into multiple ordered subtasks.
+2. Identify occlusions from the SCENE ANALYSIS: are the objects/affordances required for completing the task reported as visible ? It is very important to observe the target objects before planning a manipulation (or other) subtask(s).
+   Think step by step, using the SCENE ANALYSIS:
    1) List the objects in the scene (and their relation to the robot arm) 
-   2) Whether one or more objects / surfaces may hide the target object such that you don't observe it ? 
+   2) Whether one or more objects / surfaces may hide the target object such that it is not observed ? 
       ) If so -> design subtask(s) to remove / clear / topple the occluding objects. 
 3. Identify blocking dependencies and occlusions. Examples: an object on/against a door blocks opening it; a lid must be removed before grasping contents; an obstacle must be cleared before reaching a target.
 4. When a blocker/dependency exists, order subtasks dependency-first: earlier subtasks resolve the blocker, later subtasks perform the main action. Pass them in that order to execute_subtasks (it runs them in order while they succeed).

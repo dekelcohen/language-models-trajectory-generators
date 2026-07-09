@@ -234,7 +234,8 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"Test 2: Text + image query  (model: {MODEL})")
     print("=" * 60)
-    image_path = "./outputs/longhorizon/dark_gray_pillar_blocks_door_less.png" #"./images/rgb_image_head.png"
+    image_path = "./images/rgb_image_head.png" 
+    # "./outputs/longhorizon/dark_gray_pillar_blocks_door_less.png" #"./images/rgb_image_head.png"
     if os.path.exists(image_path):
         mime_type, base64_image = encode_image(image_path)
         messages_image = [

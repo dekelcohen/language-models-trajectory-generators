@@ -621,7 +621,34 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
 
 
 # --- Planner + orchestration (single agentic loop) ----------------------
-def _build_planner_prompt(ctx, command):
+def run_scene_perception(ctx, command):
+    """Run the perception VLM (--perception-vlm) on the current head image.
+
+    Returns its free-text scene analysis, injected into the planner prompt's
+    SCENE ANALYSIS section. Best-effort: on any failure returns a short fallback
+    string so the planner still runs (it can fall back to detect_object)."""
+    from prompts.scene_perception_prompt import SCENE_PERCEPTION_PROMPT
+    args = ctx.args
+    logger = ctx.logger
+    prompt = SCENE_PERCEPTION_PROMPT.replace("[INSERT USER COMMAND TASK]", str(command))
+    image_paths = [config.rgb_image_head_path] if args.lm_images else None
+    try:
+        logger.info(PROGRESS + f"Perception: analyzing scene with {args.perception_vlm}..." + ENDC)
+        messages = models.call_llm_cached(
+            ctx.main_connection, ctx.client, args.perception_vlm, prompt, [], role="system",
+            image_paths=image_paths,
+            options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache},
+        )
+        text = messages[-1]["content"] if messages and isinstance(messages[-1], dict) else ""
+        text = (text or "").strip()
+        logger.info(OK + "Perception: scene analysis ready." + ENDC)
+        return text or "(perception returned no analysis)"
+    except Exception as e:
+        logger.info(WARNING + f"Perception VLM failed: {e}. Proceeding without scene analysis." + ENDC)
+        return "(scene analysis unavailable; inspect the scene yourself with detect_object(...))"
+
+
+def _build_planner_prompt(ctx, command, scene_analysis=""):
     """Fill the merged PLANNER_PROMPT placeholders."""
     from prompts.planner_prompt import PLANNER_PROMPT, RECOVERY_FROM_FAILURE
     return (
@@ -630,6 +657,7 @@ def _build_planner_prompt(ctx, command):
         .replace("[INSERT INITIAL PLANNING 2]", INITIAL_PLANNING_2)
         .replace("[INSERT COLLISION AVOIDANCE]", COLLISION_AVOIDANCE)
         .replace("[INSERT RECOVERY_FROM_FAILURE]", RECOVERY_FROM_FAILURE)
+        .replace("[INSERT SCENE ANALYSIS]", scene_analysis)
         .replace("[INSERT 3D COORDINATES PROMPT SECTION]", ctx.coords_section)
         .replace("[INSERT EE POSITION]", str(ctx.ee_pos_for_prompt))
         .replace("[INSERT TASK]", command)
@@ -659,7 +687,7 @@ def run_plan(ctx, command, max_iterations=8):
     planner = PlannerAPI(ctx, execute_task, logger)
     planner_locals = get_planner_exec_locals(planner, logger)
 
-    prompt = _build_planner_prompt(ctx, command)
+    prompt = _build_planner_prompt(ctx, command, scene_analysis=run_scene_perception(ctx, command))
     image_paths = [config.rgb_image_head_path] if args.lm_images else None
     logger.info(PROGRESS + "Planner: generating plan / dispatch..." + ENDC)
     messages = models.call_llm_cached(
@@ -675,6 +703,14 @@ def run_plan(ctx, command, max_iterations=8):
 
         if planner.plan_completed_flag or planner.plan_failed_flag:
             break
+
+        # Re-run perception before each subsequent planner call: subtasks may have
+        # changed the scene (cleared occluders, opened a door, etc.).
+        scene_analysis = run_scene_perception(ctx, command)
+        new_prompt = (
+            "UPDATED SCENE ANALYSIS (perception VLM, current head-camera image):\n"
+            f"{scene_analysis}\n\n" + new_prompt
+        )
 
         logger.info(PROGRESS + f"Planner: iteration {iteration}/{max_iterations}..." + ENDC)
         messages = models.call_llm_cached(
