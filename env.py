@@ -12,7 +12,7 @@ from robot import Robot
 from common_utils import Trajectory
 from providers.env_sim_util import _rotmat_to_quat_xyzw
 from config import OK, PROGRESS, FAIL, ENDC
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
 # --- Debug helpers ------------------------------------------------------
 def add_debug_sphere(pos_xyz, radius=0.015, color=(1, 0, 0, 1)):
     """
@@ -438,6 +438,7 @@ class SimEnvDoor(SimEnvBase):
         self.latch_index = None
         self.door_handle_latch = None
         self.board_id = None
+        self.pole_id = None
 
         # Compute head camera pose identical to GUI spherical camera
         # and use it statically in DIRECT (no dynamic debug mirroring).
@@ -607,7 +608,10 @@ class SimEnvDoor(SimEnvBase):
             "door_handle_latch": self.door_handle_latch,
             "door_handle_pos": None,
             "latch_pos": None,
-            "hinge_pos": None,           
+            "hinge_pos": None,
+            "pole_id": self.pole_id,
+            "pole_pos": None,
+            "pole_dims": None,
         }
         try:
             if self.door_id is not None:
@@ -620,9 +624,22 @@ class SimEnvDoor(SimEnvBase):
                 if self.door_hinge_index is not None and self.door_hinge_index >= 0:
                     _hinge = p.getLinkState(self.door_id, int(self.door_hinge_index), computeForwardKinematics=True)
                     state["hinge_pos"] = list(map(float, _hinge[0]))
-           
+
         except Exception as e:
             print("[Env] Warning: SimEnvDoor.get_state failed to read positions:", e)
+            traceback.print_exc()
+        try:
+            if self.pole_id is not None:
+                pos, _ori = p.getBasePositionAndOrientation(self.pole_id)
+                aabb_min, aabb_max = p.getAABB(self.pole_id, -1)
+                state["pole_pos"] = list(map(float, pos))
+                state["pole_dims"] = [
+                    float(aabb_max[0] - aabb_min[0]),
+                    float(aabb_max[1] - aabb_min[1]),
+                    float(aabb_max[2] - aabb_min[2]),
+                ]
+        except Exception as e:
+            print("[Env] Warning: SimEnvDoor.get_state failed to read pole:", e)
             traceback.print_exc()
         return state
 
@@ -925,6 +942,21 @@ def run_simulation_environment(args, env_connection, logger):
                     eef_pos = list(map(float, config.ee_start_position))
                 try:
                     env_connection.send({"eef_pos": eef_pos})
+                except Exception:
+                    env_connection.send({})
+
+            elif env_connection_received[0] == GET_STATE:
+                try:
+                    _eef = p.getLinkState(robot.id, robot.ee_index, computeForwardKinematics=True)
+                    eef_pos = list(map(float, _eef[0]))
+                except Exception:
+                    eef_pos = list(map(float, config.ee_start_position))
+                try:
+                    sim_state = env.simenv.get_state()
+                except Exception:
+                    sim_state = {}
+                try:
+                    env_connection.send({"eef_pos": eef_pos, "sim_state": sim_state})
                 except Exception:
                     env_connection.send({})
 

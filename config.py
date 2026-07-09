@@ -127,6 +127,10 @@ GET_ROBOT_STATE = 20
 VISUALIZE_GRASP_POSE = 21
 VISUALIZE_BOUNDING_BOX = 22
 
+# LLM response cache
+llm_cache_dir = "./cache"               # root cache folder (auto-created)
+llm_cache_float_tolerance = 1e-2        # abs diff allowed per float when smart-matching env state
+
 # Paths
 images_folder = "./images" 
 rgb_image_wrist_path = "./images/rgb_image_wrist.png"

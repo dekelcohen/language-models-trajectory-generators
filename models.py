@@ -119,26 +119,22 @@ def log_messages(messages, file, prefix):
     except Exception as e:
         print(f"Warning: failed to log messages JSON: {e}", file=file)
         
-def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, image_paths=None, log_msgs=False, max_tokens=60000, reasoning_effort=None):
+# Default options for _call_llm_provider_wrapper; callers may override any subset.
+CHATGPT_DEFAULT_OPTIONS = {
+    "log_msgs": False,
+    "max_tokens": 60000,
+    "reasoning_effort": None,
+    "cache": None,          # LLMCache instance, or None to disable caching
+    "cache_env_state": None,  # sim/env state dict used for level-2 smart match
+}
+
+
+def call_llm_provider(client, model, messages, max_tokens, reasoning_effort, file):
+    """Dispatch to the correct provider and return the assistant response string.
+
+    Kept side-effect free w.r.t. `messages` (does not append the response).
+    Printing of streamed/full output is preserved.
     """
-    Call LLM (model - for zure or client - openai client) with new_prompt, existing conversation messages, role, image_paths - to attach images.
-    new_prompt - optional: can be None or empty (only if image_paths is also None/empty)
-    image_paths - optional: can be None or empty 
-    messages - existing conversation messages. will be updated with assistant response and returned.
-      You can optionally add to messages before calling and pass new_prompt=None, image_paths=None
-    max_tokens - max completion tokens for the response
-    reasoning_effort - optional: "high", "medium", "low", etc. for reasoning models
-    """
-    if file is None:
-        file = sys.stdout
-    print(role + ":", file=file)
-    print(new_prompt, file=file)
-    from providers.llms.azure_openai import append_to_messages
-    messages_before = list(messages) if messages is not None else []
-    messages = append_to_messages(new_prompt, image_paths, messages, role)
-    # ----------------------------------------------------------------------
-    # 1. Azure OpenAI mode: model name starts with "azure-"
-    # ----------------------------------------------------------------------
     if model.startswith("azure-"):
         from providers.llms.azure_openai import call_llm
         deployment = model[len("azure-"):]
@@ -146,10 +142,7 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
         print(new_output, file=file)
         if not new_output or len(new_output) < 5:
-            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")        
-    # ----------------------------------------------------------------------
-    # 2. OpenRouter mode: model name starts with "or-"
-    # ----------------------------------------------------------------------
+            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     elif model.startswith("or-"):
         from providers.llms.openrouter import call_openrouter
         openrouter_model = model[len("or-"):]
@@ -158,9 +151,6 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         print(new_output, file=file)
         if not new_output or len(new_output) < 5:
             print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
-    # ----------------------------------------------------------------------
-    # 3. AWS Bedrock mode: model name starts with "aws-"
-    # ----------------------------------------------------------------------
     elif model.startswith("aws-"):
         from providers.llms.aws_bedrock import call_llm as call_bedrock
         bedrock_model_id = model[len("aws-"):]
@@ -169,10 +159,6 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         print(new_output, file=file)
         if not new_output or len(new_output) < 5:
             print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
-    # ----------------------------------------------------------------------
-    # 4. Gemini mode: model name starts with "gemini-"
-    #    (prefix is kept — it is also part of the model name)
-    # ----------------------------------------------------------------------
     elif model.startswith("gemini-"):
         from providers.llms.gemini import call_gemini
         print("assistant:", file=file)
@@ -180,9 +166,6 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
         print(new_output, file=file)
         if not new_output or len(new_output) < 5:
             print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
-    # ----------------------------------------------------------------------
-    # 5. OpenAI direct mode (client-based)
-    # ----------------------------------------------------------------------
     else:
         completion = client.chat.completions.create(
             model=model,
@@ -200,36 +183,108 @@ def get_chatgpt_output(client, model, new_prompt, messages, role, file=None, ima
                 new_output += chunk_content
             else:
                 print("finish_reason:", finish_reason, file=file)
+    return new_output
+
+
+def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=None, image_paths=None, options=None):
+    """
+    Call LLM (model - for azure or client - openai client) with new_prompt, existing conversation messages, role, image_paths - to attach images.
+    new_prompt - optional: can be None or empty (only if image_paths is also None/empty)
+    image_paths - optional: can be None or empty
+    messages - existing conversation messages. will be updated with assistant response and returned.
+      You can optionally add to messages before calling and pass new_prompt=None, image_paths=None
+    options - optional dict merged over CHATGPT_DEFAULT_OPTIONS:
+        log_msgs (bool): dump conversation JSON after the call.
+        max_tokens (int): max completion tokens for the response.
+        reasoning_effort (str|None): "high"/"medium"/"low" for reasoning models.
+        cache (LLMCache|None): when None, caching is disabled. When set, the
+            response is served from / stored to the cache keyed on model +
+            text/params (level 1) and env state smart-match (level 2).
+        cache_env_state (dict|None): sim/env state used for the level-2 match.
+    """
+    opts = dict(CHATGPT_DEFAULT_OPTIONS)
+    if options:
+        opts.update(options)
+    log_msgs = opts["log_msgs"]
+    max_tokens = opts["max_tokens"]
+    reasoning_effort = opts["reasoning_effort"]
+    cache = opts["cache"]
+    cache_env_state = opts["cache_env_state"]
+
+    if file is None:
+        file = sys.stdout
+    print(role + ":", file=file)
+    print(new_prompt, file=file)
+    from providers.llms.azure_openai import append_to_messages
+    messages = append_to_messages(new_prompt, image_paths, messages, role)
+
+    def _producer():
+        return call_llm_provider(client, model, messages, max_tokens, reasoning_effort, file)
+
+    # Cache key is built AFTER images and everything are appended to messages.
+    if cache is not None:
+        params = {
+            "max_tokens": max_tokens,
+            "reasoning_effort": reasoning_effort,
+            "temperature": 0,
+        }
+        new_output = cache.get(model, messages, params, cache_env_state, _producer)
+    else:
+        new_output = _producer()
+
     messages.append({"role": "assistant", "content": new_output})
     if log_msgs:
         log_messages(messages, file, prefix=("vlm_review" if image_paths else "chat"))
     return messages
 
-    # ----------------------------------------------------------------------
-    # 2. OpenAI normal mode (original code)
-    # ----------------------------------------------------------------------
-    completion = client.chat.completions.create(
-        model=model,
-        temperature=0,
-        messages=messages,
-        stream=True
-    )
 
-    print("assistant:", file=file)
+def fetch_env_state(main_connection):
+    """Query the simulator for its current state via the GET_STATE command.
 
-    new_output = ""
+    Works with both the pybullet Pipe connection and the metaworld WS
+    connection. Returns a JSON-serializable dict (empty on any failure).
+    """
+    if main_connection is None:
+        return {}
+    try:
+        main_connection.send([config.GET_STATE])
+        resp = main_connection.recv()
+        return resp if isinstance(resp, dict) else {}
+    except Exception as e:
+        print(f"Warning: fetch_env_state failed: {e}")
+        return {}
 
-    for chunk in completion:
-        chunk_content = chunk.choices[0].delta.content
-        finish_reason = chunk.choices[0].finish_reason
-        if chunk_content is not None:
-            print(chunk_content, end="", file=file)
-            new_output += chunk_content
-        else:
-            print("finish_reason:", finish_reason, file=file)
 
-    messages.append({"role": "assistant", "content": new_output})
-    return messages
+def messages_have_images(messages):
+    """True if any message carries image content (image_url part or data: URL)."""
+    for m in messages or []:
+        content = m.get("content") if isinstance(m, dict) else None
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "image_url" or "image_url" in part:
+                        return True
+        elif isinstance(content, str) and content.startswith("data:") and "base64," in content:
+            return True
+    return False
+
+
+def call_llm_cached(main_connection, client, model, new_prompt, messages, role, file=None, image_paths=None, options=None):
+    """Wrapper that fetches the current env state (GET_STATE) and threads it
+    into the cache, then delegates to _call_llm_provider_wrapper.
+
+    The GET_STATE round-trip and level-2 env-state comparison are only used
+    when images are involved (image_paths given or messages already contain
+    image content). Text-only calls are deterministic w.r.t. the env, so a
+    single cache entry (env_state=None) is sufficient.
+
+    If options["cache"] is None the GET_STATE round-trip is skipped entirely.
+    """
+    opts = dict(options or {})
+    if opts.get("cache") is not None and opts.get("cache_env_state") is None:
+        if image_paths or messages_have_images(messages):
+            opts["cache_env_state"] = fetch_env_state(main_connection)
+    return _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=file, image_paths=image_paths, options=opts)
 
 
 

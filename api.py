@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import sys
 import torch
 import math
@@ -63,6 +63,7 @@ class API:
         segmentation_adapter.set_override_bbox_from_string(args.ovr_bbox)
         
         self.client = client
+        self.llm_cache = None
         self.langsam_model = langsam_model
         self.xmem_model = xmem_model
         self.device = device
@@ -470,7 +471,7 @@ class API:
         # Use conversation history; do not summarize
         messages = self.conversation_messages
         self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}, model={review_model}." + ENDC)
-        messages = models.get_chatgpt_output(self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, log_msgs=True, max_tokens=self.args.max_tokens, reasoning_effort=self.args.reasoning_effort)
+        messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
         # Update shared conversation
         self.conversation_messages = messages
         # Parse assistant JSON
@@ -578,7 +579,7 @@ class API:
             self.logger.info(OK + "Finished calculating object bounding cubes!" + ENDC)
             messages = []
             self.logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-            messages = models.get_chatgpt_output(self.client, self.args.language_model, new_prompt, messages, "system", file=sys.stderr, max_tokens=self.args.max_tokens, reasoning_effort=self.args.reasoning_effort)
+            messages = models.call_llm_cached(self.main_connection, self.client, self.args.language_model, new_prompt, messages, "system", file=sys.stderr, options={"max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
             self.logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
             code_block = messages[-1]["content"].split("```python")
             task_completed = self.task_completed

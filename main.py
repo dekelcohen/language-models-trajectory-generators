@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import math
 import openai
 import torch
@@ -297,6 +297,7 @@ if __name__ == "__main__":
     parser.add_argument("--lm-images", action=argparse.BooleanOptionalAction, default=True, help="pass images to LLM prompts (default: True, use --no-lm-images to disable)")
     parser.add_argument("--max-tokens", type=int, default=60000, help="max completion tokens for LLM responses")
     parser.add_argument("--reasoning-effort", type=str, default=None, choices=["xhigh", "high", "medium", "low", "minimal", "none"], help="reasoning effort for reasoning models (OpenRouter, Gemini)")
+    parser.add_argument("--llm-cache", dest="llm_cache_enabled", action=argparse.BooleanOptionalAction, default=True, help="cache LLM responses on disk (default: True, use --no-llm-cache to disable)")
     parser.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")
     parser.add_argument("-m", "--mode", choices=["default", "debug"], default="default", help="select mode to run")
     parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
@@ -407,6 +408,13 @@ if __name__ == "__main__":
     # API set-up
     api = API(args, main_connection, logger, client, langsam_model, xmem_model, device)
 
+    # Shared LLM response cache (None disables caching)
+    llm_cache = None
+    if args.llm_cache_enabled:
+        from providers.llms.llm_cache import LLMCache
+        llm_cache = LLMCache(cache_dir=config.llm_cache_dir, float_tolerance=config.llm_cache_float_tolerance, logger=logger)
+    api.llm_cache = llm_cache
+
     # Pass env sim_state into API for diagnostics
     api.sim_state = sim_state
     api.ee_pos_for_prompt = ee_pos_for_prompt
@@ -462,7 +470,7 @@ if __name__ == "__main__":
             pass
 
         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, role="system", image_paths=image_paths if args.lm_images else None, max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
+        messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, role="system", image_paths=image_paths if args.lm_images else None, options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
         api.conversation_messages = messages
         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     
@@ -509,7 +517,7 @@ if __name__ == "__main__":
                         new_prompt += "\n"
     
                         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
+                        messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, "user", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
                         api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
 
@@ -547,7 +555,7 @@ if __name__ == "__main__":
                         error = False
     
                         logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "system", max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
+                        messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, "system", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
                         api.conversation_messages = messages
                         api.failed_task = False # After retry task --> reset api.failed_task flag to resume normal flow (retry)    
                     else:    
@@ -563,7 +571,7 @@ if __name__ == "__main__":
                             _imgs_paths = None
                         if not args.lm_images:
                             _imgs_paths = None
-                        messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", image_paths=_imgs_paths, max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
+                        messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, "user", image_paths=_imgs_paths, options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
                         api.conversation_messages = messages
                         logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
                         error = False
@@ -576,7 +584,7 @@ if __name__ == "__main__":
                 break
 
             logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-            messages = models.get_chatgpt_output(client, args.language_model, new_prompt, messages, "user", max_tokens=args.max_tokens, reasoning_effort=args.reasoning_effort)
+            messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, "user", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
             api.conversation_messages = messages
             logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     except KeyboardInterrupt:

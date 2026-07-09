@@ -136,11 +136,13 @@ def learn_from_past_trajs(client, args, coords_section, logger):
     # Call LLM
     messages = []
     logger.info(PROGRESS + "Calling LLM to learn in-context examples from past trajectories..." + ENDC)
-    messages = models.get_chatgpt_output(
+    messages = models._call_llm_provider_wrapper(
         client, args.language_model, prompt, messages,
         role="user",
-        max_tokens=args.max_tokens,
-        reasoning_effort=args.reasoning_effort,
+        options={
+            "max_tokens": args.max_tokens,
+            "reasoning_effort": args.reasoning_effort,
+        },
     )
     logger.info(OK + "Finished learning from past trajectories!" + ENDC)
     # Print the last assistant response
