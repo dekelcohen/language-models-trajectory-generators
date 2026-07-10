@@ -5,7 +5,7 @@ REVIEW_PROMPT = (
     "3D Coordinates Context:\n[INSERT 3D COORDINATES PROMPT SECTION]\n\n"
     "Key frame file paths (chronological):\n[INSERT FRAME PATHS]\n\n"
     "Instructions:\n\n"
-    "Carefully compare the plan and execution in the conversation history with the visual evidence in the provided frames. focus on positions and orientation of robot arm gripper in relation to the target object(s). Only use the rendered text on the image as the plan desc, it should match actual visual state" 
+    "Carefully compare the plan and execution in the conversation history with the visual evidence in the provided frames (reference cam+frame numbers). focus on positions and orientation of robot arm gripper in relation to the target object(s). Only use the rendered text on the image as the plan desc, it should match actual visual state" 
     "Did all executed trajectories succeeded as planned ?"
     "If grasping: Did the gripper actually grasped the target object ?"
     "If grasping: Did the grasp pose ensured a stable post-grasp actions / trajectory (object moved?) or can it be improved ?"
