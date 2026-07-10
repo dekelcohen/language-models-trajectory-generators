@@ -611,6 +611,221 @@ task_completed()
 
 """
 
+IN_CONTEXT_EXAMPLE_OPEN_DOOR_LEARNED_29_06 = """
+- Orientation mapping: Rotation encodes the closing-motion direction. To make the fingers parallel to the lever, set rotation = handle_angle_long + π/2 (not = handle_angle_long). This change was critical for a stable lever pinch across its thickness.
+- Offset strategy near the door: A larger short-axis offset toward the door at hover plus a small micro-nudge at approach height reliably seats one jaw behind the lever/rosette before closing. Too-small offsets left both jaws outside.
+- Grasp height: Closing slightly below the lever’s mid-height improves capture compared to closing exactly at mid-height.
+- Contact-phase separation: Separate lateral alignment at safe height, vertical descent, micro-nudge, close, then press; avoid coupling lateral insertion and vertical contact in a single diagonal move.
+- Post-grasp actions: Apply a decisive but bounded downward press to unlatch, then a long pull along the negative door-normal. Optionally, add a brief retreat along the negative short-axis right after closing to confirm capture before the long pull.
+
+Generalized in-context example (parameterized; no hard-coded magic numbers)
+
+```python
+# Generalized door-opening via lever: parameterized template
+# Inputs:
+#   handle_center: [x, y, z] of lever midpoint
+#   handle_dims:   dict with keys {"length", "thickness", "height"} in meters
+#                  - length: lever long-axis extent
+#                  - thickness: lever thickness to pinch across
+#                  - height: vertical size of the lever assembly/rosette region
+#   handle_angle_long: lever long-axis angle in radians (XY plane)
+#   door_center:   [x, y, z] on the door plane near the handle
+#   door_dims:     dict with keys {"width"}; width used to scale pull distance
+#   gripper:       dict with keys {"max_aperture"}; e.g., {"max_aperture": 0.08}
+#
+# Conventions:
+#   - Rotation value is the closing-motion direction; fingers are perpendicular to it.
+#   - To keep fingers parallel to the lever, set rotation = handle_angle_long + π/2.
+#   - Coordinate system: x increases left, y decreases away from you, z increases upward.
+
+import math
+
+def clamp(val, vmin, vmax):
+    return max(vmin, min(vmax, val))
+
+def normalize_angle(theta):
+    # Map to [-pi, pi]
+    while theta > math.pi:
+        theta -= 2.0 * math.pi
+    while theta < -math.pi:
+        theta += 2.0 * math.pi
+    return theta
+
+def unit(vx, vy):
+    n = math.hypot(vx, vy)
+    if n == 0.0:
+        return [0.0, 0.0]
+    return [vx / n, vy / n]
+
+def points_for(pose_start, pose_end, min_points=5, base_scale=40.0):
+    # Heuristic: more points for longer moves; keep at least min_points
+    dx = pose_end[0] - pose_start[0]
+    dy = pose_end[1] - pose_start[1]
+    dz = pose_end[2] - pose_start[2]
+    dtheta = abs(pose_end[3] - pose_start[3])
+    dist = math.sqrt(dx*dx + dy*dy + dz*dz) + 0.1 * dtheta
+    return max(min_points, int(clamp(dist * base_scale, min_points, 30)))
+
+def pose(x, y, z, theta):
+    return [x, y, z, theta]
+
+def open_door_via_lever(handle_center, handle_dims, handle_angle_long, door_center, door_dims, gripper):
+    # Derived unit vectors
+    long_u = [math.cos(handle_angle_long), math.sin(handle_angle_long)]
+    # Closing-motion direction must be perpendicular to the lever axis so fingers are parallel to lever:
+    theta_work = normalize_angle(handle_angle_long + math.pi/2.0)
+    short_u = [math.cos(theta_work), math.sin(theta_work)]  # closing-motion direction
+
+    # Door-normal direction in XY plane
+    to_door_xy = [door_center[0] - handle_center[0], door_center[1] - handle_center[1]]
+    to_door_u = unit(to_door_xy[0], to_door_xy[1])
+
+    # Ensure the short-axis toward the door (inner jaw toward door/rosette)
+    dot_sd = short_u[0]*to_door_u[0] + short_u[1]*to_door_u[1]
+    toward_door_short_u = short_u if dot_sd >= 0.0 else [-short_u[0], -short_u[1]]
+
+    # Gripper/geometry checks
+    lever_thickness = handle_dims["thickness"]
+    if lever_thickness >= gripper["max_aperture"]:
+        raise RuntimeError("Lever too thick for the gripper aperture; cannot pinch across thickness.")
+
+    lever_len = handle_dims["length"]
+    lever_h = handle_dims["height"]
+    door_width = door_dims.get("width", None)
+
+    # Hover and approach heights (avoid magic numbers by scaling with lever height and safety margins)
+    hover_z = handle_center[2] + clamp(0.3 + 1.5 * lever_h, 0.25, 0.5)   # safe clearance above handle
+    approach_z = handle_center[2] + clamp(0.1 + 0.5 * lever_h, 0.10, 0.20)
+    preclose_z = handle_center[2] + clamp(0.05 * lever_h, 0.01, 0.04)
+    grasp_z = handle_center[2] - clamp(0.15 * lever_h, 0.005, 0.02)       # slightly below mid-height
+
+    # Offsets along short-axis toward door: gross offset at hover + micro-nudge at approach
+    # Choose based on lever geometry and a small clearance band
+    offset_hover = clamp(0.2 * lever_len, 0.02, 0.06)
+    micro_nudge = clamp(0.5 * lever_thickness, 0.004, 0.010)
+
+    # Downward press to unlatch; scaled to lever height and bounded
+    press_depth = clamp(0.4 * lever_h, 0.02, 0.05)
+    after_press_relief = clamp(0.2 * lever_h, 0.006, 0.02)
+
+    # Pull distance: prefer a fraction of door width; otherwise use a conservative default
+    pull_dist = clamp((0.8 * door_width) if door_width is not None else 0.4, 0.25, 0.6)
+    pull_u = [-to_door_u[0], -to_door_u[1]]  # away from door
+
+    # Optional capture-check retreat distance along negative short-axis after closing
+    capture_check = clamp(0.5 * micro_nudge, 0.002, 0.006)
+
+    # Report computed params (3 decimals) for debugging
+    print(f"theta_work = {theta_work:.3f} rad")
+    print(f"hover_z = {hover_z:.3f} m, approach_z = {approach_z:.3f} m, preclose_z = {preclose_z:.3f} m, grasp_z = {grasp_z:.3f} m")
+    print(f"offset_hover = {offset_hover:.3f} m, micro_nudge = {micro_nudge:.3f} m")
+    print(f"press_depth = {press_depth:.3f} m, after_press_relief = {after_press_relief:.3f} m")
+    print(f"pull_dist = {pull_dist:.3f} m")
+    print(f"to_door_u = [{to_door_u[0]:.3f}, {to_door_u[1]:.3f}], short_u(toward door) = [{toward_door_short_u[0]:.3f}, {toward_door_short_u[1]:.3f}]")
+
+    # Start from current end-effector pose (provided by the environment)
+    current_pose = CURRENT_EE_POSE  # assumed injected by environment as [x, y, z, theta]
+
+    # Ensure gripper open
+    open_gripper()
+
+    # trajectory1: Lift to hover at current XY
+    target1 = pose(current_pose[0], current_pose[1], hover_z, current_pose[3])
+    trajectory1 = generate_linear_trajectory("Lift to high hover at current XY", current_pose, target1, num_points=points_for(current_pose, target1))
+    execute_trajectory(trajectory1)
+    current_pose = target1
+
+    # trajectory2: In-place yaw to working orientation (closing-motion ⟂ lever axis)
+    target2 = pose(current_pose[0], current_pose[1], current_pose[2], theta_work)
+    trajectory2 = generate_linear_trajectory("Yaw in place to working orientation (fingers parallel to lever)", current_pose, target2, num_points=points_for(current_pose, target2))
+    execute_trajectory(trajectory2)
+    current_pose = target2
+
+    # trajectory3: Move to hover above handle center
+    target3 = pose(handle_center[0], handle_center[1], hover_z, theta_work)
+    trajectory3 = generate_linear_trajectory("Move to hover above handle center", current_pose, target3, num_points=points_for(current_pose, target3))
+    execute_trajectory(trajectory3)
+    current_pose = target3
+
+    # trajectory4: Apply short-axis offset toward door at hover
+    target4 = pose(current_pose[0] + offset_hover * toward_door_short_u[0],
+                   current_pose[1] + offset_hover * toward_door_short_u[1],
+                   hover_z, theta_work)
+    trajectory4 = generate_linear_trajectory("Short-axis offset toward door at hover", current_pose, target4, num_points=points_for(current_pose, target4))
+    execute_trajectory(trajectory4)
+    current_pose = target4
+
+    # trajectory5: Descend to approach height
+    target5 = pose(current_pose[0], current_pose[1], approach_z, theta_work)
+    trajectory5 = generate_linear_trajectory("Descend to approach height above lever", current_pose, target5, num_points=points_for(current_pose, target5))
+    execute_trajectory(trajectory5)
+    current_pose = target5
+
+    # trajectory6: Micro-nudge toward door at approach height
+    target6 = pose(current_pose[0] + micro_nudge * toward_door_short_u[0],
+                   current_pose[1] + micro_nudge * toward_door_short_u[1],
+                   approach_z, theta_work)
+    trajectory6 = generate_linear_trajectory("Micro-nudge toward door at approach height", current_pose, target6, num_points=points_for(current_pose, target6, min_points=5))
+    execute_trajectory(trajectory6)
+    current_pose = target6
+
+    # trajectory7: Descend to pre-close height
+    target7 = pose(current_pose[0], current_pose[1], preclose_z, theta_work)
+    trajectory7 = generate_linear_trajectory("Descend to pre-close height", current_pose, target7, num_points=points_for(current_pose, target7))
+    execute_trajectory(trajectory7)
+    current_pose = target7
+
+    # trajectory8: Final descend to grasp height (slightly below mid-height) and close
+    target8 = pose(current_pose[0], current_pose[1], grasp_z, theta_work)
+    trajectory8 = generate_linear_trajectory("Descend to grasp height", current_pose, target8, num_points=points_for(current_pose, target8, min_points=6))
+    execute_trajectory(trajectory8)
+    current_pose = target8
+    close_gripper()
+
+    # Optional capture-check: slight retreat along negative short-axis to confirm lever is captured
+    target8b = pose(current_pose[0] - capture_check * toward_door_short_u[0],
+                    current_pose[1] - capture_check * toward_door_short_u[1],
+                    current_pose[2], theta_work)
+    trajectory8b = generate_linear_trajectory("Capture-check retreat along negative short-axis", current_pose, target8b, num_points=points_for(current_pose, target8b, min_points=5))
+    execute_trajectory(trajectory8b)
+    current_pose = target8b
+
+    # trajectory9: Downward press to unlatch
+    target9 = pose(current_pose[0], current_pose[1], current_pose[2] - press_depth, theta_work)
+    trajectory9 = generate_linear_trajectory("Downward press to unlatch", current_pose, target9, num_points=points_for(current_pose, target9))
+    execute_trajectory(trajectory9)
+    current_pose = target9
+
+    # trajectory10: Slight raise after pressing
+    target10 = pose(current_pose[0], current_pose[1], current_pose[2] + after_press_relief, theta_work)
+    trajectory10 = generate_linear_trajectory("Slight raise after unlatching press", current_pose, target10, num_points=points_for(current_pose, target10))
+    execute_trajectory(trajectory10)
+    current_pose = target10
+
+    # trajectory11: Pull outward along negative door-normal to open
+    target11 = pose(current_pose[0] + pull_dist * pull_u[0],
+                    current_pose[1] + pull_dist * pull_u[1],
+                    current_pose[2], theta_work)
+    trajectory11 = generate_linear_trajectory("Pull outward along negative door normal to open", current_pose, target11, num_points=points_for(current_pose, target11))
+    execute_trajectory(trajectory11)
+    current_pose = target11
+
+    # Release and retreat upward
+    open_gripper()
+    target12 = pose(current_pose[0], current_pose[1], hover_z, theta_work)
+    trajectory12 = generate_linear_trajectory("Retreat upward to hover", current_pose, target12, num_points=points_for(current_pose, target12))
+    execute_trajectory(trajectory12)
+    current_pose = target12
+
+    task_completed()
+
+# Example of how to call:
+# open_door_via_lever(handle_center, {"length": L, "thickness": T, "height": H},
+#                     handle_angle_long, door_center, {"width": W}, {"max_aperture": 0.08})
+```
+
+"""
+
 IN_CONTEXT_EXAMPLE = IN_CONTEXT_EXAMPLE_GRASP # IN_CONTEXT_EXAMPLE_OPEN_DOOR # IN_CONTEXT_EXAMPLE_GRASP # + OPEN_HINGED_DOOR_EXTRACT_PARAMS
 
 
