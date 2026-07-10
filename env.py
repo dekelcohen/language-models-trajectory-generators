@@ -12,7 +12,7 @@ from robot import Robot
 from common_utils import Trajectory
 from providers.env_sim_util import _rotmat_to_quat_xyzw
 from config import OK, PROGRESS, FAIL, ENDC
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
 # --- Debug helpers ------------------------------------------------------
 def add_debug_sphere(pos_xyz, radius=0.015, color=(1, 0, 0, 1)):
     """
@@ -437,6 +437,8 @@ class SimEnvDoor(SimEnvBase):
         self.door_hinge_index = None
         self.latch_index = None
         self.door_handle_latch = None
+        self.board_id = None
+        self.pole_id = None
 
         # Compute head camera pose identical to GUI spherical camera
         # and use it statically in DIRECT (no dynamic debug mirroring).
@@ -520,9 +522,81 @@ class SimEnvDoor(SimEnvBase):
 
             if self.latch_index is not None:
                 p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
+            
+            HIDE_DOOR_WITH_OBJECT = True    
+            if HIDE_DOOR_WITH_OBJECT:
+                self._load_pole()
+                #self._load_board()
         except Exception as e:
             print("[Env] Failed to load or initialize adroit_door URDF:", e)
             traceback.print_exc()
+
+    def _load_pole(self):
+        """Add a vertical pole standing between the robot arm and the door.
+
+        The pole has mass and a collision shape, so the robot arm can push it
+        over and make it fall to the ground.
+        """
+        # Robot base ~[-0.3, 0.5, 0.0], door ~[-0.11, 0.04, 0.25]; place pole between
+        # them WITHOUT overlapping the door. Overlapping the door at spawn causes a
+        # large contact/penetration force that ejects the pole and topples it at
+        # sim start. This clear position spawns upright and stable, yet the robot
+        # arm can still push it over later.
+        pole_height = 1.0
+        pole_radius = 0.15
+        pole_position = [-0.15, 0.30, pole_height / 2.0]
+        pole_collision = p.createCollisionShape(
+            p.GEOM_CYLINDER, radius=pole_radius, height=pole_height
+        )
+        pole_visual = p.createVisualShape(
+            p.GEOM_CYLINDER,
+            radius=pole_radius,
+            length=pole_height,
+            rgbaColor=[0.5, 0.5, 0.55, 1.0],
+        )
+        self.pole_id = p.createMultiBody(
+            baseMass=1.0,
+            baseCollisionShapeIndex=pole_collision,
+            baseVisualShapeIndex=pole_visual,
+            basePosition=pole_position,
+        )
+        p.changeDynamics(self.pole_id, -1, lateralFriction=1.0, spinningFriction=0.5)
+        return self.pole_id
+        
+    def _load_board(self):
+        """Add a vertical board leaning against the door.
+
+        The board has mass and a collision shape, so the robot arm can push it
+        over. It starts tilted toward the door so it comes to rest leaning on
+        the door panel (it may settle/fall onto the door when the sim starts).
+        """
+        # Robot base ~[-0.3, 0.5, 0.0], door ~[-0.11, 0.04, 0.25]; lean board on the door.
+        board_height = 0.6
+        board_width = 0.6   # 10x the previous pole width (0.06)
+        board_depth = 0.06
+        half_extents = [board_width / 2.0, board_depth / 2.0, board_height / 2.0]
+
+        # Tilt the board toward the door (pitch about y-axis) so it leans instead
+        # of standing upright (a thin tall board is unstable and would topple).        
+        board_orientation_q = p.getQuaternionFromEuler([0.1422, 0.0000, 0.1975])
+        # Place the base near the door so the tilted top rests against the panel.                
+        board_position = [-0.2429, 0.2063, 0.4992]
+
+        board_collision = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents)
+        board_visual = p.createVisualShape(
+            p.GEOM_BOX,
+            halfExtents=half_extents,
+            rgbaColor=[0.5, 0.5, 0.55, 1.0],
+        )
+        self.board_id = p.createMultiBody(
+            baseMass=1.0,
+            baseCollisionShapeIndex=board_collision,
+            baseVisualShapeIndex=board_visual,
+            basePosition=board_position,
+            baseOrientation=board_orientation_q,
+        )
+        p.changeDynamics(self.board_id, -1, lateralFriction=1.0, spinningFriction=0.5)
+        return self.board_id
 
     def get_state(self):
         """Return door-related indices and world positions for diagnostics.       
@@ -534,7 +608,10 @@ class SimEnvDoor(SimEnvBase):
             "door_handle_latch": self.door_handle_latch,
             "door_handle_pos": None,
             "latch_pos": None,
-            "hinge_pos": None,           
+            "hinge_pos": None,
+            "pole_id": self.pole_id,
+            "pole_pos": None,
+            "pole_dims": None,
         }
         try:
             if self.door_id is not None:
@@ -547,9 +624,22 @@ class SimEnvDoor(SimEnvBase):
                 if self.door_hinge_index is not None and self.door_hinge_index >= 0:
                     _hinge = p.getLinkState(self.door_id, int(self.door_hinge_index), computeForwardKinematics=True)
                     state["hinge_pos"] = list(map(float, _hinge[0]))
-           
+
         except Exception as e:
             print("[Env] Warning: SimEnvDoor.get_state failed to read positions:", e)
+            traceback.print_exc()
+        try:
+            if self.pole_id is not None:
+                pos, _ori = p.getBasePositionAndOrientation(self.pole_id)
+                aabb_min, aabb_max = p.getAABB(self.pole_id, -1)
+                state["pole_pos"] = list(map(float, pos))
+                state["pole_dims"] = [
+                    float(aabb_max[0] - aabb_min[0]),
+                    float(aabb_max[1] - aabb_min[1]),
+                    float(aabb_max[2] - aabb_min[2]),
+                ]
+        except Exception as e:
+            print("[Env] Warning: SimEnvDoor.get_state failed to read pole:", e)
             traceback.print_exc()
         return state
 
@@ -855,6 +945,21 @@ def run_simulation_environment(args, env_connection, logger):
                 except Exception:
                     env_connection.send({})
 
+            elif env_connection_received[0] == GET_STATE:
+                try:
+                    _eef = p.getLinkState(robot.id, robot.ee_index, computeForwardKinematics=True)
+                    eef_pos = list(map(float, _eef[0]))
+                except Exception:
+                    eef_pos = list(map(float, config.ee_start_position))
+                try:
+                    sim_state = env.simenv.get_state()
+                except Exception:
+                    sim_state = {}
+                try:
+                    env_connection.send({"eef_pos": eef_pos, "sim_state": sim_state})
+                except Exception:
+                    env_connection.send({})
+
             elif env_connection_received[0] == VISUALIZE_GRASP_POSE:
                 grasp_poses = env_connection_received[1]
                 try:
@@ -1107,7 +1212,22 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
         if connection_mode == p.GUI:
             p.setRealTimeSimulation(1)
             print(tag + " Running. Click-and-drag the door; press ESC to quit.")
+            print(tag + " Click in the viewport to print the board's current pose "
+                        "(paste it into SimEnvDoor._load_board).")
+            board_id = getattr(env.simenv, "board_id", None)
             while p.isConnected():
+                # On any mouse button press, print the board pose so it can be
+                # copied back into _load_board() as the initial position/orientation.
+                if board_id is not None:
+                    for ev in p.getMouseEvents():
+                        # ev = (eventType, mousePosX, mousePosY, buttonIndex, buttonState)
+                        # eventType 2 = button event; buttonState 3 = pressed-down
+                        if ev[0] == 2 and ev[4] & p.KEY_WAS_TRIGGERED:
+                            b_pos, b_orn_q = p.getBasePositionAndOrientation(board_id)
+                            b_orn_e = p.getEulerFromQuaternion(b_orn_q)
+                            print(f"{tag} board_position = [{b_pos[0]:.4f}, {b_pos[1]:.4f}, {b_pos[2]:.4f}]")
+                            print(f"{tag} board_orientation_e = [{b_orn_e[0]:.4f}, {b_orn_e[1]:.4f}, {b_orn_e[2]:.4f}]  "
+                                  f"# quaternion = [{b_orn_q[0]:.4f}, {b_orn_q[1]:.4f}, {b_orn_q[2]:.4f}, {b_orn_q[3]:.4f}]")
                 time.sleep(0.01)
     except Exception as e:
         print(tag + " Exception:", e)

@@ -291,14 +291,14 @@ class Robot:
                 
                 wrist_pos = np.array(camera_position)
                 
-                # --- NEW: "Drone" Over-the-Shoulder Tracking ---
-                # 1. Pull straight back along the line of sight (40cm)
-                pullback_pos = wrist_pos - (0.4 * camera_vector)
+                # --- "Drone" Over-the-Shoulder Tracking ---
+                # 1. Pull straight back along the line of sight
+                pullback_pos = wrist_pos - (config.wrist_camera_pullback * camera_vector)
                 
-                # 2. Lift UP towards the global ceiling (0cm) to get above the arm
-                global_up_shift = np.array([0.0, 0.0, 0.0])
+                # 2. Vertical offset (negative lowers the pose to see the hinged handle)
+                global_up_shift = np.array([0.0, 0.0, config.wrist_camera_up_shift])
                 
-                # 3. Shift RIGHT (30cm) to peek around the elbow/forearm
+                # 3. Shift sideways (right->left view) to peek around the elbow/forearm
                 # We calculate global 'right' by taking the cross product of where we are looking and the ceiling
                 right_vector = np.cross(camera_vector, np.array([0, 0, 1]))
                 if np.linalg.norm(right_vector) > 1e-3:
@@ -306,7 +306,7 @@ class Robot:
                 else:
                     right_vector = np.array([1, 0, 0]) # Fallback if looking straight down
                 
-                lateral_shift = 0.3 * right_vector
+                lateral_shift = config.wrist_camera_lateral_shift * right_vector
                 
                 # Apply all shifts to get the final camera position
                 camera_position = pullback_pos + global_up_shift + lateral_shift

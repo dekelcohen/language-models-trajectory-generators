@@ -14,6 +14,6 @@ Past trajectories: [INSERT PAST TRAJS]
 
 Task: analyze past trajectories to extract a better in-context example (to be inserted in main prompt) that guides the Agent to success.
 Extract Robot Agent Task description (user command) from the past traj
-Compare failed attempts to succeesful ones and focus on the key differences in grasping, post-grasp actions, locations and trajs calc 
-Output: A generalized in-context example - make sure no hard coded magic numbers
+Compare failed attempts (if any) to successful ones and focus on the key differences in grasping, post-grasp actions, locations and trajs calc 
+Output: A generalized in-context example - make sure no hard coded magic numbers and helps even if small changes in env and poses 
 """

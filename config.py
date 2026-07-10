@@ -68,6 +68,14 @@ camera_target_position = [0.0, 0.6, 0.3]
 
 wrist_camera_offset_sawyer = 0.125
 
+# Wrist camera "drone" over-the-shoulder framing (used when approaching the handle)
+# - pullback: distance pulled straight back along the gripper line of sight
+# - up_shift: vertical offset applied to the camera (negative = lower the pose)
+# - lateral_shift: sideways offset along global 'right' so the view looks right->left
+wrist_camera_pullback = 0.4
+wrist_camera_up_shift = -0.2
+wrist_camera_lateral_shift = 0.3
+
 # Object grasping
 point_cloud_top_surface_filter = 0.06
 bounding_cube_depth_offset = 0.06
@@ -118,6 +126,10 @@ CAPTURE_TRAJECTORY_FRAME = 19
 GET_ROBOT_STATE = 20
 VISUALIZE_GRASP_POSE = 21
 VISUALIZE_BOUNDING_BOX = 22
+
+# LLM response cache
+llm_cache_dir = "./cache"               # root cache folder (auto-created)
+llm_cache_float_tolerance = 1e-2        # abs diff allowed per float when smart-matching env state
 
 # Paths
 images_folder = "./images" 

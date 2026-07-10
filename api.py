@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import sys
 import torch
 import math
@@ -16,6 +16,7 @@ from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC, WARNING
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
 from helpers.image_utils import list_file_paths
+from task_state import TaskState
 
 def create_trajectory_videos(logger):
     """Create trajectory debug videos from captured frames (head and wrist).
@@ -63,27 +64,20 @@ class API:
         segmentation_adapter.set_override_bbox_from_string(args.ovr_bbox)
         
         self.client = client
+        self.llm_cache = None
         self.langsam_model = langsam_model
         self.xmem_model = xmem_model
         self.device = device
-        self.conversation_messages = []
-        # Current trajectory step (the number on saved images)
+        # Current trajectory step (the number on saved images) - LONG-LIVED, continuous across subtasks
         self.trajectory_step = 1
-        # Start index of the current attempt (used for VLM review frame sampling)
-        self.start_attempt_trajectory_step = 1
-        self.segmentation_texts = []
-        self.segmentation_count = 0
-        self.trajectory_length = 0
-        self.attempt_number = 0
-        self.completed_task = False
-        self.failed_task = False
         self.head_camera_position = None
         self.head_camera_orientation_q = None
         self.wrist_camera_position = None
         self.wrist_camera_orientation_q = None
         self.head_image_size = None
         self.wrist_image_size = None
-        self.command = None
+        # Per-(sub)task mutable state. Replaced with a fresh TaskState per subtask.
+        self.task = TaskState(start_trajectory_step=self.trajectory_step)
 
     def _visualize_matched_bounding_boxes(self, bounding_cubes_world_coordinates, segmentation_texts):
         """Visualize matched 3D bounding boxes when --vis-box is enabled."""
@@ -184,7 +178,7 @@ class API:
             depth_image_head = Image.open(config.depth_image_head_path).convert("L")
             depth_array = (np.array(depth_image_head).astype(np.float32)) / 255.0
         
-        if self.segmentation_count == 0:
+        if self.task.segmentation_count == 0:
             xmem_image = Image.fromarray(np.zeros_like(depth_array)).convert("L")
             xmem_image.save(config.xmem_input_path)
 
@@ -196,7 +190,7 @@ class API:
             rgb_image_head,
             self.langsam_model,
             segmentation_texts,
-            self.segmentation_count,
+            self.task.segmentation_count,
             provider=getattr(self.args, "seg_provider", "langsam"),
         )
         self.logger.info(OK + "Finished segmenting head camera image!" + ENDC)
@@ -205,7 +199,7 @@ class API:
         try:
             from models import visualize_segmentation_overlay
             prov = getattr(self.args, "seg_provider", "langsam")
-            out_path = config.seg_overlay_image_path.format(provider=str(prov), object=self.segmentation_count)
+            out_path = config.seg_overlay_image_path.format(provider=str(prov), object=self.task.segmentation_count)
             status = visualize_segmentation_overlay(rgb_image_head, model_predictions, boxes, segmentation_texts, out_path)
             fname = os.path.join(os.path.dirname(out_path), os.path.basename(out_path))
             if status.get("had_masks") or status.get("had_boxes"):
@@ -227,13 +221,13 @@ class API:
             depth_array,
             self.head_camera_position,
             self.head_camera_orientation_q,
-            self.segmentation_count,
+            self.task.segmentation_count,
             cam_info=self.cam_info,
         )
 
         utils.save_xmem_image(masks)
 
-        self.segmentation_texts.extend(segmentation_texts)
+        self.task.segmentation_texts.extend(segmentation_texts)
 
         self.logger.info(PROGRESS + "Adding bounding cubes to the environment..." + ENDC)
         self.main_connection.send([ADD_BOUNDING_CUBES, bounding_cubes_world_coordinates])
@@ -269,7 +263,7 @@ class API:
                 print("Orientation along shorter side (length):", np.around(bounding_cubes_orientations[i][1], 3))
                 print("Orientation along longer side (width):", np.around(bounding_cubes_orientations[i][0], 3), "\n")
 
-        self.segmentation_count += 1
+        self.task.segmentation_count += 1
 
 
     def get_grasp_poses(self, object_name):
@@ -368,7 +362,7 @@ class API:
                     pass
         except Exception:
             pass
-        self.trajectory_length += len(trajectory.points)
+        self.task.trajectory_length += len(trajectory.points)
 
 
 
@@ -436,7 +430,7 @@ class API:
         Does not mutate the environment.
         """
         from prompts.review_prompt import REVIEW_PROMPT        
-        start_idx = self.start_attempt_trajectory_step
+        start_idx = self.task.start_attempt_trajectory_step
         # Determine review model: "vlm" uses main model, "vlm:<model>" uses specified model
         review_provider = self.args.review_provider
         if review_provider.startswith("vlm:"):
@@ -463,16 +457,16 @@ class API:
             frame_paths = frame_paths[:config.max_allowed_vlm_images - 1]
                 
         # Build prompt with placeholders
-        prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.command)) \
+        prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.task.command)) \
                               .replace("[INSERT 3D COORDINATES PROMPT SECTION]", self.coords_section) \
                               .replace("[INSERT FRAME PATHS]", "\n".join(frame_paths))
                               
         # Use conversation history; do not summarize
-        messages = self.conversation_messages
+        messages = self.task.conversation_messages
         self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}, model={review_model}." + ENDC)
-        messages = models.get_chatgpt_output(self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, log_msgs=True, max_tokens=self.args.max_tokens, reasoning_effort=self.args.reasoning_effort)
+        messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
         # Update shared conversation
-        self.conversation_messages = messages
+        self.task.conversation_messages = messages
         # Parse assistant JSON
         raw = messages[-1]["content"] if messages and isinstance(messages[-1], dict) else ""
         try:
@@ -489,23 +483,27 @@ class API:
         success = bool(resp.get("success") is True)
         reason = resp.get("reasoning", "")
         improvement_steps = resp.get("improvement_steps", "")
+        self.task.review_reason = reason
+        self.task.review_improvement_steps = improvement_steps
         self.logger.info((OK if success else FAIL) + f"Review: success={success}. See details in above json" + ENDC)
         if success:
-            self.completed_task = True
+            self.task.completed_task = True
+            self.task.review_succeeded = True
         else:
-            self.failed_task = True
+            self.task.failed_task = True
 
     def task_completed(self):        
         create_trajectory_videos(self.logger)
         
-        self.attempt_number += 1
-        max_attempts = self.args.attempts
+        self.task.attempt_number += 1
+        max_attempts = self.task.max_attempts or self.args.attempts
         is_replay = bool(self.args.replay_log)
         # On the final attempt, skip review and accept the result
         # (in replay mode, ignore max_attempts so all blocks execute)
-        if not is_replay and self.attempt_number >= max_attempts:
-            self.completed_task = True
-            self.logger.info(PROGRESS + f"task_completed final attempt {self.attempt_number}/{max_attempts} -- accepting result" + ENDC)
+        if not is_replay and self.task.attempt_number >= max_attempts:
+            self.task.completed_task = True
+            self.task.accepted_without_review = True
+            self.logger.info(PROGRESS + f"task_completed final attempt {self.task.attempt_number}/{max_attempts} -- accepting result" + ENDC)
             return
         self.logger.info(PROGRESS + "Waiting to execute all generated trajectories..." + ENDC)
         self.main_connection.send([TASK_COMPLETED])
@@ -514,19 +512,19 @@ class API:
 
         # Skip review entirely when replaying without --replay-vlm-review
         if is_replay and not self.args.replay_vlm_review:
-            self.logger.info(PROGRESS + f"Replay mode: skipping VLM review (attempt {self.attempt_number})" + ENDC)
-            self.failed_task = True
+            self.logger.info(PROGRESS + f"Replay mode: skipping VLM review (attempt {self.task.attempt_number})" + ENDC)
+            self.task.failed_task = True
             return
 
         # Dispatch review provider
         if self.args.review_provider == "xmem":
             # Legacy XMem path preserved
             self.logger.info(PROGRESS + "Generating XMem output..." + ENDC)
-            masks = models.get_xmem_output(self.xmem_model, self.device, self.trajectory_length)
+            masks = models.get_xmem_output(self.xmem_model, self.device, self.task.trajectory_length)
             self.logger.info(OK + "Finished generating XMem output!" + ENDC)
 
             num_objects = len(np.unique(masks[0])) - 1
-            new_prompt = SUCCESS_DETECTION_PROMPT.replace("[INSERT TASK]", self.command)
+            new_prompt = SUCCESS_DETECTION_PROMPT.replace("[INSERT TASK]", self.task.command)
             new_prompt += "\n"
             self.logger.info(PROGRESS + "Calculating object bounding cubes..." + ENDC)
 
@@ -570,7 +568,7 @@ class API:
                             min_index = np.argmin(circular_difference)
                             orientation = possible_orientations[min_index]
                             object_orientations.append(orientation)
-                new_prompt += self.segmentation_texts[object - 1] + " trajectory positions and orientations:\n"
+                new_prompt += self.task.segmentation_texts[object - 1] + " trajectory positions and orientations:\n"
                 new_prompt += "Positions:\n"
                 new_prompt += str(np.around([position for p, position in enumerate(object_positions) if p % config.xmem_lm_input_every == 0], 3)) + "\n"
                 new_prompt += "Orientations:\n"
@@ -578,7 +576,7 @@ class API:
             self.logger.info(OK + "Finished calculating object bounding cubes!" + ENDC)
             messages = []
             self.logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-            messages = models.get_chatgpt_output(self.client, self.args.language_model, new_prompt, messages, "system", file=sys.stderr, max_tokens=self.args.max_tokens, reasoning_effort=self.args.reasoning_effort)
+            messages = models.call_llm_cached(self.main_connection, self.client, self.args.language_model, new_prompt, messages, "system", file=sys.stderr, options={"max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
             self.logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
             code_block = messages[-1]["content"].split("```python")
             task_completed = self.task_completed
@@ -589,20 +587,20 @@ class API:
                     exec(code)
             return
         # VLM review path
-        self.logger.info(PROGRESS + f"VLM review after attempt {self.attempt_number}/{max_attempts}..." + ENDC)
+        self.logger.info(PROGRESS + f"VLM review after attempt {self.task.attempt_number}/{max_attempts}..." + ENDC)
         try:
             self.run_vlm_review()
         except Exception as e:
             self.logger.info(FAIL + f"VLM review failed: {e}" + ENDC)
             # Fall back to marking failure; main loop will replan
-            self.failed_task = True
+            self.task.failed_task = True
         return
     
     def task_failed(self):
         """Mark failure without resetting the environment.
         Keeps the current sim state to mimic real-world retries.
         """
-        self.failed_task = True
+        self.task.failed_task = True
         # Do not reset env or counters; retries will continue from current state
 
 

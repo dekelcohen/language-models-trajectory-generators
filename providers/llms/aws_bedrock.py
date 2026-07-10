@@ -215,32 +215,34 @@ def call_llm(messages, bedrock_model_id=None, max_tokens=60000, temperature=0, r
 if __name__ == "__main__":
     from providers.llms.azure_openai import encode_image
 
-    MODEL = os.environ.get("AWS_BEDROCK_MODEL_ID", "eu.anthropic.claude-sonnet-4-6")
+    MODEL = os.environ.get("AWS_BEDROCK_MODEL_ID", "eu.anthropic.claude-opus-4-8")
     if MODEL is None:
         raise ValueError("Set AWS_BEDROCK_MODEL_ID environment variable to run tests.")
 
     # --- Test 1: Text-only query ---
-    print("=" * 60)
-    print(f"Test 1: Text-only query  (model: {MODEL})")
-    print("=" * 60)
-    messages_text = [
-        {"role": "user", "content": "What is 2+2? Answer in one word."}
-    ]
-    response_text = call_llm(messages_text, bedrock_model_id=MODEL)
-    print(f"Response: {response_text}\n")
+    if False:
+        print("=" * 60)
+        print(f"Test 1: Text-only query  (model: {MODEL})")
+        print("=" * 60)
+        messages_text = [
+            {"role": "user", "content": "What is 2+2? Answer in one word."}
+        ]
+        response_text = call_llm(messages_text, bedrock_model_id=MODEL)
+        print(f"Response: {response_text}\n")
 
     # --- Test 2: Text + image query ---
     print("=" * 60)
     print(f"Test 2: Text + image query  (model: {MODEL})")
     print("=" * 60)
-    image_path = "./images/rgb_image_head.png"
+    image_path = "./images/rgb_image_head.png" 
+    # "./outputs/longhorizon/dark_gray_pillar_blocks_door_less.png" #"./images/rgb_image_head.png"
     if os.path.exists(image_path):
         mime_type, base64_image = encode_image(image_path)
         messages_image = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe this image in one sentence."},
+                    {"type": "text", "text": "Task: Open the door - grasp door handle. SubTasks: 1) Describe all objects in this image. 2) If the target object affordance is visible - say so and finish. If not, identify and describe where do you estimate that the target object and its affordance may be and the top objects the may occlude it. If the robot arm, on the way to the main target object affordance, may collide with objects in scene (that are not easy to bypass), state them"},
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},

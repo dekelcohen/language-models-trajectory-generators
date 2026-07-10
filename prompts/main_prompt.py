@@ -1,18 +1,45 @@
-# INPUT: [INSERT DETECT_OBJECT_TOOL] , [INSERT EE POSITION], [INSERT TASK], [INSERT IN CONTEXT EXAMPLE], [INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]
+# INPUT: [INSERT DETECT_OBJECT_TOOL] , [INSERT EE POSITION], [INSERT TASK], [INSERT IN CONTEXT EXAMPLE], [INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING], [INSERT COLLISION AVOIDANCE], [INSERT INITIAL PLANNING 1], [INSERT INITIAL PLANNING 2]
 
 
 DETECT_OBJECT_TOOL = """1. detect_object(object_or_object_part: str) -> None: This function will not return anything, but only print the position, orientation, and dimensions of any object or object part in the environment. This information will be printed for as many instances of the queried object or object part in the environment. If there are multiple objects or object parts to detect, call one function for each object or object part, all before executing any trajectories. The unit is in metres.
-1b. get_grasp_poses(object_name: str) -> (poses, scores): Returns pre-computed grasp pose candidates as (N,4,4) homogeneous matrices and (N,) quality scores (higher=better), sorted by descending score. Also prints the top-5 candidates summary.
+1b. 
+"""
+
+GET_GRASP_POSES = """get_grasp_poses(object_name: str) -> (poses, scores): Returns pre-computed grasp pose candidates as (N,4,4) homogeneous matrices and (N,) quality scores (higher=better), sorted by descending score. Also prints the top-5 candidates summary.
 Each pose is a 4x4 matrix: [[R_xx,R_yx,R_zx,T_x],[R_xy,R_yy,R_zy,T_y],[R_xz,R_yz,R_zz,T_z],[0,0,0,1]].
 Key indices: pose[2,3]=Z-height of gripper; pose[2,2]=alignment of gripper approach axis with world Z (negative means pointing down, -1.0=perfectly downward).
 To rank for top-down grasps above an object: select poses where pose[2,2] < -0.8 (close to  -1.0 - perfectly straight down) (gripper aimed downwards) and pose[2,3] > object_z (above target).
 1c. visualize_grasp_pose(poses) -> None: Draws the given grasp pose(s) in the 3D simulation (RGB axes + orange gripper fingers). Pass a single (4,4) matrix or an (N,4,4) array.
 """
+
 DETECT_OBJECT_TOOL_INITIAL_PLANNING = """Then, detect the necessary objects in the environment. Stop generation after this step to wait until you obtain the printed outputs from the detect_object function calls."""
 
 NO_DETECT_OBJECT_TOOL = """1. You cannot call the detect_object(...) tool in this session. Instead, infer and use object positions, orientations, and dimensions from the conversation history and any previously printed outputs. Do not attempt to invoke detect_object."""
  
 NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING  = """Infer and use necessary object positions, orientations, and dimensions from the conversation history and any previously printed outputs. Do not attempt to invoke detect_object."""
+
+# --- Shared planning sections (reused by both the subtask MAIN_PROMPT and the PLANNER_PROMPT) ---
+COLLISION_AVOIDANCE = """COLLISION AVOIDANCE:
+If the task requires interaction with multiple objects:
+1. Make sure to consider the object widths, lengths, and heights so that an object does not collide with another object or with the floor, unless necessary.
+2. It may help to generate additional trajectories and add specific waypoints (calculated from the given object information) to clear objects and the floor and avoid collisions, if necessary."""
+
+# INITIAL_PLANNING_1 intentionally excludes the [INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING] line,
+# which is tool/attempt-specific and only belongs in the subtask MAIN_PROMPT.
+INITIAL_PLANNING_1 = """INITIAL PLANNING 1:
+If the task requires interaction with an object part (as opposed to the object as a whole), describe which part of the object would be most suitable for the gripper to interact with."""
+
+INITIAL_PLANNING_2 = """INITIAL PLANNING 2:
+Then, output Python code to decide which object to interact with, if there are multiple instances of the same object.
+Then, describe how best to approach the object (for example, approaching the midpoint of the object, or one of its edges, etc.), depending on the nature of the task, or the object dimensions, etc.
+
+For thin handles or narrow gaps, prefer approaching above the object center first, then performing small lateral alignment motions at hover height before descending vertically. Avoid inferring insertion-side signs from ambiguous orientation vectors when a stable workspace-relative direction or fixed offset convention is sufficient.
+
+Then, output a detailed step-by-step plan for the trajectory, including when to lower the gripper to make contact with the object, if necessary, rotation and position of the gripper, closing the gripper.
+Tasks:
+  pickup: after closing the gripper --> must lift the object up some distance to be considered a successful grasp 
+    ) default - 50cm above the object's top surface. Smaller lifts are failures. 
+    ) Special task requirements or collisions may dictate a different lift distance"""
 
 MAIN_PROMPT = """
 You are a sentient AI that can control a robot arm by generating Python code which outputs a list of trajectory points for the robot arm end-effector to follow to complete a given user command.
@@ -49,10 +76,7 @@ Example:
 - To grasp the shorter side of an object, set rotation = angle_short.
 - To grasp the longer side, set rotation = angle_long.
 
-COLLISION AVOIDANCE:
-If the task requires interaction with multiple objects:
-1. Make sure to consider the object widths, lengths, and heights so that an object does not collide with another object or with the floor, unless necessary.
-2. It may help to generate additional trajectories and add specific waypoints (calculated from the given object information) to clear objects and the floor and avoid collisions, if necessary.
+[INSERT COLLISION AVOIDANCE]
 
 VELOCITY CONTROL:
 1. The default speed of the robot arm end-effector is 20 points per trajectory. If the total distance covered is small, keep the number of points low, as the task in sim-env has max-number-of-steps (~500-700) and each point is translated to several steps.
@@ -66,24 +90,12 @@ When generating the code for the trajectory, do the following:
 3b. For contact-rich manipulation tasks (for example handles, drawers, doors, switches, or articulated objects), prefer decomposing the motion into separate phases: high hover approach, lateral alignment at safe height, vertical descent, contact/grasp, articulation motion, and retreat. Avoid combining lateral insertion and vertical contact motions into a single diagonal approach whenever possible.
 4. When defining the functions, specify the required parameters, and document them clearly in the code. Make sure to include the orientation parameter in both definition and calls (use). make sure all dimensions of caller arguments match the function definition and body
 5. If you want to print the calculated value of a variable to use later, make sure to use the print function to three decimal places, instead of simply writing the variable name. Do not print any of the trajectory variables, since the output will be too long.
-6. Mark any code clearly with the ```python #and ``` tags.\n7. Use the provided generate_linear_trajectory helper; do not redefine it. Use logger.info(PROGRESS + f"..." + ENDC) for concise status logs instead of print for routine status.
+6. Mark any code clearly with the ```python #and ``` tags.\n7. Make sure all used variables in a python block are defined in this block. you can merge several blocks if appropriate. Use the provided generate_linear_trajectory helper; do not redefine it. Use logger.info(PROGRESS + f"..." + ENDC) for concise status logs instead of print for routine status.
 7. No need to import any of the above AVAILABLE FUNCTIONS. these are already injected into the python interpreter context
 
-INITIAL PLANNING 1:
-If the task requires interaction with an object part (as opposed to the object as a whole), describe which part of the object would be most suitable for the gripper to interact with.
+[INSERT INITIAL PLANNING 1]
 [INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]
-INITIAL PLANNING 2:
-Then, output Python code to decide which object to interact with, if there are multiple instances of the same object.
-Then, describe how best to approach the object (for example, approaching the midpoint of the object, or one of its edges, etc.), depending on the nature of the task, or the object dimensions, etc.
-
-For thin handles or narrow gaps, prefer approaching above the object center first, then performing small lateral alignment motions at hover height before descending vertically. Avoid inferring insertion-side signs from ambiguous orientation vectors when a stable workspace-relative direction or fixed offset convention is sufficient.
-
-Then, output a detailed step-by-step plan for the trajectory, including when to lower the gripper to make contact with the object, if necessary, rotation and position of the gripper, closing the gripper.
-Tasks:
-  pickup: after closing the gripper --> must lift the object up some distance to be considered a successful grasp 
-    ) default - 50cm above the object's top surface. Smaller lifts are failures. 
-    ) Special task requirements or collisions may dictate a different lift distance
-  
+[INSERT INITIAL PLANNING 2]
 
 The user command is "[INSERT TASK]".
 
@@ -469,4 +481,136 @@ def get_llm_door_prompt_data(handle_pos , pivot_pos):
     
     return llm_prompt_data
 """
-IN_CONTEXT_EXAMPLE = IN_CONTEXT_EXAMPLE_GRASP  # IN_CONTEXT_EXAMPLE_OPEN_DOOR # + OPEN_HINGED_DOOR_EXTRACT_PARAMS
+
+IN_CONTEXT_EXAMPLE_OPEN_DOOR = """
+
+The user command is: "Open the door by operating the handle lever."
+
+Perception module outputs:
+Position of door: [door_x, door_y, door_z]
+Dimensions: Width: door_w, Length: door_l, Height: door_h
+Orientation along longer side (length): door_angle_long
+
+Position of door handle lever: [lev_x, lev_y, lev_z]
+Dimensions: Width: lev_w (long axis), Length: lev_l (short/thickness), Height: lev_h
+Orientation along shorter side (length): lev_angle_short
+Orientation along longer side (width): lev_angle_long
+
+Position of door hinge: [hinge_x, hinge_y, hinge_z]   # if available; else derive from door edge
+
+
+**Assistant (Reasoning and Plan):**
+
+Interaction part: the **middle of the lever**, giving max clearance from the rosette and room for one jaw to slide into the lever–door gap.
+
+**Critical orientation reasoning:** The rotation value specifies the gripper's *closing-motion direction*; fingers are perpendicular to it. To keep fingers **parallel to the lever's long axis**, set `rotation = lev_angle_short` (align closing motion with the lever thickness). Verify thickness `lev_l < 0.08 m` (grasp limit) before committing.
+
+**Phase decomposition (never combine lateral + vertical into a diagonal):**
+1. High hover above lever center
+2. Lateral alignment (small offset toward door along short-axis) at hover height
+3. Vertical descent to pre-contact
+4. Vertical descent to grasp height + close
+5. Downward push to unlatch
+6. Pull to open along **hinge-perpendicular** vector
+7. Retreat + release
+
+```python
+from math import cos, sin, sqrt, atan2, pi
+
+# ---- Perception-derived variables (NO magic numbers; scale from dims) ----
+door_pos   = [door_x, door_y, door_z]
+hinge_pos  = [hinge_x, hinge_y, hinge_z]      # if unavailable, use farthest door corner from lever
+lever_pos  = [lev_x, lev_y, lev_z]
+lever_long = lev_w        # long axis length of the lever
+lever_thk  = lev_l        # short axis = thickness to grasp
+lever_h    = lev_h
+lever_angle_short = lev_angle_short   # closing-motion dir => fingers parallel to long axis
+
+current_pose = [ee_x, ee_y, ee_z, ee_theta]
+
+# ---- Orientation ----
+assert lever_thk < 0.08, "Lever thickness exceeds gripper limit"
+grip_theta = lever_angle_short
+print(f"grip_theta (rad): {grip_theta:.3f}")
+
+# ---- Heights derived from lever geometry (scaled, not hard-coded) ----
+lever_top_z = lever_pos[2] + lever_h / 2.0
+z_high      = lever_top_z + max(0.15, 3.0 * lever_h)   # generous hover scaled to object
+z_approach  = lever_top_z + 1.0 * lever_h              # just above top
+z_preclose  = lever_pos[2] + 0.5 * lever_thk           # near center
+z_grasp     = lever_pos[2]                             # lever mid-height
+z_unlatch   = lever_pos[2] - max(0.015, 0.8 * lever_h) # push scaled to lever height
+print(f"z_high {z_high:.3f} z_grasp {z_grasp:.3f} z_unlatch {z_unlatch:.3f}")
+
+# ---- Lateral offset along lever SHORT-axis toward the door face ----
+sx, sy = cos(lever_angle_short), sin(lever_angle_short)   # short-axis unit dir in XY
+to_door = [door_pos[0]-lever_pos[0], door_pos[1]-lever_pos[1]]
+sign = 1.0 if (sx*to_door[0] + sy*to_door[1]) >= 0 else -1.0
+offset_mag = 0.5 * lever_thk        # ~half the thickness so one jaw enters the gap
+off = [sign*offset_mag*sx, sign*offset_mag*sy]
+print(f"offset dx {off[0]:.3f} dy {off[1]:.3f}")
+
+# ---- Pull vector: perpendicular to the door plane about the hinge (physically correct) ----
+# Door swings about hinge; radial direction lever->hinge, tangential (perpendicular) = swing dir.
+radial = [lever_pos[0]-hinge_pos[0], lever_pos[1]-hinge_pos[1]]
+rlen = max(1e-6, sqrt(radial[0]**2 + radial[1]**2))
+radial = [radial[0]/rlen, radial[1]/rlen]
+# Two perpendicular candidates; choose the one pointing toward the robot (opening toward user)
+perp_a = [-radial[1], radial[0]]
+perp_b = [ radial[1],-radial[0]]
+to_robot = [current_pose[0]-lever_pos[0], current_pose[1]-lever_pos[1]]
+pull_dir = perp_a if (perp_a[0]*to_robot[0]+perp_a[1]*to_robot[1]) >= \
+                     (perp_b[0]*to_robot[0]+perp_b[1]*to_robot[1]) else perp_b
+pull_distance = max(0.20, 3.0 * lever_long)   # large swing scaled to lever size
+print(f"pull_dir {pull_dir[0]:.3f},{pull_dir[1]:.3f} dist {pull_distance:.3f}")
+
+# ---- Reusable linear-motion helper ----
+def move_linear(desc, start_pose, end_pose, num_points=8):
+    "Straight-line EE motion between two [x,y,z,theta] poses."
+    traj = generate_linear_trajectory(desc, start_pose, end_pose, num_points)
+    execute_trajectory(traj)
+    return end_pose
+
+
+**Step 1 — High hover above lever center**
+hover = [lever_pos[0], lever_pos[1], z_high, grip_theta]
+p1 = move_linear("T1: high hover above lever center", current_pose, hover, 12)
+
+**Step 2 — Lateral alignment toward door (at hover height)**
+hover_off = [lever_pos[0]+off[0], lever_pos[1]+off[1], z_high, grip_theta]
+p2 = move_linear("T2: lateral align toward door", p1, hover_off, 8)
+open_gripper()
+
+**Step 3 — Descend to approach height**
+approach = [hover_off[0], hover_off[1], z_approach, grip_theta]
+p3 = move_linear("T3: descend to approach height", p2, approach, 8)
+
+**Step 4 — Descend to pre-close, then grasp height + close**
+preclose = [hover_off[0], hover_off[1], z_preclose, grip_theta]
+p4 = move_linear("T4: descend to pre-close", p3, preclose, 6)
+grasp = [hover_off[0], hover_off[1], z_grasp, grip_theta]
+p5 = move_linear("T5: descend to grasp height", p4, grasp, 6)
+close_gripper()
+
+**Step 5 — Downward push to unlatch**
+unlatch = [grasp[0], grasp[1], z_unlatch, grip_theta]
+p6 = move_linear("T6: downward push to unlatch", p5, unlatch, 6)
+
+**Step 6 — Pull to open along hinge-perpendicular vector**
+pull = [unlatch[0]+pull_dir[0]*pull_distance,
+        unlatch[1]+pull_dir[1]*pull_distance,
+        unlatch[2], grip_theta]
+p7 = move_linear("T7: pull to open door", p6, pull, 25)   # many points => slow, controlled
+
+**Step 7 — Retreat upward and release**
+retreat = [pull[0], pull[1], z_high, grip_theta]
+p8 = move_linear("T8: retreat upward", p7, retreat, 10)
+open_gripper()
+task_completed()
+```
+
+"""
+
+IN_CONTEXT_EXAMPLE = IN_CONTEXT_EXAMPLE_GRASP # IN_CONTEXT_EXAMPLE_OPEN_DOOR # IN_CONTEXT_EXAMPLE_GRASP # + OPEN_HINGED_DOOR_EXTRACT_PARAMS
+
+
