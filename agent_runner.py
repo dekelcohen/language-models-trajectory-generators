@@ -304,6 +304,7 @@ def init_agent(args, logger):
     from multiprocessing import Process, Pipe
     from api import API
     from env import run_simulation_environment
+    import utils
 
     ctx = AgentContext()
     ctx.args = args
@@ -316,8 +317,12 @@ def init_agent(args, logger):
         client = openai.OpenAI()
     ctx.client = client
 
-    # Wire adapter-level logger and object-filter regex
+    
+    # Injects logger into utils global scope in modules
+    models.logger = logger    
+    utils.logger = logger 
     segmentation_adapter.logger = logger
+    # object-filter regex
     segmentation_adapter.set_override_object_regex(args.ovr_obj)
 
     from common_utils import ensure_image_dirs_exist

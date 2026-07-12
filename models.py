@@ -10,6 +10,8 @@ from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
 
 sys.path.append("./XMem/")
 
+logger = None
+
 def get_langsam_output(image, model, segmentation_texts, segmentation_count):
     """
     Updated to handle new LangSAM output format:
@@ -117,7 +119,7 @@ def log_messages(messages, file, prefix):
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(messages, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"Warning: failed to log messages JSON: {e}", file=file)
+        logger.info(f"Warning: failed to log messages JSON: {e}", file=file)
         
 # Default options for _call_llm_provider_wrapper; callers may override any subset.
 CHATGPT_DEFAULT_OPTIONS = {
@@ -129,11 +131,8 @@ CHATGPT_DEFAULT_OPTIONS = {
 }
 
 
-def call_llm_provider(client, model, messages, max_tokens, reasoning_effort, file):
-    """Dispatch to the correct provider and return the assistant response string.
-
-    Side-effect free: no printing. Returns the response string only.
-    """
+def call_llm_provider(client, model, messages, max_tokens, reasoning_effort):
+    """Dispatch to the correct provider and return the assistant response string"""
     if model.startswith("azure-"):
         from providers.llms.azure_openai import call_llm
         deployment = model[len("azure-"):]
@@ -186,18 +185,16 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
     reasoning_effort = opts["reasoning_effort"]
     cache = opts["cache"]
     cache_env_state = opts["cache_env_state"]
-
-    if file is None:
-        file = sys.stdout
-    print(role + ":", file=file)
-    print(new_prompt, file=file)
+    
+    logger.info(f"{role}:\n{new_prompt}")    
+    
     from providers.llms.azure_openai import append_to_messages
     messages = append_to_messages(new_prompt, image_paths, messages, role)
 
     produced = {"called": False}
     def _producer():
         produced["called"] = True
-        return call_llm_provider(client, model, messages, max_tokens, reasoning_effort, file)
+        return call_llm_provider(client, model, messages, max_tokens, reasoning_effort)
 
     # Cache key is built AFTER images and everything are appended to messages.
     if cache is not None:
@@ -210,10 +207,9 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
     else:
         new_output = _producer()
 
-    print("assistant:", file=file)
-    print(new_output, file=file)
+    logger.info(f"assistant:\n{new_output}")
     if not new_output or len(new_output) < 5:
-        print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}", file=file)
+        logger.info(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     messages.append({"role": "assistant", "content": new_output})
     if log_msgs:
         log_messages(messages, file, prefix=("vlm_review" if image_paths else "chat"))
@@ -233,7 +229,7 @@ def fetch_env_state(main_connection):
         resp = main_connection.recv()
         return resp if isinstance(resp, dict) else {}
     except Exception as e:
-        print(f"Warning: fetch_env_state failed: {e}")
+        logger.info(f"Warning: fetch_env_state failed: {e}")
         return {}
 
 
