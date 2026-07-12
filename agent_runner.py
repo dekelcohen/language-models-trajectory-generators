@@ -548,8 +548,10 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
                                 new_prompt += PRINT_OUTPUT_PROMPT.replace("[INSERT PRINT STATEMENT OUTPUT]", s)
                                 new_prompt += "\n"
                                 error = True
-        if error:
-            task.completed_task = False
+        else:
+            if not task.completed_task:
+                new_prompt += "No tool call detected. You must emit a ```python block calling actions or task_completed().\n"
+                
 
         if not task.completed_task:
             if task.failed_task:
