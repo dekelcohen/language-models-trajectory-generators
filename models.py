@@ -132,40 +132,23 @@ CHATGPT_DEFAULT_OPTIONS = {
 def call_llm_provider(client, model, messages, max_tokens, reasoning_effort, file):
     """Dispatch to the correct provider and return the assistant response string.
 
-    Kept side-effect free w.r.t. `messages` (does not append the response).
-    Printing of streamed/full output is preserved.
+    Side-effect free: no printing. Returns the response string only.
     """
     if model.startswith("azure-"):
         from providers.llms.azure_openai import call_llm
         deployment = model[len("azure-"):]
-        print("assistant:", file=file)
         new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
-        print(new_output, file=file)
-        if not new_output or len(new_output) < 5:
-            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     elif model.startswith("or-"):
         from providers.llms.openrouter import call_openrouter
         openrouter_model = model[len("or-"):]
-        print("assistant:", file=file)
         new_output = call_openrouter(messages, model=openrouter_model, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
-        print(new_output, file=file)
-        if not new_output or len(new_output) < 5:
-            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     elif model.startswith("aws-"):
         from providers.llms.aws_bedrock import call_llm as call_bedrock
         bedrock_model_id = model[len("aws-"):]
-        print("assistant:", file=file)
         new_output = call_bedrock(messages, bedrock_model_id=bedrock_model_id, max_tokens=max_tokens, temperature=0, reasoning_effort=reasoning_effort)
-        print(new_output, file=file)
-        if not new_output or len(new_output) < 5:
-            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     elif model.startswith("gemini-"):
         from providers.llms.gemini import call_gemini
-        print("assistant:", file=file)
         new_output = call_gemini(messages, model=model, max_tokens=max_tokens, temperature=0, reasoning_effort=reasoning_effort)
-        print(new_output, file=file)
-        if not new_output or len(new_output) < 5:
-            print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     else:
         completion = client.chat.completions.create(
             model=model,
@@ -173,19 +156,12 @@ def call_llm_provider(client, model, messages, max_tokens, reasoning_effort, fil
             messages=messages,
             stream=True
         )
-        print("assistant:", file=file)
         new_output = ""
         for chunk in completion:
             chunk_content = chunk.choices[0].delta.content
-            finish_reason = chunk.choices[0].finish_reason
             if chunk_content is not None:
-                print(chunk_content, end="", file=file)
                 new_output += chunk_content
-            else:
-                print("finish_reason:", finish_reason, file=file)
     return new_output
-
-
 def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=None, image_paths=None, options=None):
     """
     Call LLM (model - for azure or client - openai client) with new_prompt, existing conversation messages, role, image_paths - to attach images.
@@ -218,7 +194,9 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
     from providers.llms.azure_openai import append_to_messages
     messages = append_to_messages(new_prompt, image_paths, messages, role)
 
+    produced = {"called": False}
     def _producer():
+        produced["called"] = True
         return call_llm_provider(client, model, messages, max_tokens, reasoning_effort, file)
 
     # Cache key is built AFTER images and everything are appended to messages.
@@ -232,6 +210,10 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
     else:
         new_output = _producer()
 
+    print("assistant:", file=file)
+    print(new_output, file=file)
+    if not new_output or len(new_output) < 5:
+        print(f"Warning: Model response is empty or very short {new_output}. messages: {messages}", file=file)
     messages.append({"role": "assistant", "content": new_output})
     if log_msgs:
         log_messages(messages, file, prefix=("vlm_review" if image_paths else "chat"))
