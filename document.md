@@ -418,6 +418,15 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 
 ## Changelog
 
+- **Shared `CODE_BLOCK_CONVENTIONS`**: dedup ```python-block/logger/print/import rules into one `main_prompt` constant reused by `MAIN_PROMPT` + `PLANNER_PROMPT` via `[INSERT CODE BLOCK CONVENTIONS]`; clarifies `logger` is an injected object (not a module) to stop `import logger` errors.
+- **Shared exec env per response**: ```python blocks in one assistant/planner response now share a namespace (rebuilt each turn), so later blocks see earlier vars/imports; reset between responses.
+- **Empty user-turn fix (Bedrock)**: in `execute_task`'s continuation branch, a code
+  block that ran successfully but printed nothing (or printed ≥2000 chars) left both
+  `new_prompt` and `_imgs_paths` empty when `ENABLE_EEF_POS_IMAGE`/images are off, so no
+  user message was appended and the conversation ended on the assistant turn. AWS Bedrock
+  (e.g. Claude Opus 4.8) rejects this with *"does not support assistant message prefill;
+  conversation must end with a user message."* Now falls back to `CONTINUE_TASK_PROMPT`
+  so the turn always carries user content.
 - **Per-subtask perceive→replan**: `execute_subtasks` now runs **only the next subtask**
   then returns; `run_plan` re-runs `run_scene_perception` and re-invokes the planner after
   **every** subtask (not just at batch end / on failure). The planner reevaluates the

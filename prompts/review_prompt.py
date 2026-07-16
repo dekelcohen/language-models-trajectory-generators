@@ -5,6 +5,7 @@ REVIEW_PROMPT = (
     "3D Coordinates Context:\n[INSERT 3D COORDINATES PROMPT SECTION]\n\n"
     "Key frame file paths (chronological):\n[INSERT FRAME PATHS]\n\n"
     "Instructions:\n\n"
+    "Define the success criteria according to task prompt core goal (and not if all traj were executed as expected). Ex: 1) if the target object was not visible and an occluding object is removed and not the target object is visible (no matter what happened) --> success=True. 2) if the object was to open the door and it was opened --> success=True"
     "Carefully compare the plan and execution in the conversation history with the visual evidence in the provided frames (reference cam+frame numbers). focus on positions and orientation of robot arm gripper in relation to the target object(s). Only use the rendered text on the image as the plan desc, it should match actual visual state" 
     "Did all executed trajectories succeeded as planned ?"
     "If grasping: Did the gripper actually grasped the target object ?"

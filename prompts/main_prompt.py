@@ -19,6 +19,12 @@ NO_DETECT_OBJECT_TOOL = """1. You cannot call the detect_object(...) tool in thi
 NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING  = """Infer and use necessary object positions, orientations, and dimensions from the conversation history and any previously printed outputs. Do not attempt to invoke detect_object."""
 
 # --- Shared planning sections (reused by both the subtask MAIN_PROMPT and the PLANNER_PROMPT) ---
+# Common code-block + logging conventions. Reused via the [INSERT CODE BLOCK CONVENTIONS]
+# placeholder in both the subtask MAIN_PROMPT and the PLANNER_PROMPT.
+CODE_BLOCK_CONVENTIONS = """Mark any code clearly with the ```python and ``` tags. No need to import any of the AVAILABLE FUNCTIONS listed above - they (and `logger`, PROGRESS, ENDC) are already injected into the Python interpreter.
+If you want to print a value to reuse later, use print(...) (floats to three decimal places) rather than writing the variable name alone.
+Use logger.info(PROGRESS + f"..." + ENDC) for concise status logs instead of print for routine status. NOTE: `logger` is an already-injected function/object (loguru), NOT a module - do NOT run `import logger` (it will raise ModuleNotFoundError) and do not re-initialize it."""
+
 COLLISION_AVOIDANCE = """COLLISION AVOIDANCE:
 If the task requires interaction with multiple objects:
 1. Make sure to consider the object widths, lengths, and heights so that an object does not collide with another object or with the floor, unless necessary.
@@ -39,7 +45,11 @@ Then, output a detailed step-by-step plan for the trajectory, including when to 
 Tasks:
   pickup: after closing the gripper --> must lift the object up some distance to be considered a successful grasp 
     ) default - 50cm above the object's top surface. Smaller lifts are failures. 
-    ) Special task requirements or collisions may dictate a different lift distance"""
+    ) Special task requirements or collisions may dictate a different lift distance
+  push/move: may approach the object from the side (depending on push direction) and make contact
+  topple: approach the object from the side near its max height to have it fall 
+  
+"""
 
 MAIN_PROMPT = """
 You are a sentient AI that can control a robot arm by generating Python code which outputs a list of trajectory points for the robot arm end-effector to follow to complete a given user command.
@@ -89,9 +99,9 @@ When generating the code for the trajectory, do the following:
 3. If the trajectory is broken down into multiple steps, make sure to chain them such that the start point of trajectory_2 is the same as the end point of trajectory_1 and so on, to ensure a smooth overall trajectory. Call the execute_trajectory function after each trajectory step.
 3b. For contact-rich manipulation tasks (for example handles, drawers, doors, switches, or articulated objects), prefer decomposing the motion into separate phases: high hover approach, lateral alignment at safe height, vertical descent, contact/grasp, articulation motion, and retreat. Avoid combining lateral insertion and vertical contact motions into a single diagonal approach whenever possible.
 4. When defining the functions, specify the required parameters, and document them clearly in the code. Make sure to include the orientation parameter in both definition and calls (use). make sure all dimensions of caller arguments match the function definition and body
-5. If you want to print the calculated value of a variable to use later, make sure to use the print function to three decimal places, instead of simply writing the variable name. Do not print any of the trajectory variables, since the output will be too long.
-6. Mark any code clearly with the ```python #and ``` tags.\n7. Make sure all used variables in a python block are defined in this block. you can merge several blocks if appropriate. Use the provided generate_linear_trajectory helper; do not redefine it. Use logger.info(PROGRESS + f"..." + ENDC) for concise status logs instead of print for routine status.
-7. No need to import any of the above AVAILABLE FUNCTIONS. these are already injected into the python interpreter context
+5. Do not print any of the trajectory variables, since the output will be too long.
+6. [INSERT CODE BLOCK CONVENTIONS]
+7. Make sure all used variables in a python block are defined in this block. you can merge several blocks if appropriate. Use the provided generate_linear_trajectory helper; do not redefine it.
 
 [INSERT INITIAL PLANNING 1]
 [INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]
