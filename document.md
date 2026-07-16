@@ -418,6 +418,7 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 
 ## Changelog
 
+- **`--max-planner-iter` (default 4)**: CLI cap on planner LLM turns per command; `run_plan` defaults to `ctx.args.max_planner_iter` (was hardcoded 16).
 - **Shared `CODE_BLOCK_CONVENTIONS`**: dedup ```python-block/logger/print/import rules into one `main_prompt` constant reused by `MAIN_PROMPT` + `PLANNER_PROMPT` via `[INSERT CODE BLOCK CONVENTIONS]`; clarifies `logger` is an injected object (not a module) to stop `import logger` errors.
 - **Shared exec env per response**: ```python blocks in one assistant/planner response now share a namespace (rebuilt each turn), so later blocks see earlier vars/imports; reset between responses.
 - **Empty user-turn fix (Bedrock)**: in `execute_task`'s continuation branch, a code

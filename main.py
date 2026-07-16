@@ -46,6 +46,7 @@ def build_arg_parser():
     parser.add_argument("--prepend-prompt", type=str, default=None, help="Path to a text file whose contents are prepended to the initial command (first MAIN_PROMPT only).",
     )
     parser.add_argument("--attempts", type=int, default=2, help="total number of task attempts (default: 2 = first attempt + 1 retry after VLM review). Values > 2 allow additional retries with VLM review between each.")
+    parser.add_argument("--max-planner-iter", type=int, default=4, help="max planner LLM iterations (subtask dispatch/replan turns) per user command before the loop stops without a terminal decision (default: 4).")
     parser.add_argument("--no-plan", dest="no_plan", action="store_true", default=False, help="bypass the LLM planner and run the raw command as a single task.")
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
     parser.add_argument("--vis-grasp", action="store_true", help="visualize grasp pose candidates in the 3D sim environment (cylinder/sphere markers)")

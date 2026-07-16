@@ -693,7 +693,7 @@ def _build_planner_prompt(ctx, command, scene_analysis=""):
     )
 
 
-def run_plan(ctx, command, max_iterations=16):
+def run_plan(ctx, command, max_iterations=None):
     """Drive one continuous agentic planner conversation for the user command.
 
     With args.no_plan, runs the raw command as a single execute_task.
@@ -703,9 +703,15 @@ def run_plan(ctx, command, max_iterations=16):
     can reevaluate before the next subtask - e.g. insert a "move the arm out of the
     way" subtask once an occluder is cleared, or replan on failure. The planner always
     terminates by calling plan_completed() or plan_failed().
+
+    max_iterations caps planner LLM turns per command (defaults to
+    ctx.args.max_planner_iter); after the cap the loop stops without a terminal decision.
     """
     args = ctx.args
     logger = ctx.logger
+
+    if max_iterations is None:
+        max_iterations = args.max_planner_iter
 
     if getattr(args, "no_plan", False):
         logger.info(PROGRESS + "Planner disabled (--no-plan): running command as a single task." + ENDC)
