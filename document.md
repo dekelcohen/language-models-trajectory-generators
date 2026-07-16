@@ -24,18 +24,21 @@ user command
 run_plan ──(--no-plan)──► execute_task (single subtask)
    │
    ▼  (planner enabled)
-PLANNER LLM  ── observes head image + command
+PLANNER LLM  ── observes head image + command (+ SCENE ANALYSIS from perception VLM)
    │  emits ```python: execute_subtasks([{prompt, max_attempts}, ...])
    ▼
-execute_subtasks  ── runs subtasks IN ORDER, stop at first failure
-   │        each subtask ▼
+execute_subtasks  ── runs ONLY the NEXT subtask, then returns
+   │        the subtask ▼
    │   execute_task ── low-level code-gen agent (attempts loop)
    │        │  detect_object → 2D seg → 3D perception
    │        │  generate_linear_trajectory → execute_trajectory → gripper
    │        │  task_completed() → VLM review → pass/fail
    │        ▼  TaskResult(success, attempts, reviewer_reason, improvement_steps, …)
-   ▼   printed batch summary flows back to PLANNER
-PLANNER replans on failure / proceeds, then plan_completed() or plan_failed()
+   ▼   printed subtask summary flows back to PLANNER
+run_scene_perception ── perception VLM RE-RUNS on the updated scene after every subtask
+   ▼   UPDATED SCENE ANALYSIS prepended to next planner turn
+PLANNER reevaluates (insert prep/recovery subtask, e.g. move arm clear), dispatches
+   next subtask, then plan_completed() or plan_failed()
 ```
 
 Design split: **`API`** holds long-lived handles (sim connection, models, camera
@@ -153,40 +156,49 @@ generate motion code — only decomposition + dispatch.
   Best-effort: perception failure yields a fallback string and the planner continues.
 - `run_plan(ctx, command, max_iterations=8)`:
   - `--no-plan` → `execute_task(ctx, command, max_attempts=args.attempts)` and return.
-  - else: build `PLANNER_PROMPT`, seed the LLM with the head image, then loop:
-    execute the ```python blocks in the latest message → build a follow-up user prompt
-    from captured stdout/errors → call LLM again — until `plan_completed_flag` /
-    `plan_failed_flag` or `max_iterations`.
+  - else: build `PLANNER_PROMPT` (with the initial `run_scene_perception` SCENE
+    ANALYSIS), seed the LLM with the head image, then loop: execute the ```python
+    blocks in the latest message → **re-run `run_scene_perception` on the updated
+    scene** → prepend the UPDATED SCENE ANALYSIS + captured stdout/errors as the
+    follow-up user prompt → call LLM again — until `plan_completed_flag` /
+    `plan_failed_flag` or `max_iterations` (default 16).
   - Returns the `PlannerAPI` instance (`.plan_completed_flag`, `.plan_failed_flag`,
     `.subtask_results`).
 - **Tools** (`planner_api.get_planner_exec_locals`): `execute_subtasks`, `plan_completed`,
   `plan_failed`, `detect_object`, plus `planner`, `math`, `np`, `logger`.
-- **`execute_subtasks(subtasks)`**: runs a list of `{"prompt","max_attempts"}` dicts in
-  order, **continuing while each succeeds, stopping at the first failure**. Returns:
+- **`execute_subtasks(subtasks)`**: runs **only the NEXT (first) subtask** in the list,
+  then **stops and returns** so perception + the planner re-run on the updated world
+  state. Returns:
   ```python
-  {"all_succeeded": bool,
-   "completed": [prompt, ...],
-   "failed": {"index": int, "prompt": str, "result": <TaskResult.as_summary_dict()>} | None,
+  {"executed": prompt | None,
+   "success": bool,
+   "result": <TaskResult.as_summary_dict()> | None,
    "remaining": [subtask, ...]}
   ```
   The concise printed form flows back as the planner's next user turn. A single dict is
   accepted and wrapped as a one-element list.
-- **Efficiency**: the happy path stays cheap — one `execute_subtasks` call runs the whole
-  batch without re-invoking the planner LLM until the batch finishes or a subtask fails.
+- **Per-subtask perceive→replan**: after every subtask the perception VLM re-runs and the
+  planner is re-invoked with an UPDATED SCENE ANALYSIS. This lets it react to state
+  changes between subtasks — e.g. after clearing an occluder, insert a "move the arm
+  clear of the target" subtask before the next manipulation (fixes: arm self-occluding
+  the door handle right after removing the gray cylinder). Cost: one perception + planner
+  LLM call per subtask (intentional trade-off for correctness).
 - **Subtask prompt contract**: each `prompt` must be self-contained and END with explicit
   REVIEW/VERIFICATION instructions (what the VLM reviewer must observe to accept success).
 
 <details><summary>Prompt placeholders & recovery details</summary>
 
 `_build_planner_prompt` fills: `[INSERT INITIAL PLANNING 1/2]`, `[INSERT COLLISION
-AVOIDANCE]`, `[INSERT RECOVERY_FROM_FAILURE]`, `[INSERT 3D COORDINATES PROMPT SECTION]`
-(from `ctx.coords_section`), `[INSERT EE POSITION]`, `[INSERT TASK]`.
+AVOIDANCE]`, `[INSERT RECOVERY_FROM_FAILURE]`, `[INSERT SCENE ANALYSIS]`, `[INSERT 3D
+COORDINATES PROMPT SECTION]` (from `ctx.coords_section`), `[INSERT EE POSITION]`,
+`[INSERT TASK]`.
 
-`RECOVERY_FROM_FAILURE` is **static guidance** (not a per-failure dump): it tells the
-planner how to read `failed.result.reviewer_reason`/`improvement_steps`, decide to
-retry/insert-a-blocker-removal/proceed, optionally re-`detect_object`, re-dispatch, and
-`plan_failed()` if unreachable. Concrete failure details arrive at runtime via the printed
-`execute_subtasks` return.
+`RECOVERY_FROM_FAILURE` is **static guidance** (not a per-failure dump): after every
+subtask (success or failure) it tells the planner to read the UPDATED SCENE ANALYSIS +
+the last subtask's printed `result`, on failure read `result.reviewer_reason`/
+`improvement_steps` and retry/insert-a-blocker-removal, on success watch for NEW
+occlusions/blockers (incl. the arm itself) and insert a prep subtask, then dispatch the
+next subtask or `plan_completed()`/`plan_failed()`.
 
 `_run_planner_code_blocks` splits on ```` ```python ````, `exec`s each block with
 `globals().copy()` updated by `planner_locals`, captures stdout via `redirect_stdout`.
@@ -195,12 +207,13 @@ call → a nudge to emit a proper block.
 
 </details>
 
-<details><summary>Planner in-context example (decomposition)</summary>
+<details><summary>Planner in-context example (per-subtask replanning)</summary>
 
-Command "Open the door" with a box blocking it → two ordered subtasks (clear box, then
-open door), dispatched via `execute_subtasks(plan)`; second turn either `plan_completed()`
-or inspect `failed.result.reviewer_reason` and dispatch a recovery batch. Full text lives
-in `prompts/planner_prompt.py`.
+Command "Open the door" with a gray cylinder occluding the handle → step 1: clear the
+cylinder (only this runs); step 2: UPDATED SCENE ANALYSIS shows the arm now occludes the
+handle → insert "move the arm clear" subtask; step 3: open the door; final: `plan_completed()`.
+Each `execute_subtasks([...])` call runs exactly one subtask. Full text lives in
+`prompts/planner_prompt.py`.
 
 </details>
 
@@ -328,7 +341,7 @@ High-level flow:
 On each failed attempt, `execute_task` asks the LLM for a `TASK_SUMMARY_PROMPT` summary and
 appends it to `attempt_summaries`; a combined summary is injected into the next attempt via
 `TASK_FAILURE_PROMPT`. Summaries are returned on `TaskResult.summaries` and surfaced to the
-planner in `execute_subtasks`' failure report.
+planner in `execute_subtasks`' printed `result` report.
 
 <details><summary>XMem review path (legacy)</summary>
 
@@ -377,32 +390,49 @@ a `SUCCESS_DETECTION_PROMPT`; the model emits ```python calling `task_completed`
 $ python main.py -lm azure-gpt-5
 Enter a command: open the door
 
-[planner] observes head image; box blocks the door
+[planner] observes head image; gray cylinder occludes the door handle
 [planner] execute_subtasks([
-    {prompt: "Pick up the box in front of the door and place it ~30cm aside... Success = area clear", max_attempts: 2},
+    {prompt: "Pick up the gray cylinder in front of the door and place it ~30cm aside... Success = handle unobstructed", max_attempts: 2},
+])
+  subtask → execute_task: detect_object("gray cylinder") → grasp → lift/place → task_completed() → VLM review PASS
+execute_subtasks: executed=... success=True remaining_subtasks=0
+[perception] re-runs → UPDATED SCENE ANALYSIS: robot arm now hovers over / occludes the door handle
+[planner] inserts a prep subtask:
+[planner] execute_subtasks([
+    {prompt: "Move the arm up and clear of the door handle... Success = handle fully visible, unobstructed by the arm", max_attempts: 2},
+])
+  subtask → execute_task → task_completed() → VLM review PASS
+[perception] re-runs → handle now visible and clear
+[planner] execute_subtasks([
     {prompt: "Grasp the door lever and open it... Success = hinge angle clearly increased", max_attempts: 3},
 ])
-  subtask 0 → execute_task: detect_object("box") → grasp poses → lift/place → task_completed() → VLM review PASS
-  subtask 1 → execute_task: detect_object("door lever") → rotate about hinge → task_completed() → VLM review PASS
-execute_subtasks: all_succeeded=True completed=2/2
+  subtask → execute_task: detect_object("door lever") → rotate about hinge → task_completed() → VLM review PASS
 [planner] plan_completed()
 ```
 
-If subtask 1 fails, the printed `failed.result.reviewer_reason` /`improvement_steps` flow
-back; the planner retries it with a refined prompt or inserts a recovery subtask, then
+If a subtask fails, the printed `result.reviewer_reason` /`improvement_steps` flow back;
+the planner retries it with a refined prompt or inserts a recovery subtask, then
 re-dispatches — or calls `plan_failed()` if unreachable.
 
 ---
 
 ## Changelog
 
+- **Per-subtask perceive→replan**: `execute_subtasks` now runs **only the next subtask**
+  then returns; `run_plan` re-runs `run_scene_perception` and re-invokes the planner after
+  **every** subtask (not just at batch end / on failure). The planner reevaluates the
+  UPDATED SCENE ANALYSIS and can insert prep subtasks (e.g. "move the arm clear of the
+  target") between subtasks. Return shape changed to
+  `{executed, success, result, remaining}`; `max_iterations` default 8 → 16. Fixes: after
+  removing an occluding gray cylinder, the open-door subtask started while the robot arm
+  itself occluded the door handle. Prompt/example in `prompts/planner_prompt.py` updated.
 - **Scene perception pre-step**: new `--perception-vlm` (default
   `or-google/gemini-3.5-flash`) + `prompts/scene_perception_prompt.py`. Runs on the head
   image before every planner LLM call; its text is injected into the planner prompt's
   `[INSERT SCENE ANALYSIS]` section; `DECOMPOSITION RULES` now reference that section
   instead of the raw image.
 - **Merged planner + TaskState split**: single `PLANNER_PROMPT` (+ static
-  `RECOVERY_FROM_FAILURE`); batch `execute_subtasks` (stop-at-first-failure) replaces
+  `RECOVERY_FROM_FAILURE`); `execute_subtasks` (now one-subtask-per-call) replaces
   single `execute_subtask`; unified single agentic `run_plan` loop (removed the two-phase
   JSON parse/recovery-agent path); per-subtask state extracted from `API` into
   `TaskState`; `prompts/initial_plan.py` → `prompts/planner_prompt.py`.

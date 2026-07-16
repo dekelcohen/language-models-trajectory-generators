@@ -671,16 +671,16 @@ def _build_planner_prompt(ctx, command, scene_analysis=""):
     )
 
 
-def run_plan(ctx, command, max_iterations=8):
+def run_plan(ctx, command, max_iterations=16):
     """Drive one continuous agentic planner conversation for the user command.
 
     With args.no_plan, runs the raw command as a single execute_task.
-    Otherwise the planner LLM observes the scene + command, dispatches a decomposed
-    plan via the execute_subtasks tool (which runs subtasks in a loop while they
-    succeed), reacts to the printed batch results, replans on failure, and always
-    terminates by calling plan_completed() or plan_failed(). The static happy path
-    stays cheap because a single execute_subtasks call runs the whole batch without
-    re-invoking the planner LLM until a batch finishes or a subtask fails.
+    Otherwise the planner LLM observes the scene + command, then dispatches subtasks
+    ONE AT A TIME via the execute_subtasks tool. After every subtask, perception is
+    re-run on the (possibly changed) world state and the planner is re-invoked, so it
+    can reevaluate before the next subtask - e.g. insert a "move the arm out of the
+    way" subtask once an occluder is cleared, or replan on failure. The planner always
+    terminates by calling plan_completed() or plan_failed().
     """
     args = ctx.args
     logger = ctx.logger
@@ -711,8 +711,10 @@ def run_plan(ctx, command, max_iterations=8):
         if planner.plan_completed_flag or planner.plan_failed_flag:
             break
 
-        # Re-run perception before each subsequent planner call: subtasks may have
-        # changed the scene (cleared occluders, opened a door, etc.).
+        # Re-run perception after every subtask: the executed subtask may have
+        # changed the scene (cleared occluders, opened a door, or left the arm
+        # occluding the next target). The planner reevaluates this fresh analysis
+        # and may insert a new subtask (e.g. move the arm away) before continuing.
         scene_analysis = run_scene_perception(ctx, command)
         new_prompt = (
             "UPDATED SCENE ANALYSIS (perception VLM, current head-camera image):\n"

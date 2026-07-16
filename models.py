@@ -105,19 +105,56 @@ def visualize_segmentation_overlay(image, masks_any, boxes_any, labels, out_path
 
 
 
-def log_messages(messages, file, prefix):
+def _strip_images_from_messages(messages, image_paths):
+    """Return a deep copy of messages with base64 image_url blobs replaced by a
+    reference to the copied image file under the 'images/' subfolder."""
+    import copy
+    import os
+    stripped = copy.deepcopy(messages)
+    img_iter = iter(image_paths or [])
+    for msg in stripped:
+        content = msg.get("content")
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "image_url":
+                    item.pop("image_url", None)
+                    item["type"] = "image_ref"
+                    src = next(img_iter, None)
+                    item["image"] = f"images/{os.path.basename(src)}" if src else None
+    return stripped
+
+
+def log_messages(messages, file, prefix, image_paths=None):
     """messages to log
     - file: stream to print warnings to
     - prefix: filename prefix (e.g., "vlm_review" or "chat")
+    - image_paths: images attached to the prompt; copied into an 'images/' subfolder
+
+    Layout: ./images/vlm_images_prompts/{prefix}_prompt_<date_time>/
+        {prefix}_messages.json   (conversation without embedded base64 images)
+        images/                  (copies of all files in image_paths)
     """
     try:
         import json
         import os
+        import shutil
         from datetime import datetime
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_path = os.path.join(config.images_folder, f"{prefix}_messages_{ts}.json")
+        base_dir = os.path.join(config.images_folder, "vlm_images_prompts", f"{prefix}_prompt_{ts}")
+        os.makedirs(base_dir, exist_ok=True)
+
+        if image_paths:
+            images_dir = os.path.join(base_dir, "images")
+            os.makedirs(images_dir, exist_ok=True)
+            for src in image_paths:
+                try:
+                    shutil.copy2(src, os.path.join(images_dir, os.path.basename(src)))
+                except Exception as e:
+                    logger.info(f"Warning: failed to copy prompt image {src}: {e}", file=file)
+
+        out_path = os.path.join(base_dir, f"{prefix}_messages.json")
         with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(messages, f, ensure_ascii=False, indent=2)
+            json.dump(_strip_images_from_messages(messages, image_paths), f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.info(f"Warning: failed to log messages JSON: {e}", file=file)
         
@@ -212,7 +249,7 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
         logger.info(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     messages.append({"role": "assistant", "content": new_output})
     if log_msgs:
-        log_messages(messages, file, prefix=("vlm_review" if image_paths else "chat"))
+        log_messages(messages, file, prefix=("vlm_review" if image_paths else "chat"), image_paths=image_paths)
     return messages
 
 
