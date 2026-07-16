@@ -35,6 +35,7 @@ from prompts.main_prompt import (
     DETECT_OBJECT_TOOL_INITIAL_PLANNING,
     NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING,
     COLLISION_AVOIDANCE,
+    CODE_BLOCK_CONVENTIONS,
     INITIAL_PLANNING_1,
     INITIAL_PLANNING_2,
 )
@@ -44,6 +45,14 @@ from prompts.task_failure_prompt import TASK_FAILURE_PROMPT
 from prompts.task_summary_prompt import TASK_SUMMARY_PROMPT
 
 EEF_POS_SNIPPET = 'Current end-effector pos (x,y,z): {eef_pos}'
+
+# Fallback user turn when a code block executed successfully but produced no
+# captured stdout and no context images are attached (keeps the conversation from
+# ending on an assistant message, which some providers reject).
+CONTINUE_TASK_PROMPT = (
+    "The previous code block executed successfully with no output. "
+    "Continue with the next step of the task, or call task_completed() if the task is now complete."
+)
 
 
 # --- Prompt helper ------------------------------------------------------
@@ -424,6 +433,7 @@ def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section
         .replace("[INSERT DETECT_OBJECT_TOOL]", detect_tool)
         .replace("[INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]", detect_initial)
         .replace("[INSERT COLLISION AVOIDANCE]", COLLISION_AVOIDANCE)
+        .replace("[INSERT CODE BLOCK CONVENTIONS]", CODE_BLOCK_CONVENTIONS)
         .replace("[INSERT INITIAL PLANNING 1]", INITIAL_PLANNING_1)
         .replace("[INSERT INITIAL PLANNING 2]", INITIAL_PLANNING_2)
         .replace("[INSERT EE POSITION]", str(ee_pos))
@@ -530,6 +540,11 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
         if len(messages[-1]["content"].split("```python")) > 1:
             code_block = messages[-1]["content"].split("```python")
             block_number = 0
+            # One shared namespace for all blocks in THIS assistant response, so a
+            # variable/import defined in an earlier block is visible to later blocks.
+            # It is rebuilt each turn (new assistant response) -> reset between responses.
+            exec_env = globals().copy()
+            exec_env.update(ctx.exec_locals)
             for block in code_block:
                 if not error:
                     if len(block.split("```")) > 1:
@@ -538,8 +553,6 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
                         try:
                             f = StringIO()
                             with redirect_stdout(f):
-                                exec_env = globals().copy()
-                                exec_env.update(ctx.exec_locals)
                                 exec(code, exec_env)
                         except Exception:
                             error_message = traceback.format_exc()
@@ -610,6 +623,14 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
                     _imgs_paths = None
                 if not args.lm_images:
                     _imgs_paths = None
+                # Never send an empty user turn: a successful code block may print
+                # nothing (only logger output, which is not captured) and, with
+                # ENABLE_EEF_POS_IMAGE/images off, leave both new_prompt and
+                # _imgs_paths empty. Some providers (e.g. AWS Bedrock) reject a
+                # conversation that ends on the assistant message. Add a concise
+                # continuation nudge so the turn always has user content.
+                if not (new_prompt and new_prompt.strip()) and not _imgs_paths:
+                    new_prompt = CONTINUE_TASK_PROMPT
                 messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, "user", image_paths=_imgs_paths, options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
                 task.conversation_messages = messages
                 logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
@@ -660,6 +681,7 @@ def _build_planner_prompt(ctx, command, scene_analysis=""):
     from prompts.planner_prompt import PLANNER_PROMPT, RECOVERY_FROM_FAILURE
     return (
         PLANNER_PROMPT
+        .replace("[INSERT CODE BLOCK CONVENTIONS]", CODE_BLOCK_CONVENTIONS)
         .replace("[INSERT INITIAL PLANNING 1]", INITIAL_PLANNING_1)
         .replace("[INSERT INITIAL PLANNING 2]", INITIAL_PLANNING_2)
         .replace("[INSERT COLLISION AVOIDANCE]", COLLISION_AVOIDANCE)
@@ -744,6 +766,9 @@ def _run_planner_code_blocks(messages, planner_locals):
     code_block = content.split("```python")
     if len(code_block) > 1:
         block_number = 0
+        # Shared namespace for all blocks in this planner response (reset per response).
+        exec_env = globals().copy()
+        exec_env.update(planner_locals)
         for block in code_block:
             if len(block.split("```")) > 1:
                 code = block.split("```")[0]
@@ -751,8 +776,6 @@ def _run_planner_code_blocks(messages, planner_locals):
                 try:
                     f = StringIO()
                     with redirect_stdout(f):
-                        exec_env = globals().copy()
-                        exec_env.update(planner_locals)
                         exec(code, exec_env)
                 except Exception:
                     error_message = traceback.format_exc()
