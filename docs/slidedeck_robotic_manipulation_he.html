@@ -330,42 +330,53 @@
 <div class="slide bg-2">
   <span class="sn">4 / 17</span>
   <div class="wrap" style="gap:1.6vh;">
-    <h2><span class="gt">משימות צבאיות</h2>
-	<p style="font-size:clamp(1rem,1.5vw,1.3rem); color:var(--muted); text-align:center; margin-top:.5vh;">
-	אוטונומיה במקרה של מחסור במפעילים לעומת כמות הרובוטים ו/או מגבלת תקשורת
-	</p>
-    <div style="display:flex; direction:rtl; gap:.8vw; width:70%; align-items:flex-start; flex:1; min-height:0;">
-      <!-- Video — top 240px hidden, expanded bottom -->
-      <div style="flex:1.3; display:flex; flex-direction:column; gap:.5vh;">
+    <h2><span class="gt">משימות צבאיות</span></h2>
+    <p style="font-size:clamp(1rem,1.5vw,1.3rem); color:var(--muted); text-align:center; margin-top:.5vh; margin-bottom: 2vh;">
+    אוטונומיה במקרה של מחסור במפעילים לעומת כמות הרובוטים ו/או מגבלת תקשורת
+    </p>
+    
+    <!-- מיכל מרכזי: שונה לרוחב 100% וגובה קבוע של 65vh כדי שכל העמודות יהיו באותו גובה מיושר -->
+    <div style="display:flex; direction:rtl; gap:1.2vw; width:100%; align-items:stretch; height: 65vh;">
+      
+      <!-- עמודה 1: וידאו Bear -->
+      <div style="flex:1.3; display:flex; flex-direction:column; gap:.5vh; height: 100%;">
         <span style="font-size:clamp(.85rem,1.25vw,1.05rem); color:var(--muted); font-weight:600; text-align:right;">🐻 Bear Robot — נשלט מרחוק</span>
-        <div style="overflow:hidden; border-radius:.8vw; background:#000; height:62vh;">
+        <div style="overflow:hidden; border-radius:.8vw; background:#000; flex:1; position: relative;">
+          <!-- שימוש במיקום אבסולוטי מבטיח שהווידאו נחתך בדיוק ב-240px למעלה אבל נמתח עד למטה -->
           <video controls autoplay muted loop preload="auto"
-                 style="width:100%; display:block; margin-top:-240px; border-radius:.8vw;">
+                 style="position: absolute; top: -240px; left: 0; width:100%; height: calc(100% + 240px); object-fit: cover; border-radius:.8vw;">
             <source src="./assets/robotics_applications/bear_military_robot.mp4" type="video/mp4">
           </video>
         </div>
       </div>
-	  <div style="flex:1.3; display:flex; flex-direction:column; gap:.5vh;">
+      
+      <!-- עמודה 2: תמונה חדשה (נמתחת למילוי החלל) -->
+      <div style="flex:1.3; display:flex; flex-direction:column; gap:.5vh; height: 100%;">
         <span style="font-size:clamp(.85rem,1.25vw,1.05rem); color:var(--muted); font-weight:600; text-align:right;">מפעיל אחד למספר כלים</span>
-        <div style="overflow:hidden; border-radius:.8vw; background:#000; height:62vh;">
+        <div style="overflow:hidden; border-radius:.8vw; background:#000; flex:1; display:flex;">
           <img src="./assets/robotics_applications/one_operator_many_robots_fight.jpg" alt="מפעיל אחד למספר כלים"
-               style="width:100%; flex:1; min-height:0; object-fit:contain; border-radius:.8vw;">
+               style="width:100%; height:100%; object-fit:cover; border-radius:.8vw;">
         </div>
       </div>
-      <!-- Two images stacked with titles — larger & wider -->
-      <div style="flex:1.44; display:flex; flex-direction:column; gap:1.2vh; height:64vh;">
+      
+      <!-- עמודה 3: שתי תמונות קטנות אחת מעל השנייה -->
+      <div style="flex:1.44; display:flex; flex-direction:column; gap:1.2vh; height: 100%;">
         <div style="flex:1; min-height:0; display:flex; flex-direction:column; gap:.4vh;">
           <span style="font-size:clamp(.85rem,1.25vw,1.05rem); color:var(--muted); font-weight:600; text-align:center;">🔧 הנדסה — פינוי מוקשים</span>
-          <img src="./assets/robotics_applications/robot_vehicle_arm_mine.png" alt="Robot vehicle arm mine"
-               style="width:100%; flex:1; min-height:0; object-fit:contain; border-radius:.8vw;">
+          <div style="flex:1; border-radius:.8vw; background:#000; overflow:hidden; display:flex;">
+            <img src="./assets/robotics_applications/robot_vehicle_arm_mine.png" alt="Robot vehicle arm mine"
+                 style="width:100%; height:100%; object-fit:contain; border-radius:.8vw;">
+          </div>
         </div>
         <div style="flex:1; min-height:0; display:flex; flex-direction:column; gap:.4vh;">
           <span style="font-size:clamp(.85rem,1.25vw,1.05rem); color:var(--muted); font-weight:600; text-align:center;">🏥 רפואה — פינוי פצועים תחת אש</span>
-          <img src="./assets/robotics_applications/medic_robot_vehicle_arm.png" alt="Medic robot vehicle arm"
-               style="width:100%; flex:1; min-height:0; object-fit:contain; border-radius:.8vw;">
+          <div style="flex:1; border-radius:.8vw; background:#000; overflow:hidden; display:flex;">
+            <img src="./assets/robotics_applications/medic_robot_vehicle_arm.png" alt="Medic robot vehicle arm"
+                 style="width:100%; height:100%; object-fit:contain; border-radius:.8vw;">
+          </div>
         </div>
-		
       </div>
+
     </div>
   </div>
 </div>
@@ -668,61 +679,63 @@
 <!-- ════════════════════════════════════════════════
      שקף 8 · גישה 2: VLM Agent + כלים
      ════════════════════════════════════════════════ -->
-<div class="slide bg-8">
+<div class="slide bg-8" style="justify-content: flex-start; padding-top: 8vh;">
   <span class="sn">10 / 17</span>
-  <div class="wrap" style="gap:1.6vh;">
+  <div class="wrap" style="gap:1.2vh;">
     <h2>גישה 2 — <span class="gt">VLM Agent + כלים</span></h2>
-    <p style="font-size:clamp(.95rem,1.4vw,1.2rem); color:var(--muted); text-align:center; margin-top:-2vh; margin-bottom:6vh;">הכלים מתווכים את החישה ל-VLM ועוזרים בחיזוי נקודות קריטיות למשימה</p>
-    <div class="pipe-wrap" style="margin-bottom:.6vh;">
+    <p style="font-size:clamp(.95rem,1.4vw,1.2rem); color:var(--muted); text-align:center; margin-top:-1vh; margin-bottom:1vh;">הכלים מתווכים את החישה ל-VLM ועוזרים בחיזוי נקודות קריטיות למשימה</p>
+    
+    <div class="pipe-wrap">
       <div class="pipe">
         <div class="ps"><div class="pi">💬</div><h4>הנחיית משימה</h4><p>"פתח מגירה, קח ספל"</p></div>
         <div class="pa">→</div>
-        <div class="ps" style="border-color:rgba(168,85,247,.45);"><div class="pi">🧠</div><h4>מתכנן VLM</h4><p>תכנון ברמה גבוהה ופירוק תת-משימות</p></div>
+        <div class="ps" style="border-color:rgba(168,85,247,.45);"><div class="pi">🧠</div><h4>מתכנן VLM</h4><p>תכנון ברמה גבוהה</p></div>
         <div class="pa">→</div>
-        <div class="ps" style="border-color:rgba(0,212,255,.45);"><div class="pi">🔧</div><h4>קריאות לכלים</h4><p>תפיסה · אחיזה · 3D · <strong style="color:var(--a1)">VLA</strong></p></div>
+        <div class="ps" style="border-color:rgba(0,212,255,.45);"><div class="pi">🔧</div><h4>קריאות לכלים</h4><p>תפיסה · אחיזה · <strong style="color:var(--a1)">VLA</strong></p></div>
         <div class="pa">→</div>
-        <div class="ps" style="border-color:rgba(34,211,160,.45);" id="pipe-verify"><div class="pi">🔁</div><h4>אימות ותכנון מחדש</h4><p>זיהוי הצלחה/כישלון, ניסיון חוזר</p></div>
+        <div class="ps" style="border-color:rgba(34,211,160,.45);" id="pipe-verify"><div class="pi">🔁</div><h4>אימות ותכנון</h4><p>זיהוי הצלחה/כישלון</p></div>
         <div class="pa">→</div>
         <div class="ps" style="border-color:rgba(34,211,160,.7);" id="pipe-action"><div class="pi">🦾</div><h4>בקרה</h4><p>מסלולי תנועה</p></div>
       </div>
-      <!-- closed-loop back arrow -->
       <div style="display:flex; justify-content:flex-end; align-items:center; gap:.4vw; margin-top:.3vh; padding-left:2vw;">
         <span style="color:var(--a3); font-size:clamp(.8rem,1.1vw,.95rem); font-weight:700;">לולאה סגורה — כישלון מחזיר לאימות ←</span>
         <span style="color:var(--a3); font-size:clamp(1rem,1.6vw,1.4rem);">↺</span>
       </div>
     </div>
-    <p style="font-size:clamp(1rem,1.5vw,1.3rem); font-weight:700; color:var(--muted); text-align:center; margin:.2vh 0 .5vh; letter-spacing:.05em;">כלים</p>
+    
+    <p style="font-size:clamp(1rem,1.5vw,1.3rem); font-weight:700; color:var(--muted); text-align:center; margin:.5vh 0;">כלים</p>
+    
     <div class="cards">
       <div class="card" style="text-align:center;">
         <div class="ci">👁️</div><h3>תפיסה</h3>
-        <p>זיהוי עצמים, סגמנטציה, הערכת יציבה</p>
+        <p>זיהוי עצמים, סגמנטציה</p>
       </div>
       <div class="card" style="text-align:center;">
         <div class="ci">✋</div><h3>אחיזה (Grasp)</h3>
-        <p>חיזוי אחיזה יציבה, זיהוי affordance</p>
+        <p>חיזוי אחיזה, affordance</p>
       </div>
       <div class="card" style="text-align:center;">
         <div class="ci">📐</div><h3>גיאומטריה 3D</h3>
-        <p>Point Cloud, צירי ארטיקולציה, חשיבה מרחבית</p>
+        <p>Point Cloud, חשיבה מרחבית</p>
       </div>
       <div class="card" style="text-align:center; border-color:rgba(0,212,255,.4);">
         <div class="ci">🦾</div>
         <h3 style="color:var(--a1);">VLA (כלי)</h3>
-        <p>בקרת closed-loop ברמה נמוכה לתת-משימות פשוטות — ה-VLM מאציל ביצוע למדיניות VLA מקומית</p>
+        <p>בקרת closed-loop — ה-VLM מאציל ביצוע ל-VLA</p>
       </div>
       <div class="card" style="text-align:center; border-color:rgba(251,191,36,.4);">
         <div class="ci">⚡</div><h3 style="color:#fbbf24;">VLM Feedback</h3>
-        <p>Realtime feedback &amp; correction — VLM קטן ומהיר (local) שרץ בלולאה, מזהה כישלון או סטייה ומתקן את המסלול תוך כדי תנועה</p>
+        <p>VLM מהיר בלולאה שמתקן מסלול תוך כדי תנועה</p>
       </div>
       <div class="card" style="text-align:center; border-color:rgba(52,211,153,.4);">
-        <div class="ci">🤏</div><h3 style="color:#34d399;">חיישני מגע וכוח</h3>
-        <p>קריטי כשהעצם מוסתר, ולמשימות הדורשות תחושה (עיצוב, הידוק)</p>
-      </div>
+        <div class="ci">🤏</div><h3 style="color:#34d399;">מגע וכוח</h3>
+        <p>קריטי למשימות הדורשות תחושה או כשהעצם מוסתר</p>
       </div>
     </div>
-    <p style="font-size:clamp(.9rem,1.3vw,1.1rem); color:var(--muted); text-align:center; margin-top:.2vh;">
-      <strong style="color:var(--a2)">יתרון:</strong> קל יותר לאבחון וניפוי שגיאות, מודולרי, מטפל במשימות מורכבות ארוכות-טווח &nbsp;|&nbsp;
-      <strong style="color:#f87171;">חיסרון:</strong> איטי יותר; שגיאות עלולות להתפשט לאורך ה-pipeline; מסובך ודורש יותר הנדסה
+    
+    <p style="font-size:clamp(.9rem,1.3vw,1.1rem); color:var(--muted); text-align:center; margin-top:1.5vh;">
+      <strong style="color:var(--a2)">יתרון:</strong> מודולרי, אבחון שגיאות נוח, מטפל במשימות מורכבות &nbsp;|&nbsp;
+      <strong style="color:#f87171;">חיסרון:</strong> איטי יותר, מסובך ודורש יותר הנדסה
     </p>
   </div>
 </div>
@@ -860,7 +873,7 @@
       <div class="card" style="border-color:rgba(34,211,160,.4); text-align:right;">
         <div class="ci">🎞️ 🔮</div>
         <h3 style="color:var(--a3);">מודלי עולם</h3>
-        <p>prior פיזיקלי עשיר מ-pre-training על וידאו אינטרנט. תכנון על ידי דמיון תוצאות. עדיין מתבגר לשליטה מדויקת במפרקים.</p>
+        <p>prior פיזיקלי עשיר מ-pre-training על וידאו אינטרנט. תכנון על ידי דמיון תוצאות. עדיין בפיתוח לשליטה מדויקת במפרקים.</p>
       </div>
     </div>
     <div style="background:var(--card); border:1px solid rgba(255,255,255,.09); border-radius:1.2vw; padding:1.8vh 2.4vw; width:100%; backdrop-filter:blur(10px);">
