@@ -311,6 +311,53 @@ High-level flow:
 
 </details>
 
+### 6.1 How grasp coordinates are computed (image w/ a box → grasp pose)
+
+Given a head image + a text label (e.g. `"box"`), the grasp point and orientation are
+derived from the object's fitted 3D bounding cube. Chain:
+`detect_object` → `utils.get_bounding_cube_from_point_cloud` → `get_world_point_world_frame`.
+
+Steps:
+1. **Segment** the box in 2D (LangSAM / SAM3), take the largest contour (`get_max_contour`).
+2. **Deproject** every in-contour pixel `(col, row, depth)` to world XYZ
+   (`get_world_point_world_frame`) → raw object point cloud.
+3. **Clean the cloud**: DBSCAN (eps=2.5cm) clusters, keep the cluster *closest to the
+   camera* (drops mask-bleed/background); then a top-surface Z filter drops table bleed.
+4. **Fit footprint**: `minimum_rotated_rectangle` (shapely) over the XY points → rotated
+   rectangle; if footprint <1.5cm (thin ridge) refit using all cluster points.
+5. **Build cube**: 4 top corners @ `max_z`, 4 bottom @ `min_z`, and a centroid appended to
+   each → 10-element `bounding_cube_world_coordinates`.
+6. **Grasp point** = `cube[4]` (top-surface centroid), Z reduced by
+   `config.bounding_cube_depth_offset` → printed as `Position` (`obj_position`).
+7. **Grasp orientation** = `arctan2` of the rectangle edges (width & length axes); robot
+   aligns the gripper to the **shorter** side. Dimensions (W/L/H) come from corner norms.
+
+The printed `Position` + dimensions + orientation are what the code-gen LLM consumes to
+generate the grasp trajectory. (Alternate source: `api.get_grasp_poses(object_name)` loads
+precomputed GraspGen candidates from `outputs/graspgen/grasp_poses_{object}.npz`.)
+
+<details><summary>Code-level detail — cube indices & deprojection paths</summary>
+
+- **Cube layout** (`bounding_cubes.append(box_top + box_btm)`), indices:
+  - `0..3` top corners (@ `max_z`), `4` = **top centroid** ← grasp point,
+  - `5..8` bottom corners (@ `min_z`), `9` = bottom centroid.
+  - Dims: `width=|cube[1]-cube[0]|`, `length=|cube[2]-cube[1]|`,
+    `height=|cube[5]-cube[0]|`.
+  - Orientation: `orient_width=arctan2(box[1]-box[0])`,
+    `orient_length=arctan2(box[2]-box[1])`.
+- **Two deprojection paths** in `get_world_point_world_frame`:
+  - **New** (`cam_info['new_3d_proj']`): pixel+depth → NDC → `inv(Projection@View)` →
+    perspective divide → world XYZ.
+  - **Legacy PyBullet**: recenter pixel `[u-W/2, H/2-v, 1]`, head remap `[-py,-px,pz]`,
+    `world_cam = inv(K)·pixel · depth`, `world = Rt @ [world_cam;1]`.
+- **DBSCAN** `eps=0.025, min_samples=5`; target cluster = `min` mean-distance to camera.
+- **Top-surface filter**: keep pts with `z > max_z - config.point_cloud_top_surface_filter`
+  (falls back to all target points if <3 survive).
+- **Footprint refit** when `min(width,length) < 0.015`.
+- `project_3d_world_pos_to_2d_pixel` reprojects `obj_position` back to a pixel for logging.
+
+</details>
+
 ---
 
 ## 7. Trajectory creation, execution, review & correction
@@ -423,6 +470,9 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 
 ## Changelog
 
+- **§6.1 grasp-coord doc**: documented how a box's grasp point/orientation is derived from
+  the fitted 3D bounding cube (`cube[4]` top centroid − `bounding_cube_depth_offset`;
+  `arctan2` edge orientation; DBSCAN + top-surface cleaning; shapely rotated rect).
 - **`--max-planner-iter` (default 4)**: CLI cap on planner LLM turns per command; `run_plan` defaults to `ctx.args.max_planner_iter` (was hardcoded 16).
 - **Shared `CODE_BLOCK_CONVENTIONS`**: dedup ```python-block/logger/print/import rules into one `main_prompt` constant reused by `MAIN_PROMPT` + `PLANNER_PROMPT` via `[INSERT CODE BLOCK CONVENTIONS]`; clarifies `logger` is an injected object (not a module) to stop `import logger` errors.
 - **Shared exec env per response**: ```python blocks in one assistant/planner response now share a namespace (rebuilt each turn), so later blocks see earlier vars/imports; reset between responses.
