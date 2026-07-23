@@ -579,6 +579,9 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
                 new_prompt += "\n"
 
                 logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+                # Summary is text-only: drop accumulated images (perception, detect_object,
+                # review frames) so the request stays under provider image caps (Bedrock max 20).
+                models.strip_images_from_messages(messages)
                 messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, "user", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
                 task.conversation_messages = messages
                 logger.info(OK + "Finished generating ChatGPT output!" + ENDC)

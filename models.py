@@ -284,6 +284,32 @@ def messages_have_images(messages):
     return False
 
 
+def strip_images_from_messages(messages, placeholder="[image omitted]"):
+    """Remove image content from a conversation, in place, preserving text/turns.
+
+    Each `image_url` part is replaced by a short text placeholder so the turn
+    structure and any accompanying text are kept. Prevents accumulated images
+    (perception, detect_object, review frames) from being resent on later
+    text-only calls, which would otherwise blow past provider image caps
+    (e.g. Bedrock's max 20 images per request). Returns the same list.
+    """
+    for m in messages or []:
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content")
+        if isinstance(content, list):
+            new_parts = []
+            for part in content:
+                if isinstance(part, dict) and (part.get("type") == "image_url" or "image_url" in part):
+                    new_parts.append({"type": "text", "text": placeholder})
+                else:
+                    new_parts.append(part)
+            m["content"] = new_parts
+        elif isinstance(content, str) and content.startswith("data:") and "base64," in content:
+            m["content"] = placeholder
+    return messages
+
+
 def call_llm_cached(main_connection, client, model, new_prompt, messages, role, file=None, image_paths=None, options=None):
     """Wrapper that fetches the current env state (GET_STATE) and threads it
     into the cache, then delegates to _call_llm_provider_wrapper.

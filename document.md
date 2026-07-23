@@ -51,7 +51,12 @@ fresh-per-subtask (conversation, attempts, review outcome). See
 ## 2. Command line usage
 
 Entry point: `python main.py [options]`. Interactive loop prompts `Enter a command:` and
-calls `run_plan(ctx, command)` per line until an empty line / Ctrl+C.
+calls `run_plan(ctx, command)` per line until an empty line / Ctrl+C. Prompt supports
+bash-like command history: arrow-up/down recalls previous commands (see `helpers/command_utils.py`).
+History merges a repo-committed seed file `config/vlm_traj_user_commands.txt` with a
+per-user file `~/vlm_traj_user_commands.txt` (duplicates removed); newly entered commands
+are appended to the home file only. Uses stdlib `readline` on Unix; on Windows uses
+`pyreadline3`'s line editor directly (built-in `input()` bypasses it there).
 
 ### Common
 ```bash

@@ -461,10 +461,15 @@ class API:
                               .replace("[INSERT 3D COORDINATES PROMPT SECTION]", self.coords_section) \
                               .replace("[INSERT FRAME PATHS]", "\n".join(frame_paths))
                               
-        # Use conversation history; do not summarize
+        # Use conversation history; do not summarize. Strip previously accumulated
+        # images so only THISreview's fresh trajectory frames are sent — keeps the request under
+        # provider image caps (e.g. Bedrock max 20) and focuses the reviewer.
         messages = self.task.conversation_messages
+        models.strip_images_from_messages(messages)
         self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}, model={review_model}." + ENDC)
         messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
+        # Drop the dozens of fresh review frames now that the review is done, so they don't persist in the shared conversation 
+        models.strip_images_from_messages(messages)
         # Update shared conversation
         self.task.conversation_messages = messages
         # Parse assistant JSON

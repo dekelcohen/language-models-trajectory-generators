@@ -72,6 +72,10 @@ def main():
     logger.info(PROGRESS + f"Args: {vars(args)}" + ENDC)
     segmentation_adapter.logger = logger
 
+    # Enable bash-like arrow-up command history for the interactive prompt
+    from helpers.command_utils import init_command_history, record_command, read_command
+    readline = init_command_history(logger)
+
     # One-time setup: models, simulator connection, API, exec env
     ctx = init_agent(args, logger)
 
@@ -98,10 +102,11 @@ def main():
 
         # Interactive command loop: plan + execute each user command
         while True:
-            command = input("Enter a command: ").strip()
+            command = read_command("Enter a command: ", readline).strip()
             if not command:
                 logger.info(PROGRESS + "No command entered. Exiting." + ENDC)
                 break
+            record_command(readline, command)
             run_plan(ctx, command)
     except KeyboardInterrupt:
         logger.info(PROGRESS + "Interrupted by user (Ctrl+C). Shutting down..." + ENDC)
