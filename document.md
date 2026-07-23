@@ -92,7 +92,7 @@ python main.py -s metaworld --task sawyer_door_v3 --transport ws
 | `--timeout` | `15.0` | Timeout secs; `<=0` disables. |
 | `--delete-images` | off | Wipe image folders before recreating. |
 | `--review-provider` | `vlm` | Success check: `vlm`, `vlm:<model>` (e.g. `vlm:or-openai/gpt-5.5`), or `xmem`. |
-| `--perception-vlm` | `or-google/gemini-3.5-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
+| `--planner-perception-vlm` | `or-google/gemini-3.5-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
 | `--attempts` | `2` | Global default per-task attempts (1 first + retries with review between). |
 | `--no-plan` | off | Skip planner; run command as a single `execute_task`. |
 | `--prepend-prompt PATH` | None | Text prepended to the first `MAIN_PROMPT` only. |
@@ -152,7 +152,7 @@ The planner is a **single continuous agentic conversation** (Arch 1). It does **
 generate motion code — only decomposition + dispatch.
 
 - **Scene perception (pre-step)**: before **every** planner LLM call, `run_scene_perception`
-  runs the `--perception-vlm` model (default `or-google/gemini-3.5-flash`) on the current
+  runs the `--planner-perception-vlm` model (default `or-google/gemini-3.5-flash`) on the current
   head image with `SCENE_PERCEPTION_PROMPT` (`[INSERT USER COMMAND TASK]` ← command). Its
   free-text answer (objects, target-affordance visibility/occluders, collision risks) is
   injected into the planner prompt's `[INSERT SCENE ANALYSIS]` section on the first call,
@@ -441,7 +441,7 @@ re-dispatches — or calls `plan_failed()` if unreachable.
   `{executed, success, result, remaining}`; `max_iterations` default 8 → 16. Fixes: after
   removing an occluding gray cylinder, the open-door subtask started while the robot arm
   itself occluded the door handle. Prompt/example in `prompts/planner_prompt.py` updated.
-- **Scene perception pre-step**: new `--perception-vlm` (default
+- **Scene perception pre-step**: new `--planner-perception-vlm` (default
   `or-google/gemini-3.5-flash`) + `prompts/scene_perception_prompt.py`. Runs on the head
   image before every planner LLM call; its text is injected into the planner prompt's
   `[INSERT SCENE ANALYSIS]` section; `DECOMPOSITION RULES` now reference that section

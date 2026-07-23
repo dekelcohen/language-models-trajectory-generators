@@ -1,6 +1,6 @@
 # INPUT: [INSERT USER COMMAND TASK]
 #
-# Perception/vision prompt run by a dedicated perception VLM (--perception-vlm) on the
+# Perception/vision prompt run by a dedicated perception VLM (--planner-perception-vlm) on the
 # head-camera image BEFORE each planner LLM call. Its free-text answer is injected into
 # the planner prompt's SCENE ANALYSIS section so the planner reasons over a described
 # scene instead of the raw pixels.
