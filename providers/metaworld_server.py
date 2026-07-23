@@ -546,11 +546,6 @@ def main():
                     await websocket.send(json.dumps({"gripper_open": False}))
                 elif cmd == config.TASK_COMPLETED:
                     await websocket.send(json.dumps(["\u001b[92mFinished executing all generated trajectories!\u001b[0m"]))
-                elif cmd == config.RESET_ENVIRONMENT:
-                    env.reset()
-                    gripper_open = True
-                    traj_step = 1
-                    await websocket.send(json.dumps(["\u001b[92mFinished resetting environment!\u001b[0m"]))
                 elif cmd == config.GET_STATE:                    
                     eef = env.get_endeff_pos().copy()
                     names = []

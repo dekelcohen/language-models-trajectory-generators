@@ -48,6 +48,7 @@ def build_arg_parser():
     parser.add_argument("--attempts", type=int, default=2, help="total number of task attempts (default: 2 = first attempt + 1 retry after VLM review). Values > 2 allow additional retries with VLM review between each.")
     parser.add_argument("--max-planner-iter", type=int, default=4, help="max planner LLM iterations (subtask dispatch/replan turns) per user command before the loop stops without a terminal decision (default: 4).")
     parser.add_argument("--no-plan", dest="no_plan", action="store_true", default=False, help="bypass the LLM planner and run the raw command as a single task.")
+    parser.add_argument("--reset-eef", dest="reset_eef", action="store_true", default=False, help="re-home the arm (RESET_EEF) at the start of every subtask; re-homes the arm only and does NOT reset object/world state. Default off (real-world behavior: arm starts wherever the previous subtask left it).")
     parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
     parser.add_argument("--vis-grasp", action="store_true", help="visualize grasp pose candidates in the 3D sim environment (cylinder/sphere markers)")
     parser.add_argument("--vis-box", type=str, default=None, help="Visualize 3D bounding box in sim for objects whose label matches this regex (e.g. 'handle|knob'). Uses cylinder markers visible in camera captures.")

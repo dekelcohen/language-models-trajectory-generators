@@ -12,7 +12,7 @@ from robot import Robot
 from common_utils import Trajectory
 from providers.env_sim_util import _rotmat_to_quat_xyzw
 from config import OK, PROGRESS, FAIL, ENDC
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
 # --- Debug helpers ------------------------------------------------------
 def add_debug_sphere(pos_xyz, radius=0.015, color=(1, 0, 0, 1)):
     """
@@ -925,14 +925,16 @@ def run_simulation_environment(args, env_connection, logger):
                 env_connection_message = OK + "Finished executing all generated trajectories!" + ENDC
                 env_connection.send([env_connection_message])
 
-            elif env_connection_received[0] == RESET_ENVIRONMENT:
+            elif env_connection_received[0] == RESET_EEF:
+                # Re-home the ARM ONLY to its start pose. Does NOT reset object/world
+                # state, and deliberately does NOT reset robot.trajectory_step so that
+                # trajectory image frames from previous subtasks are preserved.
                 robot.move(env, robot.ee_start_position, robot.ee_start_orientation_e, gripper_open=True, is_trajectory=False)
                 robot.gripper_open = True
-                robot.trajectory_step = 1
 
                 step_env_and_record_loop(env, robot)
 
-                env_connection_message = OK + "Finished resetting environment!" + ENDC
+                env_connection_message = OK + "Finished re-homing end-effector!" + ENDC
                 env_connection.send([env_connection_message])
             elif env_connection_received[0] == GET_ROBOT_STATE:
                 try:

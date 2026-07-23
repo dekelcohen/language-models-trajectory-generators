@@ -515,6 +515,10 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
     image_paths = [config.rgb_image_head_path]
     first_command = prepend_to_initial_command(prompt, args, logger)
     ic = IN_CONTEXT_EXAMPLE if in_context_example else ''
+    if args.reset_eef:
+        logger.info(PROGRESS + "--reset-eef: re-homing arm (RESET_EEF) before subtask..." + ENDC)
+        api.reset_eef()
+        
     _, _eef = build_llm_context_images_and_pose(main_connection, api.trajectory_step, logger)
     if _eef is not None:
         ee_pos_for_prompt = _eef

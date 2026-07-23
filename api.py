@@ -14,7 +14,7 @@ from common_utils import Trajectory
 from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC, WARNING
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
 from helpers.image_utils import list_file_paths
 from task_state import TaskState
 
@@ -607,6 +607,15 @@ class API:
         """
         self.task.failed_task = True
         # Do not reset env or counters; retries will continue from current state
+
+    def reset_eef(self):
+        """--reset-eef Re-home the arm to its start pose (RESET_EEF).        """
+        self.main_connection.send([RESET_EEF])
+        try:
+            [env_connection_message] = self.main_connection.recv()
+        except Exception:
+            env_connection_message = self.main_connection.recv()
+        self.logger.info(env_connection_message)
 
 
 

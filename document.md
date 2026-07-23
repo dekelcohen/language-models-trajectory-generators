@@ -95,6 +95,7 @@ python main.py -s metaworld --task sawyer_door_v3 --transport ws
 | `--planner-perception-vlm` | `or-google/gemini-3.5-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
 | `--attempts` | `2` | Global default per-task attempts (1 first + retries with review between). |
 | `--no-plan` | off | Skip planner; run command as a single `execute_task`. |
+| `--reset-eef` | off | Re-home the **arm only** (`RESET_EEF`) at the start of every subtask, before capturing the EE start pose. Does **not** reset object/world state and does **not** reset `trajectory_step` (prior subtask frames preserved). Default off = real-world behavior: the arm starts wherever the previous subtask left it. |
 | `--prepend-prompt PATH` | None | Text prepended to the first `MAIN_PROMPT` only. |
 
 <details><summary>Diagnostics / visualization / override args</summary>
@@ -231,6 +232,12 @@ The subtask agent writes and runs Python; each attempt ends in a VLM review that
 retry vs. done.
 
 - Fresh `api.task = TaskState(command=prompt, max_attempts, start_trajectory_step=api.trajectory_step)`.
+- **Optional arm re-home** (`--reset-eef`): before capturing the EE start pose, call
+  `api.reset_eef()` → sends `RESET_EEF`, which re-homes the **arm only** to
+  `ee_start_position` (gripper open) and does **not** touch object/world state or
+  `trajectory_step`. Default off; when on it makes a later subtask start from the same
+  canonical arm pose as subtask #1 (addresses "open-door as subtask #2 starts far from the
+  door" — the carried-over EE pose otherwise seeds a bad first-attempt trajectory).
 - **First attempt** prompt = `MAIN_PROMPT` filled with the `detect_object` tool + optional
   in-context example + head image (`config.rgb_image_head_path`), sent as `role="system"`.
   Optional `--prepend-prompt` text is prepended to the first command only.
