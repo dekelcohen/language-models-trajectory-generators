@@ -515,6 +515,10 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
     image_paths = [config.rgb_image_head_path]
     first_command = prepend_to_initial_command(prompt, args, logger)
     ic = IN_CONTEXT_EXAMPLE if in_context_example else ''
+    _, _eef = build_llm_context_images_and_pose(main_connection, api.trajectory_step, logger)
+    if _eef is not None:
+        ee_pos_for_prompt = _eef
+        logger.info(PROGRESS + f"Updated EE start pose for task: {ee_pos_for_prompt}" + ENDC)
     new_prompt = _build_main_prompt(
         DETECT_OBJECT_TOOL, DETECT_OBJECT_TOOL_INITIAL_PLANNING,
         ee_pos_for_prompt, first_command, coords_section, ic,
@@ -653,7 +657,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
 
 # --- Planner + orchestration (single agentic loop) ----------------------
 def run_scene_perception(ctx, command):
-    """Run the perception VLM (--perception-vlm) on the current head image.
+    """Run the perception VLM (--planner-perception-vlm) on the current head image.
 
     Returns its free-text scene analysis, injected into the planner prompt's
     SCENE ANALYSIS section. Best-effort: on any failure returns a short fallback
@@ -664,9 +668,9 @@ def run_scene_perception(ctx, command):
     prompt = SCENE_PERCEPTION_PROMPT.replace("[INSERT USER COMMAND TASK]", str(command))
     image_paths = [config.rgb_image_head_path] if args.lm_images else None
     try:
-        logger.info(PROGRESS + f"Perception: analyzing scene with {args.perception_vlm}..." + ENDC)
+        logger.info(PROGRESS + f"Perception: analyzing scene with {args.planner_perception_vlm}..." + ENDC)
         messages = models.call_llm_cached(
-            ctx.main_connection, ctx.client, args.perception_vlm, prompt, [], role="system",
+            ctx.main_connection, ctx.client, args.planner_perception_vlm, prompt, [], role="system",
             image_paths=image_paths,
             options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache},
         )
