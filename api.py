@@ -102,34 +102,12 @@ class API:
         self.logger.info(vis_msg)
 
 
-    def detect_object(self, segmentation_text):
-        """
-        segment in 2D --> transform to 3D world coordinates in Sim
-        Workflow:
-        ) Send to env CAPTURE_IMAGES message
-          ) env.py: robot.get_camera_image("head") 
-          ) def robot.py: get_camera_image
-                camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
-                if camera == "head" and config.head_camera_use_spherical_view: # Door task head camera
-                  view_matrix, camera_position = self._view_and_pos_from_spherical(target pos, distance, yaw_deg, pitch_deg)
-                  def _view_and_pos_from_spherical:
-                    view_matrix = p.computeViewMatrixFromYawPitchRoll( ... )
-                      camera_position = <complex calc with target, distance, yaw_deg, pitch_deg>
-                      return view_matrix, camera_position
-                return camera_position, camera_orientation_q 
-            
-            ) env::CAPTURE_IMAGES respond with head_camera_position=camera_position, head_camera_orientation_q=camera_orientation_q
-              ) metaworld_server also returns: calib {K_head, K_wrist - intrinsic of head cam }
-          ) utils.get_bounding_cube_from_point_cloud(head_camera_position, head_camera_orientation_q, K_override=None -if pybullet)
-            ) contour_pixel_points = <countour of segmented object in 2d image>
-            ) get_world_point_world_frame(camera_position, camera_orientation_q, 'head', pixel_point for contour_pixel_points, K_override)
-                K, Rt = get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=K_use)
-                elif camera == "head":
-                  pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
-                world_point_camera_frame = (np.linalg.inv(K) @ pixel_point) * point[2]
-                world_point_world_frame = Rt @ np.vstack((world_point_camera_frame, np.array([1.0])))
-            
-        )   
+    def _capture_head_image_and_depth(self):
+        """Send CAPTURE_IMAGES, parse camera poses/cam_info, load head RGB + depth.
+
+        Shared by detect_object and convert_2d_point_to_3d_world. Sets
+        self.head/wrist camera pose fields, self.cam_info and self.head_image_size.
+        Returns (rgb_image_head: PIL.Image, depth_array: np.ndarray[H,W] float32).
         """
         self.logger.info(PROGRESS + "Capturing head and wrist camera images..." + ENDC)
         self.main_connection.send([CAPTURE_IMAGES])
@@ -164,7 +142,6 @@ class API:
         self.head_image_size = rgb_image_head.size
         # Prefer raw depth from .npy if available; fall back to 8-bit image
         depth_npy_path = os.path.splitext(config.depth_image_head_path)[0] + ".npy"
-        depth_format = getattr(self.args, "depth_format", "norm_1m")
         if os.path.exists(depth_npy_path):
             depth_array = np.load(depth_npy_path).astype(np.float32)
             if os.environ.get("DEBUG_PINHOLE", "0") == "1":
@@ -172,12 +149,104 @@ class API:
                 px = 156
                 py = 72
                 pz = depth_array[py, px]
-                point=[px, py, pz]
-                self.logger.info(PROGRESS + f"**************** api.detect_object: After load .npy depth test  {point}" + ENDC)
+                point = [px, py, pz]
+                self.logger.info(PROGRESS + f"**************** api._capture_head_image_and_depth: After load .npy depth test  {point}" + ENDC)
         else:
             depth_image_head = Image.open(config.depth_image_head_path).convert("L")
             depth_array = (np.array(depth_image_head).astype(np.float32)) / 255.0
-        
+
+        return rgb_image_head, depth_array
+
+    def _overlay_affordance_points(self, rgb_image_head, points_xy, object_name):
+        """Draw all 2D affordance points on the head RGB, colored best->worst
+        (green -> yellow by descending quality/order). Saves to images_folder."""
+        try:
+            import cv2
+            img = cv2.cvtColor(np.array(rgb_image_head), cv2.COLOR_RGB2BGR)
+            n = max(1, len(points_xy))
+            for i, (x, y) in enumerate(points_xy):
+                # green (0,255,0) at best -> yellow (0,255,255) at worst (BGR)
+                t = i / max(1, n - 1)
+                color = (0, 255, int(255 * t))
+                cv2.circle(img, (int(x), int(y)), 2, color, -1)
+                cv2.circle(img, (int(x), int(y)), 2, (0, 0, 0), 1)
+            safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(object_name))[:60] or "object"
+            out_path = os.path.join(config.images_folder, f"affordance_points_{safe}.png")
+            cv2.imwrite(out_path, img)
+            self.logger.info(OK + f"Saved affordance-points overlay to {out_path}" + ENDC)
+            return out_path
+        except Exception as e:
+            self.logger.info(PROGRESS + f"Warning: failed to save affordance-points overlay: {e}" + ENDC)
+            return None
+
+    def convert_2d_point_to_3d_world(self, points_xy, object_name, print_out=False):
+        """Convert ranked 2D affordance pixel points to 3D world coordinates.
+
+        Args:
+            points_xy: list of [x, y] pixel points (already denormalized), ordered
+                best-first (descending predicted grasp quality).
+            object_name: identifying name of the target object (for logging/overlay).
+        Returns:
+            list of 3D world points (np.ndarray) aligned with the input order; entries
+            for invalid/out-of-range points are None.
+        """
+        rgb_image_head, depth_array = self._capture_head_image_and_depth()
+        h, w = depth_array.shape[:2]
+
+        world_points = []
+        for (x, y) in points_xy:
+            xi, yi = int(round(x)), int(round(y))
+            if not (0 <= xi < w and 0 <= yi < h):
+                self.logger.info(PROGRESS + f"Warning: affordance point ({xi},{yi}) out of image bounds {w}x{h}; skipping." + ENDC)
+                world_points.append(None)
+                continue
+            z = float(depth_array[yi, xi])
+            if not np.isfinite(z):
+                self.logger.info(PROGRESS + f"Warning: non-finite depth at affordance point ({xi},{yi}); skipping." + ENDC)
+                world_points.append(None)
+                continue
+            world_point = utils.get_world_point_world_frame(
+                self.head_camera_position, self.head_camera_orientation_q, "head",
+                self.head_image_size, [xi, yi, z], cam_info=self.cam_info,
+            )
+            world_points.append(world_point)
+            if print_out:
+                print(f"Affordance-pointing of {object_name}: {list(np.around(np.array(world_point).flatten(), 3))}")
+
+        self._overlay_affordance_points(rgb_image_head, points_xy, object_name)
+        return world_points
+
+    def detect_object(self, segmentation_text):
+        """
+        segment in 2D --> transform to 3D world coordinates in Sim
+        Workflow:
+        ) Send to env CAPTURE_IMAGES message
+          ) env.py: robot.get_camera_image("head") 
+          ) def robot.py: get_camera_image
+                camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
+                if camera == "head" and config.head_camera_use_spherical_view: # Door task head camera
+                  view_matrix, camera_position = self._view_and_pos_from_spherical(target pos, distance, yaw_deg, pitch_deg)
+                  def _view_and_pos_from_spherical:
+                    view_matrix = p.computeViewMatrixFromYawPitchRoll( ... )
+                      camera_position = <complex calc with target, distance, yaw_deg, pitch_deg>
+                      return view_matrix, camera_position
+                return camera_position, camera_orientation_q 
+            
+            ) env::CAPTURE_IMAGES respond with head_camera_position=camera_position, head_camera_orientation_q=camera_orientation_q
+              ) metaworld_server also returns: calib {K_head, K_wrist - intrinsic of head cam }
+          ) utils.get_bounding_cube_from_point_cloud(head_camera_position, head_camera_orientation_q, K_override=None -if pybullet)
+            ) contour_pixel_points = <countour of segmented object in 2d image>
+            ) get_world_point_world_frame(camera_position, camera_orientation_q, 'head', pixel_point for contour_pixel_points, K_override)
+                K, Rt = get_intrinsics_extrinsics(image_height, camera_position, camera_orientation_q, K_override=K_use)
+                elif camera == "head":
+                  pixel_point = [-pixel_point[1], -pixel_point[0], pixel_point[2]]
+                world_point_camera_frame = (np.linalg.inv(K) @ pixel_point) * point[2]
+                world_point_world_frame = Rt @ np.vstack((world_point_camera_frame, np.array([1.0])))
+            
+        )   
+        """
+        rgb_image_head, depth_array = self._capture_head_image_and_depth()
+
         if self.task.segmentation_count == 0:
             xmem_image = Image.fromarray(np.zeros_like(depth_array)).convert("L")
             xmem_image.save(config.xmem_input_path)

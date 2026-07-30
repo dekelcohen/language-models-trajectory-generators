@@ -105,6 +105,7 @@ When generating the code for the trajectory, do the following:
 
 SCENE ANALYSIS (produced by a separate perception VLM from the current head-camera image; use it as your observation of the scene):
 [INSERT SCENE ANALYSIS]
+If available, Perfer the first (top) target-object position from Affordace-pointing over the Position of <object name>.
 
 [INSERT INITIAL PLANNING 1]
 [INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]

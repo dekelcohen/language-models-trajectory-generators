@@ -9,5 +9,6 @@ Can you suggest what was wrong with the plans for the trajectories, and suggest 
 2) Incrementally Explore: In the failed trajs, change one thing at a time. Do not just repeat a set of failed trajectories - as it will fail again. 
    ) Ex: If Grasping failed - change grapsing pose towards the correct object part 
    ) Ex: If pull failed - consider changing pull direction (a little bit each attempt)
+   ) Try the DIFFERENT candidate positions of the SAME target object across attempts: the scene analysis provides ranked affordance-pointing 3D positions (best-first) and the segmentation/bounding-box computation yields another position estimate. If one position failed, try the next-best affordance point or the segmentation-bbox position instead of repeating the same one.
 Then, replan and retry the task by continuing with INITIAL PLANNING 1.
 """

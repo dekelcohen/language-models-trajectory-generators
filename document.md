@@ -94,6 +94,7 @@ python main.py -s metaworld --task sawyer_door_v3 --transport ws
 | `--delete-images` | off | Wipe image folders before recreating. |
 | `--review-provider` | `vlm` | Success check: `vlm`, `vlm:<model>` (e.g. `vlm:or-openai/gpt-5.5`), or `xmem`. |
 | `--planner-perception-vlm` | `or-google/gemini-3.5-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
+| `--affordance-points` / `--no-affordance-points` | on | Ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis. Disable to drop the pointing block from the perception prompt entirely. |
 | `--attempts` | `2` | Global default per-task attempts (1 first + retries with review between). |
 | `--no-plan` | off | Skip planner; run command as a single `execute_task`. |
 | `--reset-eef` | off | Re-home the **arm only** (`RESET_EEF`) at the start of every subtask, before capturing the EE start pose. Does **not** reset object/world state and does **not** reset `trajectory_step` (prior subtask frames preserved). Default off = real-world behavior: the arm starts wherever the previous subtask left it. |
@@ -134,7 +135,7 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | File | Responsibility |
 |------|----------------|
 | `main.py` | Arg parsing, logging, wiring: `init_agent → (replay/learn) → run_plan loop → teardown_agent`. |
-| `agent_runner.py` | Core orchestration: `init_agent`/`teardown_agent`, `execute_task` (subtask agent), `run_plan` + planner loop, prompt builders, `TaskResult`, sim/handshake/context helpers. |
+| `agent_runner.py` | Core orchestration: `init_agent`/`teardown_agent`, `execute_task` (subtask agent), `run_plan` + planner loop, prompt builders, `TaskResult`, sim/handshake/context helpers. (Scene perception lives in `helpers/perception_scene_analysis.py`.) |
 | `planner_api.py` | `PlannerAPI` — planner-level tools (`execute_subtasks`, `plan_completed`, `plan_failed`, `detect_object`) injected into the planner's exec env. |
 | `prompts/planner_prompt.py` | Merged `PLANNER_PROMPT` + static `RECOVERY_FROM_FAILURE`. |
 | `prompts/scene_perception_prompt.py` | `SCENE_PERCEPTION_PROMPT` run by the perception VLM before each planner call. |
@@ -143,6 +144,7 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `task_state.py` | `TaskState`: per-subtask mutable state contract. |
 | `env.py` | Simulator process: message loop (`CAPTURE_IMAGES`, `EXECUTE_TRAJECTORY`, grippers, `GET_STATE`…), sim envs, camera capture, marker drawing. |
 | `helpers/main_utils.py` | `get_exec_locals` (subtask tool injection), `execute_blocks_from_log`, `learn_from_past_trajs`. |
+| `helpers/perception_scene_analysis.py` | `run_scene_perception` (perception VLM call + prompt assembly) and affordance pointing: `_parse_affordance_points_block`, `_process_affordance_points` (2D→3D + text splice). |
 | `segmentation_adapter.py` | Provider-agnostic 2D segmentation dispatch. |
 | `utils.py` | Point-cloud → bounding cube, 3D↔2D projection, intrinsics/extrinsics. |
 
@@ -164,6 +166,47 @@ generate motion code — only decomposition + dispatch.
   `[INSERT SCENE ANALYSIS]` section — perception is run once per planner turn, not re-run
   per subtask. `DECOMPOSITION RULES` reference this section instead of raw pixels.
   Best-effort: perception failure yields a fallback string and the planner continues.
+- **Target-object affordance pointing**: `SCENE_PERCEPTION_PROMPT` also asks the perception
+  VLM for a ranked (best-first) JSON block of **4 grasp-affordance points** on the target
+  object, delimited by an `AFFORDANCE_POINTS:` marker + fenced ```json. `run_scene_perception`
+  parses this block out, converts the 2D points to **3D world coordinates**
+  (`API.convert_2d_point_to_3d_world`), and **replaces the raw 2D points with the 3D coords**
+  in the scene-analysis text (so the planner never reasons over confusing 2D pixels). The
+  coordinate format is VLM-dependent: if `--planner-perception-vlm` contains `gemini`, points
+  are `[y, x]` normalized 0-1000 and denormalized via
+  `features_markers.bbox_providers.gemini_bbox_provider.denormalize_yx_point_to_xy_pixels`;
+  otherwise they are `[x, y]` pixels used directly. The 2D→3D mapping is stored on
+  `ctx.affordance_points` for debugging, and a green→yellow (best→worst) overlay of the 2D
+  points is saved to `images/affordance_points_{object}.png`.
+
+<details><summary>Affordance-pointing code-level detail</summary>
+
+- Prompt: `prompts/scene_perception_prompt.py` splits the pointing block into
+  `AFFORDANCE_POINTING_SECTION`, appended into `SCENE_PERCEPTION_PROMPT`'s
+  `[INSERT AFFORDANCE POINTING SECTION]` slot only when `--affordance-points` is on
+  (with `--no-affordance-points` the section is empty, so the VLM never generates points
+  and no 2D→3D conversion runs). The section carries a `COORDINATES_FORMAT_PLACEHOLDER`
+  token that `run_scene_perception` replaces with `config.affordance_coords_format_gemini`
+  ("The points are in [y, x] format normalized to 0-1000") or
+  `config.affordance_coords_format_pixels` ("The points are in [x, y] pixel coordinates").
+- `helpers.perception_scene_analysis._parse_affordance_points_block(text)` splits the response at `AFFORDANCE_POINTS:`
+  and extracts the JSON array (fenced or first `[...]`).
+- `helpers.perception_scene_analysis._process_affordance_points(ctx, command, analysis, points)` builds the
+  `[[x,y],...]` list (denormalizing when gemini), calls
+  `ctx.api.convert_2d_point_to_3d_world(points_xy, object_name)`, appends an
+  "AFFORDANCE POINTS (…3D world coords, best-first)" section, and records
+  `ctx.affordance_points`.
+- `api.API.convert_2d_point_to_3d_world(points_xy, object_name)`: reuses
+  `_capture_head_image_and_depth()` (extracted shared helper also used by `detect_object`),
+  reads `depth_array[y, x]` per point (bounds/NaN-guarded), calls
+  `utils.get_world_point_world_frame(head_pos, head_orient_q, "head", head_image_size,
+  [x, y, z], cam_info)`, prints `Affordance-pointing of {object_name}: <xyz>`, and saves the
+  overlay via `_overlay_affordance_points` (cv2 circles colored green→yellow by rank).
+- `prompts/task_failure_prompt.py` now advises retrying the different candidate positions of
+  the same object (ranked affordance points + the segmentation-bbox position) instead of
+  repeating a failed grasp position.
+
+</details>
 - `run_plan(ctx, command, max_iterations=8)`:
   - `--no-plan` → `execute_task(ctx, command, max_attempts=args.attempts)` and return.
   - else: build `PLANNER_PROMPT` (with the initial `run_scene_perception` SCENE
@@ -487,6 +530,31 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 ---
 
 ## Changelog
+
+- **Bedrock opus-5 `'text'` KeyError fix**: `providers/llms/aws_bedrock.py` no longer indexes
+  `model_response["content"][0]["text"]`. Newer models (e.g. `aws-eu.anthropic.claude-opus-5`)
+  can emit `thinking`/`redacted_thinking` blocks first, so `content[0]` isn't a text block and
+  every attempt failed with `unexpected error: 'text'`. New `_extract_text_from_bedrock_content`
+  joins **all** `type == "text"` blocks (falling back to any block with a `text` field) and
+  raises a descriptive error (with `stop_reason` + block types) when there is genuinely no text.
+
+- **Scene perception extracted to `helpers/perception_scene_analysis.py`**: `run_scene_perception`,
+  `_parse_affordance_points_block` and `_process_affordance_points` moved out of `agent_runner.py`
+  (which now imports `run_scene_perception` from the new module).
+
+- **Target-object affordance pointing in scene analysis**: perception VLM now also returns a
+  ranked JSON block of 4 grasp-affordance points (`AFFORDANCE_POINTS:` marker in
+  `SCENE_PERCEPTION_PROMPT`). `run_scene_perception` parses them, converts 2D→3D via new
+  `API.convert_2d_point_to_3d_world` (reusing `_capture_head_image_and_depth` extracted from
+  `detect_object`), and **replaces the 2D points with 3D world coords** in the scene text.
+  Coordinate format branches on `gemini` in `--planner-perception-vlm` ([y,x] 0-1000 +
+  denormalize vs [x,y] pixels). Denormalization extracted to importable
+  `denormalize_yx_point_to_xy_pixels` in robotic_perception `GeminiBBoxProvider`. 2D→3D map
+  stored on `ctx.affordance_points`; green→yellow overlay saved to
+  `images/affordance_points_{object}.png`. `task_failure_prompt` advises trying the different
+  candidate positions (affordance points + segmentation-bbox) on retry. Toggle with
+  `--affordance-points` / `--no-affordance-points` (default on); when off the
+  `AFFORDANCE_POINTING_SECTION` is omitted from the perception prompt and no conversion runs.
 
 - **Scene analysis shared with subtask agent**: `MAIN_PROMPT` gains a `SCENE ANALYSIS`
   section (`[INSERT SCENE ANALYSIS]`). The planner's already-computed `run_scene_perception`

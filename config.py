@@ -170,6 +170,11 @@ xmem_output_path = "./images/xmem_output_{step}.png"
 visualize_traj_history_steps = 6
 seg_overlay_image_path = "./images/seg_overlay_{provider}_{object}.png"
 
+# Affordance-pointing coordinate format text injected into SCENE_PERCEPTION_PROMPT
+# (replaces COORDINATES_FORMAT_PLACEHOLDER), selected by the perception VLM family.
+affordance_coords_format_gemini = "The points are in [y, x] format normalized to 0-1000"
+affordance_coords_format_pixels = "The points are in [x, y] pixel coordinates"
+
 # Output - ANSI escape color codes:
 OK = "\033[92m"       # Bright Green
 PROGRESS = "\033[97m" # Bright White

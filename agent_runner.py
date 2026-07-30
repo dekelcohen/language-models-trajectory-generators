@@ -27,6 +27,7 @@ import models
 import segmentation_adapter
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
 from helpers.main_utils import get_exec_locals, execute_blocks_from_log
+from helpers.perception_scene_analysis import run_scene_perception
 from prompts.main_prompt import (
     MAIN_PROMPT,
     IN_CONTEXT_EXAMPLE,
@@ -303,6 +304,9 @@ class AgentContext:
         self.coords_section = None
         self.sim_state = {}
         self.ee_pos_for_prompt = None
+        # 2D->3D affordance-point mappings from perception, kept for debugging.
+        # Each entry: {"object": str, "points_2d": [[x,y],...], "points_3d": [...]}.
+        self.affordance_points = []
 
 
 # --- One-time init ------------------------------------------------------
@@ -667,33 +671,6 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
 
 
 # --- Planner + orchestration (single agentic loop) ----------------------
-def run_scene_perception(ctx, command):
-    """Run the perception VLM (--planner-perception-vlm) on the current head image.
-
-    Returns its free-text scene analysis, injected into the planner prompt's
-    SCENE ANALYSIS section. Best-effort: on any failure returns a short fallback
-    string so the planner still runs (it can fall back to detect_object)."""
-    from prompts.scene_perception_prompt import SCENE_PERCEPTION_PROMPT
-    args = ctx.args
-    logger = ctx.logger
-    prompt = SCENE_PERCEPTION_PROMPT.replace("[INSERT USER COMMAND TASK]", str(command))
-    image_paths = [config.rgb_image_head_path] if args.lm_images else None
-    try:
-        logger.info(PROGRESS + f"Perception: analyzing scene with {args.planner_perception_vlm}..." + ENDC)
-        messages = models.call_llm_cached(
-            ctx.main_connection, ctx.client, args.planner_perception_vlm, prompt, [], role="system",
-            image_paths=image_paths,
-            options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache},
-        )
-        text = messages[-1]["content"] if messages and isinstance(messages[-1], dict) else ""
-        text = (text or "").strip()
-        logger.info(OK + "Perception: scene analysis ready." + ENDC)
-        return text or "(perception returned no analysis)"
-    except Exception as e:
-        logger.info(WARNING + f"Perception VLM failed: {e}. Proceeding without scene analysis." + ENDC)
-        return "(scene analysis unavailable; inspect the scene yourself with detect_object(...))"
-
-
 def _build_planner_prompt(ctx, command, scene_analysis=""):
     """Fill the merged PLANNER_PROMPT placeholders."""
     from prompts.planner_prompt import PLANNER_PROMPT, RECOVERY_FROM_FAILURE
