@@ -33,6 +33,10 @@ class PlannerAPI:
         self.plan_failed_flag = False
         # History of subtasks the planner ran (each: {prompt, max_attempts, result})
         self.subtask_results = []
+        # Latest perception-VLM scene analysis for the current world state, set by the
+        # planner loop each turn and forwarded to the subtask agent (perception is run
+        # once per planner turn, not re-run inside execute_task).
+        self.scene_analysis = ""
 
     # --- Tools (injected into the planner exec environment) ---------------
     def execute_subtasks(self, subtasks):
@@ -72,7 +76,8 @@ class PlannerAPI:
         remaining = subtasks[idx + 1:]
 
         self.logger.info(PROGRESS + f"[planner] execute_subtasks[{idx}] (max_attempts={max_attempts}) prompt={prompt!r}" + ENDC)
-        result = self._execute_task(self.ctx, prompt, max_attempts=max_attempts)
+        result = self._execute_task(self.ctx, prompt, max_attempts=max_attempts,
+                                    scene_analysis=self.scene_analysis)
         summary = result.as_summary_dict()
         self.subtask_results.append({"prompt": prompt, "max_attempts": max_attempts, "result": summary})
 

@@ -1,4 +1,4 @@
-# INPUT: [INSERT DETECT_OBJECT_TOOL] , [INSERT EE POSITION], [INSERT TASK], [INSERT IN CONTEXT EXAMPLE], [INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING], [INSERT COLLISION AVOIDANCE], [INSERT INITIAL PLANNING 1], [INSERT INITIAL PLANNING 2]
+# INPUT: [INSERT DETECT_OBJECT_TOOL] , [INSERT EE POSITION], [INSERT TASK], [INSERT IN CONTEXT EXAMPLE], [INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING], [INSERT COLLISION AVOIDANCE], [INSERT SCENE ANALYSIS], [INSERT INITIAL PLANNING 1], [INSERT INITIAL PLANNING 2]
 
 
 DETECT_OBJECT_TOOL = """1. detect_object(object_or_object_part: str) -> None: This function will not return anything, but only print the position, orientation, and dimensions of any object or object part in the environment. This information will be printed for as many instances of the queried object or object part in the environment. If there are multiple objects or object parts to detect, call one function for each object or object part, all before executing any trajectories. The unit is in metres.
@@ -102,6 +102,9 @@ When generating the code for the trajectory, do the following:
 5. Do not print any of the trajectory variables, since the output will be too long.
 6. [INSERT CODE BLOCK CONVENTIONS]
 7. Make sure all used variables in a python block are defined in this block. you can merge several blocks if appropriate. Use the provided generate_linear_trajectory helper; do not redefine it.
+
+SCENE ANALYSIS (produced by a separate perception VLM from the current head-camera image; use it as your observation of the scene):
+[INSERT SCENE ANALYSIS]
 
 [INSERT INITIAL PLANNING 1]
 [INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]

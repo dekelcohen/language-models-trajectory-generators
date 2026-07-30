@@ -30,6 +30,7 @@ PLANNER LLM  ── observes head image + command (+ SCENE ANALYSIS from percept
 execute_subtasks  ── runs ONLY the NEXT subtask, then returns
    │        the subtask ▼
    │   execute_task ── low-level code-gen agent (attempts loop)
+   │        │  (reuses the planner's SCENE ANALYSIS; no per-subtask perception re-run)
    │        │  detect_object → 2D seg → 3D perception
    │        │  generate_linear_trajectory → execute_trajectory → gripper
    │        │  task_completed() → VLM review → pass/fail
@@ -137,7 +138,7 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `planner_api.py` | `PlannerAPI` — planner-level tools (`execute_subtasks`, `plan_completed`, `plan_failed`, `detect_object`) injected into the planner's exec env. |
 | `prompts/planner_prompt.py` | Merged `PLANNER_PROMPT` + static `RECOVERY_FROM_FAILURE`. |
 | `prompts/scene_perception_prompt.py` | `SCENE_PERCEPTION_PROMPT` run by the perception VLM before each planner call. |
-| `prompts/main_prompt.py` | Subtask `MAIN_PROMPT` + shared vars (`COLLISION_AVOIDANCE`, `INITIAL_PLANNING_1/2`, detect-object tool variants), `IN_CONTEXT_EXAMPLE`. |
+| `prompts/main_prompt.py` | Subtask `MAIN_PROMPT` (now with a `SCENE ANALYSIS` section) + shared vars (`COLLISION_AVOIDANCE`, `INITIAL_PLANNING_1/2`, detect-object tool variants), `IN_CONTEXT_EXAMPLE`. |
 | `api.py` | `API`: `detect_object`, `get_grasp_poses`, trajectory gen/exec, gripper, `task_completed`/`task_failed`, `run_vlm_review`. |
 | `task_state.py` | `TaskState`: per-subtask mutable state contract. |
 | `env.py` | Simulator process: message loop (`CAPTURE_IMAGES`, `EXECUTE_TRAJECTORY`, grippers, `GET_STATE`…), sim envs, camera capture, marker drawing. |
@@ -158,7 +159,10 @@ generate motion code — only decomposition + dispatch.
   free-text answer (objects, target-affordance visibility/occluders, collision risks) is
   injected into the planner prompt's `[INSERT SCENE ANALYSIS]` section on the first call,
   and prepended as "UPDATED SCENE ANALYSIS" on subsequent iterations (subtasks may have
-  changed the scene). `DECOMPOSITION RULES` reference this section instead of raw pixels.
+  changed the scene). The same per-turn analysis is also **forwarded to the subtask agent**
+  (`execute_subtasks` → `execute_task(scene_analysis=...)`), filling `MAIN_PROMPT`'s
+  `[INSERT SCENE ANALYSIS]` section — perception is run once per planner turn, not re-run
+  per subtask. `DECOMPOSITION RULES` reference this section instead of raw pixels.
   Best-effort: perception failure yields a fallback string and the planner continues.
 - `run_plan(ctx, command, max_iterations=8)`:
   - `--no-plan` → `execute_task(ctx, command, max_attempts=args.attempts)` and return.
@@ -227,7 +231,7 @@ Each `execute_subtasks([...])` call runs exactly one subtask. Full text lives in
 
 ## 5. Subtask (low-level code-gen agent)
 
-`execute_task(ctx, prompt, max_attempts=None, in_context_example=True) -> TaskResult`.
+`execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_analysis="") -> TaskResult`.
 The subtask agent writes and runs Python; each attempt ends in a VLM review that decides
 retry vs. done.
 
@@ -238,9 +242,15 @@ retry vs. done.
   `trajectory_step`. Default off; when on it makes a later subtask start from the same
   canonical arm pose as subtask #1 (addresses "open-door as subtask #2 starts far from the
   door" — the carried-over EE pose otherwise seeds a bad first-attempt trajectory).
+- **Scene analysis (reused, not re-run)**: the planner passes its already-computed
+  `scene_analysis` (from `run_scene_perception`) down through `execute_subtasks`; it fills
+  `MAIN_PROMPT`'s `[INSERT SCENE ANALYSIS]` section and is reused across this task's
+  attempts. `execute_task` does **not** run the perception VLM itself (one perception call
+  per planner turn, not per subtask/attempt). Under `--no-plan`, `run_plan` runs perception
+  once and passes it in.
 - **First attempt** prompt = `MAIN_PROMPT` filled with the `detect_object` tool + optional
-  in-context example + head image (`config.rgb_image_head_path`), sent as `role="system"`.
-  Optional `--prepend-prompt` text is prepended to the first command only.
+  in-context example + SCENE ANALYSIS + head image (`config.rgb_image_head_path`), sent as
+  `role="system"`. Optional `--prepend-prompt` text is prepended to the first command only.
 - **Loop** until `task.completed_task`: parse ```` ```python ```` blocks from the latest
   message, `exec` each with injected tools (`get_exec_locals`), capture stdout.
   - Exception → `ERROR_CORRECTION_PROMPT` (block number + traceback), `error=True`.
@@ -248,8 +258,9 @@ retry vs. done.
   - `task_completed()` triggers review (see §7); on review failure `failed_task=True`.
 - **Retry path** (`failed_task`): generate a `TASK_SUMMARY_PROMPT` summary (appended to
   `attempt_summaries`), reset `start_attempt_trajectory_step`, rebuild the prompt with the
-  **no-detect-object** variant + latest EE pose + combined `TASK_FAILURE_PROMPT` summary,
-  reset `messages`, continue.
+  **no-detect-object** variant + latest EE pose + the same reused SCENE ANALYSIS +
+  combined `TASK_FAILURE_PROMPT` summary, reset `messages`, continue. (The retry turn is
+  text-only — no head image — so the reused scene analysis is its main visual context.)
 - Returns `TaskResult(success=review_succeeded, attempts, summaries, messages,
   reviewer_reason, improvement_steps, accepted_without_review)`.
 
@@ -477,6 +488,14 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 
 ## Changelog
 
+- **Scene analysis shared with subtask agent**: `MAIN_PROMPT` gains a `SCENE ANALYSIS`
+  section (`[INSERT SCENE ANALYSIS]`). The planner's already-computed `run_scene_perception`
+  output is forwarded to the subtask agent via `PlannerAPI.scene_analysis` →
+  `execute_subtasks` → `execute_task(scene_analysis=...)` and reused across the task's
+  attempts (including the otherwise image-less retry turn). Perception is **not** re-run
+  inside `execute_task` (one call per planner turn); `--no-plan` runs it once and passes it
+  in. Also replaced `getattr(args, ...)` with direct `args.` access in `agent_runner.py`
+  (parser guarantees the fields).
 - **§6.1 grasp-coord doc**: documented how a box's grasp point/orientation is derived from
   the fitted 3D bounding cube (`cube[4]` top centroid − `bounding_cube_depth_offset`;
   `arctan2` edge orientation; DBSCAN + top-surface cleaning; shapely rotated rect).

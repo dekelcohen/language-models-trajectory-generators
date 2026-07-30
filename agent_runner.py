@@ -61,7 +61,7 @@ def prepend_to_initial_command(command, args, logger):
     On read error, logs a warning and returns the original command.
     """
     first_command = command
-    if getattr(args, "prepend_prompt", None):
+    if args.prepend_prompt:
         try:
             with open(args.prepend_prompt, "r", encoding="utf-8") as _pf:
                 _pre = _pf.read().strip()
@@ -171,7 +171,7 @@ def _setup_metaworld_ws(args, logger):
     _p = subprocess.Popen(cmd, stdin=None, stdout=None, stderr=None, cwd=os.getcwd())
 
     from providers.ws_connection import WsJSONConnection
-    conn = WsJSONConnection(default_url, timeout=getattr(args, 'timeout', 15.0))
+    conn = WsJSONConnection(default_url, timeout=args.timeout)
     try:
         _ready = conn.recv(timeout=15)
         if isinstance(_ready, dict) and _ready.get("status") == "ready":
@@ -264,7 +264,7 @@ def read_env_handshake(main_connection, logger, default_pos):
 
 def process_cli_viz_point_arg(args, conn, logger):
     """Parse --viz-point/--vis-point and send one or more points as permanent markers."""
-    if not getattr(args, "viz_point", None):
+    if not args.viz_point:
         return
     try:
         raw = json.loads(args.viz_point)
@@ -426,7 +426,7 @@ def teardown_agent(ctx):
 
 
 # --- Prompt builders ----------------------------------------------------
-def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section, in_context_example):
+def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section, in_context_example, scene_analysis=""):
     """Fill all placeholders of the subtask MAIN_PROMPT."""
     return (
         MAIN_PROMPT
@@ -436,6 +436,7 @@ def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section
         .replace("[INSERT CODE BLOCK CONVENTIONS]", CODE_BLOCK_CONVENTIONS)
         .replace("[INSERT INITIAL PLANNING 1]", INITIAL_PLANNING_1)
         .replace("[INSERT INITIAL PLANNING 2]", INITIAL_PLANNING_2)
+        .replace("[INSERT SCENE ANALYSIS]", scene_analysis)
         .replace("[INSERT EE POSITION]", str(ee_pos))
         .replace("[INSERT TASK]", task)
         .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
@@ -473,7 +474,7 @@ class TaskResult:
 
 
 # --- Per-(sub)task execution -------------------------------------------
-def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
+def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_analysis=""):
     """Run a single (sub)task to completion.
 
     Inputs:
@@ -484,6 +485,10 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
         VLM review between each). Defaults to ctx.args.attempts when None. This is a
         small per-task cap and is distinct from the global args.attempts default.
       in_context_example : bool - include the in-context example on the first attempt.
+      scene_analysis : str - perception-VLM scene description already produced by the
+        planner for the current world state. Injected into the subtask MAIN_PROMPT's
+        SCENE ANALYSIS section and reused across this task's attempts (perception is
+        NOT re-run here).
 
     Returns TaskResult.
     """
@@ -526,6 +531,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
     new_prompt = _build_main_prompt(
         DETECT_OBJECT_TOOL, DETECT_OBJECT_TOOL_INITIAL_PLANNING,
         ee_pos_for_prompt, first_command, coords_section, ic,
+        scene_analysis=scene_analysis,
     )
 
     try:
@@ -605,6 +611,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True):
                 new_prompt = _build_main_prompt(
                     NO_DETECT_OBJECT_TOOL, NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING,
                     eef_pos, prompt, coords_section, '',
+                    scene_analysis=scene_analysis,
                 )
                 try:
                     _sim_state_str = json.dumps(sim_state)
@@ -724,16 +731,19 @@ def run_plan(ctx, command, max_iterations=None):
     if max_iterations is None:
         max_iterations = args.max_planner_iter
 
-    if getattr(args, "no_plan", False):
+    if args.no_plan:
         logger.info(PROGRESS + "Planner disabled (--no-plan): running command as a single task." + ENDC)
-        return execute_task(ctx, command, max_attempts=args.attempts)
+        return execute_task(ctx, command, max_attempts=args.attempts,
+                            scene_analysis=run_scene_perception(ctx, command))
 
     from planner_api import PlannerAPI, get_planner_exec_locals
 
     planner = PlannerAPI(ctx, execute_task, logger)
     planner_locals = get_planner_exec_locals(planner, logger)
 
-    prompt = _build_planner_prompt(ctx, command, scene_analysis=run_scene_perception(ctx, command))
+    scene_analysis = run_scene_perception(ctx, command)
+    planner.scene_analysis = scene_analysis
+    prompt = _build_planner_prompt(ctx, command, scene_analysis=scene_analysis)
     image_paths = [config.rgb_image_head_path] if args.lm_images else None
     logger.info(PROGRESS + "Planner: generating plan / dispatch..." + ENDC)
     messages = models.call_llm_cached(
@@ -755,6 +765,7 @@ def run_plan(ctx, command, max_iterations=None):
         # occluding the next target). The planner reevaluates this fresh analysis
         # and may insert a new subtask (e.g. move the arm away) before continuing.
         scene_analysis = run_scene_perception(ctx, command)
+        planner.scene_analysis = scene_analysis
         new_prompt = (
             "UPDATED SCENE ANALYSIS (perception VLM, current head-camera image):\n"
             f"{scene_analysis}\n\n" + new_prompt
