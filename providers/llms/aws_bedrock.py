@@ -97,6 +97,33 @@ def _oai_content_to_bedrock(content):
     return [{"type": "text", "text": str(content)}]
 
 
+def _extract_text_from_bedrock_content(model_response):
+    """Join all text blocks of an Anthropic/Bedrock response.
+
+    Newer models (e.g. claude-opus-5) may return non-text blocks first
+    (`thinking` / `redacted_thinking` / `reasoning_content`), so indexing
+    `content[0]["text"]` raises KeyError. Scan all blocks and keep the text ones.
+    """
+    content = model_response.get("content") or []
+    texts = [
+        block["text"] for block in content
+        if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+    ]
+    if not texts:
+        # Fall back to any block exposing a "text" field, regardless of type.
+        texts = [
+            block["text"] for block in content
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+        ]
+    if not texts:
+        block_types = [b.get("type") for b in content if isinstance(b, dict)]
+        raise ValueError(
+            f"No text block in Bedrock response (stop_reason={model_response.get('stop_reason')!r}, "
+            f"block types={block_types})"
+        )
+    return "\n".join(texts)
+
+
 def call_llm(messages, bedrock_model_id=None, max_tokens=60000, temperature=0, reasoning_effort=None, max_retries=5):
     """
     Call AWS Bedrock (Anthropic Messages API via boto3) with the given messages.
@@ -181,7 +208,7 @@ def call_llm(messages, bedrock_model_id=None, max_tokens=60000, temperature=0, r
             model_response = json.loads(response["body"].read())
             if bedrock_model_id.startswith("openai"):
                 return model_response["choices"][0]["message"]["content"]
-            return model_response["content"][0]["text"]
+            return _extract_text_from_bedrock_content(model_response)
 
         except ClientError as e:
             if _is_sso_expiry(e):
