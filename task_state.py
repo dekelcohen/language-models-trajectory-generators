@@ -36,3 +36,9 @@ class TaskState:
         self.segmentation_texts = []
         self.segmentation_count = 0
         self.trajectory_length = 0
+
+        # Scene analysis (perception VLM) this task started from, plus the exact head
+        # image it was computed from. Shown to the reviewer VLM so it knows the
+        # start-of-attempt scene, separately from the trajectory frames.
+        self.scene_analysis = ""
+        self.scene_analysis_image_path = None

@@ -444,6 +444,12 @@ precomputed GraspGen candidates from `outputs/graspgen/grasp_poses_{object}.npz`
   `start_attempt_trajectory_step` + wrist frames (stride 7), cap at
   `config.max_allowed_vlm_images`; ask the review model (`vlm` = main model, `vlm:<model>`
   = override) for strict JSON `{success, reasoning, improvement_steps}`.
+  - **Start-of-attempt scene**: the head image the perception VLM analyzed (saved by
+    `run_scene_perception` to `config.scene_analysis_image_path`) is attached **first**,
+    before the key frames, and `REVIEW_SCENE_ANALYSIS_SECTION` (from `task.scene_analysis` /
+    `task.scene_analysis_image_path`) tells the reviewer that image is *not* a trajectory
+    frame and that the rest are the listed key frames — an unambiguous "before" reference.
+    One image slot is reserved for it in the `max_allowed_vlm_images` budget.
   - success → `completed_task=True`, `review_succeeded=True`;
   - failure → `failed_task=True` (drives the retry path in `execute_task`).
   - captures `review_reason` / `review_improvement_steps` on `task`.
@@ -456,12 +462,104 @@ appends it to `attempt_summaries`; a combined summary is injected into the next 
 `TASK_FAILURE_PROMPT`. Summaries are returned on `TaskResult.summaries` and surfaced to the
 planner in `execute_subtasks`' printed `result` report.
 
-<details><summary>XMem review path (legacy)</summary>
+### XMem review path (legacy, `--review-provider xmem`)
 
-With `--review-provider xmem`, `task_completed` runs `get_xmem_output`, reconstructs
-per-object trajectory positions/orientations from masks across frames, and feeds them into
-a `SUCCESS_DETECTION_PROMPT`; the model emits ```python calling `task_completed`/
-`task_failed`. Preserved for compatibility; the default path is `vlm`.
+Geometric alternative to the VLM reviewer: instead of *looking* at frames, it **tracks the
+segmented objects through the whole trajectory** and lets the LLM judge success from the
+resulting numeric pose sequences.
+
+- **Seeding (during `detect_object`)** — every LangSAM mask is baked into a single label
+  image `./images/xmem_input.png` (`utils.save_xmem_image`); object *k* = pixel value *k*.
+  The file is reset to zeros at the start of `detect_object`.
+- **Tracking (at `task_completed`)** — `models.get_xmem_output` runs XMem
+  (`InferenceCore`) over head-camera frames `trajectory/rgb_image_{step}.png` for
+  `step = 0 .. task.trajectory_length`, propagating the seed masks frame-by-frame. Returns
+  one integer label mask per sampled frame; overlays saved to `images/xmem_output_{step}.png`.
+- **Pose reconstruction** — for each tracked object and each frame, the mask + depth image
+  go through `utils.get_bounding_cube_from_point_cloud` → world-frame **position**
+  (cube centre) and **z-rotation**; orientations are unwrapped to the closest of the 4
+  symmetric candidates relative to the previous frame (avoids ±90° flips).
+- **Judgement** — positions/orientations (every `xmem_lm_input_every`-th sample) are
+  appended to `SUCCESS_DETECTION_PROMPT` with the task command; the LLM replies with a
+  python code block calling `task_completed()` or `task_failed()`, which is `exec`'d.
+- **Requirements** — `XMem` submodule + weights `XMem/saves/XMem.pth`; model loaded eagerly
+  in `agent_runner` only when `--review-provider xmem` (hard error if missing). CUDA
+  strongly recommended (`torch.cuda.amp.autocast`).
+- **Limits** — head-camera only, depth-based, needs LangSAM masks to exist; no textual
+  reasoning/`improvement_steps`, so `review_reason` stays empty and retries get less
+  guidance than the `vlm` path. Default remains `vlm`.
+
+<details><summary>Code-level details</summary>
+
+**Config** (`config.py`)
+- `xmem_config`: `top_k=30`, `mem_every=5`, `deep_update_every=-1`, long-term memory on
+  (`num_prototypes=128`, `min/max_mid_term_frames=5/10`, `max_long_term_elements=10000`).
+- `xmem_output_every=1` (track stride), `xmem_visualise_every=1` (overlay save stride),
+  `xmem_lm_input_every=20` (pose subsampling fed to the LLM).
+- Paths: `xmem_input_path = ./images/xmem_input.png`,
+  `xmem_output_path = ./images/xmem_output_{step}.png`.
+
+**Seeding** (`utils.save_xmem_image`, called at end of `API.detect_object`)
+```python
+xmem_array = np.array(Image.open(config.xmem_input_path).convert("L"))
+xmem_array = np.unique(xmem_array, return_inverse=True)[1].reshape(xmem_array.shape)  # → 0..N labels
+for mask in masks:
+    xmem_array[mask.astype(bool)] = np.max(xmem_array) + 1   # each mask gets a new label id
+Image.fromarray((xmem_array / max_val * 255).astype(np.uint8)).save(config.xmem_input_path)
+```
+Note the file is stored **normalised to 0..255** and re-quantised via `np.unique(...)` on
+load, so label ids round-trip. `api.detect_object` first writes an all-zeros image the size
+of the depth map, so labels accumulate only within one detection pass.
+
+**Model load** (`agent_runner.py`)
+```python
+sys.path.append("./XMem/")
+from XMem.model.network import XMem
+xmem_model = XMem(config.xmem_config, "./XMem/saves/XMem.pth", device).eval().to(device)
+```
+Passed into `API(..., xmem_model, device)`; `None` for other providers.
+
+**Tracking loop** (`models.get_xmem_output`) — XMem imports are lazy so the dependency is
+optional:
+```python
+processor = InferenceCore(model, config.xmem_config)
+processor.set_all_labels(range(1, num_objects + 1))
+for i in range(0, trajectory_length + 1, config.xmem_output_every):
+    frame_torch, _ = image_to_torch(np.array(Image.open(rgb_path(i))), device)
+    prediction = processor.step(frame_torch, mask_torch[1:]) if i == 0 else processor.step(frame_torch)
+    masks.append(torch_prob_to_numpy_mask(prediction))
+    if i % config.xmem_visualise_every == 0:
+        Image.fromarray(overlay_davis(frame, prediction)).save(xmem_output_path(i))
+```
+`num_objects = len(np.unique(seed_mask)) - 1` (minus background).
+
+**Pose extraction** (`api.task_completed`, per object `1..num_objects`, per frame `i`)
+- binarise: `object_mask = (mask == object)`;
+- depth from `trajectory/depth_image_{i}.png` scaled `/255.`;
+- `utils.get_bounding_cube_from_point_cloud(rgb, [object_mask], depth, head_camera_position,
+  head_camera_orientation_q, object-1, cam_info)` → `bounding_cubes`, `orientations`;
+- `position = bounding_cube[4]` (centre); orientation wrapped to `[-pi, pi]`;
+- empty result → frame dropped and `idx_offset += 1` so the previous-orientation lookup
+  stays aligned;
+- symmetry disambiguation:
+```python
+possible = [wrap(orientation + k*pi/2) for k in range(4)]
+orientation = possible[argmin(circular_distance(possible, previous_orientation))]
+```
+
+**Prompt** (`prompts/success_detection_prompt.py`) states the axis convention (x right,
+y depth, z up, metres; z-rotation −pi..pi), injects the command, then appends per object:
+```
+<segmentation_text> trajectory positions and orientations:
+Positions:
+[[...]]
+Orientations:
+[...]
+```
+Reply is parsed by splitting on the python fence marker and `exec`-ing blocks with local
+`task_completed` / `task_failed` bound to the API methods — i.e. the LLM's chosen call
+directly sets `completed_task` / `failed_task`. `task_completed()` re-entry is guarded by
+the attempt counter (final attempt accepts without review).
 
 </details>
 
@@ -530,6 +628,17 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 ---
 
 ## Changelog
+
+- **Scene analysis + its image given to the reviewer VLM**: `run_scene_perception` now snapshots
+  the exact head image it analyzed to `config.scene_analysis_image_path`
+  (`./images/scene_analysis_head_{step}.png`, kept out of the trajectory frames) and records it on
+  `ctx.scene_analysis_image_path`. `execute_task` threads both the analysis text and that path into
+  `TaskState.scene_analysis` / `.scene_analysis_image_path`, and `run_vlm_review` prepends a
+  `REVIEW_SCENE_ANALYSIS_SECTION` ("START-OF-ATTEMPT SCENE") to `REVIEW_PROMPT` and attaches the
+  scene image **first**, ahead of the key frames. The section states explicitly that the first
+  image is *not* a trajectory frame and that all remaining images are the listed key frames, so the
+  reviewer has an unambiguous "before" reference. The image budget reserves a slot for it
+  (`max_allowed_vlm_images - 1 - 1`).
 
 - **Bedrock opus-5 `'text'` KeyError fix**: `providers/llms/aws_bedrock.py` no longer indexes
   `model_response["content"][0]["text"]`. Newer models (e.g. `aws-eu.anthropic.claude-opus-5`)

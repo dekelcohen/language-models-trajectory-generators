@@ -498,7 +498,7 @@ class API:
         Expects strict JSON: { "success": true/false, "reasoning": "..." }.
         Does not mutate the environment.
         """
-        from prompts.review_prompt import REVIEW_PROMPT        
+        from prompts.review_prompt import REVIEW_PROMPT, REVIEW_SCENE_ANALYSIS_SECTION
         start_idx = self.task.start_attempt_trajectory_step
         # Determine review model: "vlm" uses main model, "vlm:<model>" uses specified model
         review_provider = self.args.review_provider
@@ -520,23 +520,44 @@ class API:
             skip=7,
         )
         
+        # Start-of-attempt scene image (perception VLM input). Sent FIRST, before the
+        # trajectory key frames, and explicitly described in the prompt so the reviewer
+        # never confuses it with one of the many trajectory frames.
+        scene_image_path = self.task.scene_analysis_image_path
+        scene_analysis_text = (self.task.scene_analysis or "").strip()
+        has_scene_image = bool(scene_image_path and os.path.exists(scene_image_path))
+
         # GPT-5 in azure limits to 50 images in a request - test if it confuses the model (the cutoff of wrist images ....)
-        if len(frame_paths) > config.max_allowed_vlm_images:
+        max_frames = config.max_allowed_vlm_images - 1 - (1 if has_scene_image else 0)
+        if len(frame_paths) > max_frames:
             self.logger.info(WARNING + f"Cutoff wrist frames from the end. frame_paths in preview > config.max_allowed_vlm_images ({config.max_allowed_vlm_images})" + ENDC)
-            frame_paths = frame_paths[:config.max_allowed_vlm_images - 1]
-                
+            frame_paths = frame_paths[:max_frames]
+
+        if has_scene_image or scene_analysis_text:
+            scene_section = (
+                REVIEW_SCENE_ANALYSIS_SECTION
+                .replace("[INSERT SCENE ANALYSIS IMAGE PATH]", str(scene_image_path))
+                .replace("[INSERT SCENE ANALYSIS]", scene_analysis_text or "(unavailable)")
+            )
+        else:
+            scene_section = ""
+
         # Build prompt with placeholders
         prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.task.command)) \
                               .replace("[INSERT 3D COORDINATES PROMPT SECTION]", self.coords_section) \
+                              .replace("[INSERT SCENE ANALYSIS SECTION]", scene_section) \
                               .replace("[INSERT FRAME PATHS]", "\n".join(frame_paths))
-                              
+
+        # Scene image first, then the chronological trajectory frames.
+        review_image_paths = ([scene_image_path] if has_scene_image else []) + frame_paths
+
         # Use conversation history; do not summarize. Strip previously accumulated
         # images so only THISreview's fresh trajectory frames are sent — keeps the request under
         # provider image caps (e.g. Bedrock max 20) and focuses the reviewer.
         messages = self.task.conversation_messages
         models.strip_images_from_messages(messages)
-        self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}, model={review_model}." + ENDC)
-        messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=frame_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
+        self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}, scene_image={'yes' if has_scene_image else 'no'}, model={review_model}." + ENDC)
+        messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=review_image_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
         # Drop the dozens of fresh review frames now that the review is done, so they don't persist in the shared conversation 
         models.strip_images_from_messages(messages)
         # Update shared conversation

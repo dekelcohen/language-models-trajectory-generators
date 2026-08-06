@@ -12,6 +12,8 @@ planner never reasons over pixel coordinates.
 """
 import re
 import json
+import os
+import shutil
 
 import numpy as np
 from PIL import Image
@@ -19,6 +21,26 @@ from PIL import Image
 import config
 import models
 from config import OK, PROGRESS, WARNING, ENDC
+
+
+def _save_scene_analysis_image(ctx):
+    """Snapshot the head image the perception VLM analyzed.
+
+    Kept as its own file (not a trajectory frame) so the reviewer VLM can be shown the
+    start-of-attempt scene separately from the many trajectory frames. Returns the saved
+    path, or the live head-image path if the copy failed.
+    """
+    src = config.rgb_image_head_path
+    try:
+        step = getattr(ctx.api, "trajectory_step", 0) if ctx.api is not None else 0
+        dst = config.scene_analysis_image_path.format(step=step)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+        ctx.logger.info(PROGRESS + f"Perception: saved scene-analysis image to {dst}" + ENDC)
+        return dst
+    except Exception as e:
+        ctx.logger.info(WARNING + f"Warning: failed to save scene-analysis image: {e}" + ENDC)
+        return src
 
 
 def _parse_affordance_points_block(text):
@@ -141,6 +163,7 @@ def run_scene_perception(ctx, command):
         .replace("[INSERT AFFORDANCE POINTING SECTION]", affordance_section)
     )
     image_paths = [config.rgb_image_head_path] if args.lm_images else None
+    ctx.scene_analysis_image_path = _save_scene_analysis_image(ctx)
     try:
         logger.info(PROGRESS + f"Perception: analyzing scene with {args.planner_perception_vlm}..." + ENDC)
         messages = models.call_llm_cached(

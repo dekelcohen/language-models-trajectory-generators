@@ -307,6 +307,8 @@ class AgentContext:
         # 2D->3D affordance-point mappings from perception, kept for debugging.
         # Each entry: {"object": str, "points_2d": [[x,y],...], "points_3d": [...]}.
         self.affordance_points = []
+        # Snapshot of the head image the last scene analysis was computed from.
+        self.scene_analysis_image_path = None
 
 
 # --- One-time init ------------------------------------------------------
@@ -512,6 +514,8 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     # --- Fresh per-task state (function-call analogy) ---
     from task_state import TaskState
     task = TaskState(command=prompt, max_attempts=max_attempts, start_trajectory_step=api.trajectory_step)
+    task.scene_analysis = scene_analysis
+    task.scene_analysis_image_path = ctx.scene_analysis_image_path
     api.task = task
     messages = []
     task.conversation_messages = messages

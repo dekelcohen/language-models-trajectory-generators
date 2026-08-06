@@ -170,6 +170,11 @@ xmem_output_path = "./images/xmem_output_{step}.png"
 visualize_traj_history_steps = 6
 seg_overlay_image_path = "./images/seg_overlay_{provider}_{object}.png"
 
+# Snapshot of the exact head-camera image the perception VLM analyzed for a given
+# scene analysis. Kept separate from the trajectory frames so the reviewer VLM can be
+# shown the start-of-attempt scene without it being mistaken for a trajectory frame.
+scene_analysis_image_path = "./images/scene_analysis_head_{step}.png"
+
 # Affordance-pointing coordinate format text injected into SCENE_PERCEPTION_PROMPT
 # (replaces COORDINATES_FORMAT_PLACEHOLDER), selected by the perception VLM family.
 affordance_coords_format_gemini = "The points are in [y, x] format normalized to 0-1000"
