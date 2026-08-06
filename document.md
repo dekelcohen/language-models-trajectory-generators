@@ -294,10 +294,22 @@ retry vs. done.
 - **First attempt** prompt = `MAIN_PROMPT` filled with the `detect_object` tool + optional
   in-context example + SCENE ANALYSIS + head image (`config.rgb_image_head_path`), sent as
   `role="system"`. Optional `--prepend-prompt` text is prepended to the first command only.
-- **Loop** until `task.completed_task`: parse ```` ```python ```` blocks from the latest
-  message, `exec` each with injected tools (`get_exec_locals`), capture stdout.
-  - Exception → `ERROR_CORRECTION_PROMPT` (block number + traceback), `error=True`.
-  - stdout (`< 2000` chars) → `PRINT_OUTPUT_PROMPT` fed back.
+- **Loop** until `task.completed_task` — `run_task_agent_loop`, split into focused funcs
+  (all in `agent_runner.py`):
+
+  | function | intent | states / cases handled |
+  |---|---|---|
+  | `execute_python_blocks(ctx, task, assistant_content) -> feedback` | the **only** place LLM-generated code runs; must never let the LLM believe an action ran when it did not | 1) no ```` ```python ```` block → `NO_TOOL_CALL_PROMPT`; 2) block raises → `ERROR_CORRECTION_PROMPT` (block number + traceback), remaining blocks **aborted**; 3) block prints (`< 2000` chars) → collected into `PRINT_OUTPUT_PROMPT`, execution **continues**; 4) `task_completed()` / `task_failed()` fires mid-response → remaining blocks skipped on purpose, no notice; 5) blocks skipped by case 2 → `BLOCKS_NOT_EXECUTED_PROMPT` naming exactly which blocks never ran |
+  | `handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, feedback) -> messages` | close a FAILED attempt and open the next one (state: `task.failed_task` set by reviewer / `task_failed()` / no-motion guard) | summarize attempt (`TASK_SUMMARY_PROMPT`, images stripped) → append to `attempt_summaries`; re-baseline `start_attempt_trajectory_step`; fresh conversation (`messages=[]`) with retry `MAIN_PROMPT` (no `detect_object`, no in-context example, latest EE pose) + combined `TASK_FAILURE_PROMPT`; clear `failed_task` |
+  | `continue_task_turn(ctx, task, feedback) -> messages` | continue the CURRENT attempt (not completed, not failed): feed execution results back and get the next response | attaches latest head/wrist frames + `EEF_POS_SNIPPET` per `config.ENABLE_EEF_POS_IMAGE` / `--lm-images`; never sends an empty user turn (providers such as Bedrock reject an assistant-final conversation) → falls back to `CONTINUE_TASK_PROMPT` |
+  | `run_task_agent_loop(ctx, task, prompt, scene_analysis, attempt_summaries) -> messages` | drive one (sub)task to termination: execute → feedback → next LLM turn | invariant: conversation always ends on an assistant response with pending blocks. Per iteration exactly one of: `completed_task` → exit; `failed_task` → `handle_task_failure`; else → `continue_task_turn`. Assumes the first assistant response was produced by `execute_task` |
+
+  - All blocks of one response share a single namespace (a variable/import from an earlier
+    block is visible to later ones); it is rebuilt per response.
+  - **A `print()` must not abort the response.** Earlier versions reused one `error` flag for
+    "exception" and "has print output", so a first block that printed silently dropped every
+    later block (typically all `execute_trajectory` calls) while the LLM was told only
+    "Print statement output: …" and then claimed the task was done.
   - `task_completed()` triggers review (see §7); on review failure `failed_task=True`.
 - **Retry path** (`failed_task`): generate a `TASK_SUMMARY_PROMPT` summary (appended to
   `attempt_summaries`), reset `start_attempt_trajectory_step`, rebuild the prompt with the
@@ -437,6 +449,10 @@ precomputed GraspGen candidates from `outputs/graspgen/grasp_poses_{object}.npz`
 ### Reviewer & correction (`task_completed` → `run_vlm_review`)
 - `task_completed()`:
   - render trajectory videos; `attempt_number += 1`;
+  - **no-motion guard** (non-replay): if `trajectory_step <= start_attempt_trajectory_step`
+    the robot never moved in this attempt (generated blocks did not reach the env), so the
+    claim is rejected — `failed_task=True` (retry), or on the last attempt
+    `completed_task=True` with `review_succeeded=False` (never `accepted_without_review`);
   - **final attempt** (`attempt_number >= max_attempts`, non-replay) → accept without
     review: `completed_task=True`, `accepted_without_review=True`;
   - else `TASK_COMPLETED` then dispatch review by `--review-provider`.
@@ -444,6 +460,10 @@ precomputed GraspGen candidates from `outputs/graspgen/grasp_poses_{object}.npz`
   `start_attempt_trajectory_step` + wrist frames (stride 7), cap at
   `config.max_allowed_vlm_images`; ask the review model (`vlm` = main model, `vlm:<model>`
   = override) for strict JSON `{success, reasoning, improvement_steps}`.
+  - **Zero-frame guard**: if no frames exist from `start_attempt_trajectory_step`, the VLM is
+    **not** called — `success=False` with reason "no trajectory frames captured / robot did
+    not move". Without it the reviewer judged from conversation text alone and hallucinated
+    key frames ("the door is clearly swung open") that were never rendered.
   - **Start-of-attempt scene**: the head image the perception VLM analyzed (saved by
     `run_scene_perception` to `config.scene_analysis_image_path`) is attached **first**,
     before the key frames, and `REVIEW_SCENE_ANALYSIS_SECTION` (from `task.scene_analysis` /
@@ -628,6 +648,25 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 ---
 
 ## Changelog
+
+- **Phantom-success fix (multi-block execution + review guards)** — a `door` run removed the
+  occluding cylinder, never touched the handle, yet reported success. Three chained defects,
+  all fixed:
+  - `agent_runner.py` reused one `error` flag for "exception" and "block printed something", so
+    a first block that called `print()` **silently skipped the remaining 6 blocks** (all
+    `execute_trajectory` calls). The LLM saw only the print output and asserted every step had
+    run. Now prints never abort the response, and any genuinely skipped blocks are reported via
+    the new `BLOCKS_NOT_EXECUTED_PROMPT`.
+  - `run_vlm_review` was called with **0 key frames** (nothing moved → no frames from
+    `start_attempt_trajectory_step`), and the reviewer hallucinated a final frame showing the
+    door open. It now short-circuits to `success=False` without calling the VLM.
+  - `task_completed()` gained a **no-motion guard** (`trajectory_step <= start_attempt_trajectory_step`)
+    so a completion claim without any executed trajectory can never be accepted (the planner
+    then sees failure instead of a phantom success).
+  - New prompt constants in `prompts/print_output_prompt.py`: `NO_TOOL_CALL_PROMPT`,
+    `BLOCKS_NOT_EXECUTED_PROMPT`.
+  - `execute_task`'s inline `while` loop refactored into `run_task_agent_loop` +
+    `execute_python_blocks` / `handle_task_failure` / `continue_task_turn` (see §5 table).
 
 - **Scene analysis + its image given to the reviewer VLM**: `run_scene_perception` now snapshots
   the exact head image it analyzed to `config.scene_analysis_image_path`

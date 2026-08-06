@@ -31,6 +31,9 @@ class TaskState:
         self.review_reason = ""
         self.review_improvement_steps = ""
         self.accepted_without_review = False
+        # Per-attempt trajectory clips (head, wrist mp4) built by task_completed() and
+        # attached to the reviewer when the review model supports video input.
+        self.review_clips = []
 
         # Perception / trajectory bookkeeping for this task
         self.segmentation_texts = []
@@ -42,3 +45,8 @@ class TaskState:
         # start-of-attempt scene, separately from the trajectory frames.
         self.scene_analysis = ""
         self.scene_analysis_image_path = None
+
+    def title(self, max_len=90):
+        """Short single-line task name for log lines."""
+        text = " ".join(str(self.command or "(no task)").split())
+        return text if len(text) <= max_len else text[:max_len - 3] + "..."

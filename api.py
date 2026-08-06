@@ -18,37 +18,27 @@ from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EX
 from helpers.image_utils import list_file_paths
 from task_state import TaskState
 
-def create_trajectory_videos(logger):
-    """Create trajectory debug videos from captured frames (head and wrist).
-    Uses `config.trajectory_folder`, `trajectory_image_base`, `trajectory_wrist_image_base`, and `trajectory_video_fps`. Logs warnings instead of raising on errors.
+def create_trajectory_videos(logger, start_idx=0):
+    """Build this attempt's review clips (head + wrist) and grow the per-camera full videos.
+
+    Only the frames from `start_idx` (the attempt's first trajectory step) are encoded;
+    each clip is then appended to `<base>_full.mp4` with ffmpeg stream copy, so the full
+    session video stays inspectable mid-run without re-encoding it from frame 0 every
+    time. See helpers/video_utils.py.
+
+    Returns: list of attempt clip paths (head first, then wrist); [] when no frames.
     """
+    from helpers.video_utils import build_review_clips
     try:
-        from debug.dbg_utils import create_video_from_images
-        from contextlib import redirect_stdout
-        import sys as _sys
-        with redirect_stdout(_sys.stderr):
-            create_video_from_images(
-                folder_path=config.trajectory_folder,
-                base_name=config.trajectory_image_base,
-                start_idx=0,
-                end_idx=float('inf'),
-                fps=config.trajectory_video_fps,
-            )
-        logger.info(OK + "Saved trajectory video from captured frames." + ENDC)
-        try:
-            with redirect_stdout(_sys.stderr):
-                create_video_from_images(
-                    folder_path=config.trajectory_folder,
-                    base_name=config.trajectory_wrist_image_base,
-                    start_idx=0,
-                    end_idx=float('inf'),
-                    fps=config.trajectory_video_fps,
-                )
-            logger.info(OK + "Saved wrist trajectory video from captured frames." + ENDC)
-        except Exception as e_w:
-            logger.info(PROGRESS + f"Warning: could not create wrist trajectory video: {e_w}" + ENDC)
+        clips = build_review_clips(logger, start_idx)
     except Exception as e:
-        logger.info(PROGRESS + f"Warning: could not create trajectory video: {e}" + ENDC)
+        logger.info(PROGRESS + f"Warning: could not create trajectory videos: {e}" + ENDC)
+        return []
+    if clips:
+        logger.info(OK + f"Saved attempt trajectory clip(s) + updated full video(s): {clips}" + ENDC)
+    else:
+        logger.info(PROGRESS + f"No trajectory frames from step {start_idx} - no video created." + ENDC)
+    return clips
 
 class API:
 
@@ -494,11 +484,19 @@ class API:
 
 
     def run_vlm_review(self):
-        """Subsample trajectory frames and ask VLM to judge success.
-        Expects strict JSON: { "success": true/false, "reasoning": "..." }.
+        """Ask a VLM to judge whether the attempt achieved the task goal.
+
+        Visual evidence is EITHER the per-attempt trajectory videos (head + wrist mp4,
+        preferred - see models.model_supports_video) OR, for review models without video
+        input (Azure OpenAI, Claude on Bedrock), the legacy subsampled key frames.
+        Expects strict JSON: { "success": true/false, "reasoning": "...", "improvement_steps": [...] }.
         Does not mutate the environment.
         """
-        from prompts.review_prompt import REVIEW_PROMPT, REVIEW_SCENE_ANALYSIS_SECTION
+        from prompts.review_prompt import (
+            REVIEW_PROMPT, REVIEW_SCENE_ANALYSIS_SECTION,
+            REVIEW_MEDIA_FRAMES_SECTION, REVIEW_MEDIA_VIDEO_SECTION,
+            REMAINING_MEDIA_SENTENCE_FRAMES, REMAINING_MEDIA_SENTENCE_VIDEO,
+        )
         start_idx = self.task.start_attempt_trajectory_step
         # Determine review model: "vlm" uses main model, "vlm:<model>" uses specified model
         review_provider = self.args.review_provider
@@ -506,6 +504,11 @@ class API:
             review_model = review_provider[len("vlm:"):]
         else:
             review_model = self.args.language_model
+
+        # Attempt clips built by task_completed() (head, then wrist).
+        video_paths = [p for p in (self.task.review_clips or []) if p and os.path.exists(p)]
+        use_video = bool(video_paths) and models.model_supports_video(review_model)
+
         # Subsample every 5th frame from head RGB, starting at the attempt's first step
         frame_paths = list_file_paths(
             root=config.trajectory_folder,
@@ -519,24 +522,60 @@ class API:
             start_idx=start_idx,
             skip=7,
         )
+
+        # No trajectory frames/clips since the attempt started => the robot never moved.
+        # Reviewing on conversation text alone lets the VLM hallucinate a success
+        # (it "sees" frames described in the plan that do not exist) - fail hard instead.
+        if not frame_paths and not video_paths:
+            reason = (f"No trajectory frames were captured for this attempt (start_idx={start_idx}, "
+                      f"trajectory_step={self.trajectory_step}): the robot did not move, so none of the "
+                      "planned trajectories were actually executed.")
+            self.logger.info(FAIL + f"Review: success=False (no frames) | task=\"{self.task.title()}\". {reason}" + ENDC)
+            self.task.review_reason = reason
+            self.task.review_improvement_steps = [
+                "Re-emit and execute every planned trajectory: no execute_trajectory call reached the environment.",
+                "Do not call task_completed() before the trajectories have actually run.",
+            ]
+            self.task.failed_task = True
+            return
         
         # Start-of-attempt scene image (perception VLM input). Sent FIRST, before the
-        # trajectory key frames, and explicitly described in the prompt so the reviewer
-        # never confuses it with one of the many trajectory frames.
+        # trajectory videos / key frames, and explicitly described in the prompt so the
+        # reviewer never confuses it with the execution evidence.
         scene_image_path = self.task.scene_analysis_image_path
         scene_analysis_text = (self.task.scene_analysis or "").strip()
         has_scene_image = bool(scene_image_path and os.path.exists(scene_image_path))
 
-        # GPT-5 in azure limits to 50 images in a request - test if it confuses the model (the cutoff of wrist images ....)
-        max_frames = config.max_allowed_vlm_images - 1 - (1 if has_scene_image else 0)
-        if len(frame_paths) > max_frames:
-            self.logger.info(WARNING + f"Cutoff wrist frames from the end. frame_paths in preview > config.max_allowed_vlm_images ({config.max_allowed_vlm_images})" + ENDC)
-            frame_paths = frame_paths[:max_frames]
+        if use_video:
+            frame_paths = []  # videos replace the key frames entirely
+            cam_labels = ["head cam", "wrist cam"]
+            video_list = "\n".join(
+                f"  {i+1}. {cam_labels[i] if i < len(cam_labels) else 'cam'}: {p}"
+                for i, p in enumerate(video_paths)
+            )
+            media_section = (
+                REVIEW_MEDIA_VIDEO_SECTION
+                .replace("[INSERT VIDEO LIST]", video_list)
+                .replace("[INSERT VIDEO FPS]", str(config.trajectory_video_fps))
+            )
+            remaining_media_sentence = REMAINING_MEDIA_SENTENCE_VIDEO
+        else:
+            # GPT-5 in azure limits to 50 images in a request - test if it confuses the model (the cutoff of wrist images ....)
+            max_frames = config.max_allowed_vlm_images - 1 - (1 if has_scene_image else 0)
+            if len(frame_paths) > max_frames:
+                self.logger.info(WARNING + f"Cutoff wrist frames from the end. frame_paths in preview > config.max_allowed_vlm_images ({config.max_allowed_vlm_images})" + ENDC)
+                frame_paths = frame_paths[:max_frames]
+            media_section = REVIEW_MEDIA_FRAMES_SECTION.replace("[INSERT FRAME PATHS]", "\n".join(frame_paths))
+            remaining_media_sentence = REMAINING_MEDIA_SENTENCE_FRAMES
+            if video_paths:
+                self.logger.info(WARNING + f"Review model {review_model} has no video input - falling back to {len(frame_paths)} key frames." + ENDC)
+            video_paths = []
 
         if has_scene_image or scene_analysis_text:
             scene_section = (
                 REVIEW_SCENE_ANALYSIS_SECTION
                 .replace("[INSERT SCENE ANALYSIS IMAGE PATH]", str(scene_image_path))
+                .replace("[INSERT REMAINING MEDIA SENTENCE]", remaining_media_sentence)
                 .replace("[INSERT SCENE ANALYSIS]", scene_analysis_text or "(unavailable)")
             )
         else:
@@ -546,9 +585,10 @@ class API:
         prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.task.command)) \
                               .replace("[INSERT 3D COORDINATES PROMPT SECTION]", self.coords_section) \
                               .replace("[INSERT SCENE ANALYSIS SECTION]", scene_section) \
-                              .replace("[INSERT FRAME PATHS]", "\n".join(frame_paths))
+                              .replace("[INSERT MEDIA SECTION]", media_section)
 
-        # Scene image first, then the chronological trajectory frames.
+        # Scene image first, then the chronological trajectory frames (frames mode);
+        # in video mode the clips are attached after the scene image.
         review_image_paths = ([scene_image_path] if has_scene_image else []) + frame_paths
 
         # Use conversation history; do not summarize. Strip previously accumulated
@@ -556,9 +596,10 @@ class API:
         # provider image caps (e.g. Bedrock max 20) and focuses the reviewer.
         messages = self.task.conversation_messages
         models.strip_images_from_messages(messages)
-        self.logger.info(PROGRESS + f"==================== VLM review using {len(frame_paths)} frames (stride=5), start_idx={start_idx}, scene_image={'yes' if has_scene_image else 'no'}, model={review_model}." + ENDC)
-        messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=review_image_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
-        # Drop the dozens of fresh review frames now that the review is done, so they don't persist in the shared conversation 
+        media_desc = f"{len(video_paths)} video(s)" if use_video else f"{len(frame_paths)} frames (stride=5)"
+        self.logger.info(PROGRESS + f"==================== VLM review using {media_desc}, start_idx={start_idx}, scene_image={'yes' if has_scene_image else 'no'}, model={review_model}." + ENDC)
+        messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=review_image_paths, video_paths=video_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
+        # Drop the fresh review media now that the review is done, so it doesn't persist in the shared conversation
         models.strip_images_from_messages(messages)
         # Update shared conversation
         self.task.conversation_messages = messages
@@ -580,7 +621,7 @@ class API:
         improvement_steps = resp.get("improvement_steps", "")
         self.task.review_reason = reason
         self.task.review_improvement_steps = improvement_steps
-        self.logger.info((OK if success else FAIL) + f"Review: success={success}. See details in above json" + ENDC)
+        self.logger.info((OK if success else FAIL) + f"Review: success={success} | task=\"{self.task.title()}\". See details in above json" + ENDC)
         if success:
             self.task.completed_task = True
             self.task.review_succeeded = True
@@ -588,11 +629,30 @@ class API:
             self.task.failed_task = True
 
     def task_completed(self):        
-        create_trajectory_videos(self.logger)
+        self.task.review_clips = create_trajectory_videos(self.logger, self.task.start_attempt_trajectory_step)
         
         self.task.attempt_number += 1
         max_attempts = self.task.max_attempts or self.args.attempts
         is_replay = bool(self.args.replay_log)
+
+        # Guard: task_completed() claimed while the robot never moved during this attempt
+        # (no new trajectory steps). This happens when generated code blocks were not
+        # executed - accepting it would report a hallucinated success.
+        if not is_replay and self.trajectory_step <= self.task.start_attempt_trajectory_step:
+            reason = (f"task_completed() was called but no trajectory was executed in this attempt "
+                      f"(trajectory_step={self.trajectory_step}, attempt start={self.task.start_attempt_trajectory_step}).")
+            self.logger.info(FAIL + reason + ENDC)
+            self.task.review_reason = reason
+            self.task.review_improvement_steps = [
+                "Actually execute the planned trajectories (execute_trajectory / gripper actions) before calling task_completed().",
+            ]
+            if self.task.attempt_number >= max_attempts:
+                self.task.completed_task = True
+                self.task.review_succeeded = False
+            else:
+                self.task.failed_task = True
+            return
+
         # On the final attempt, skip review and accept the result
         # (in replay mode, ignore max_attempts so all blocks execute)
         if not is_replay and self.task.attempt_number >= max_attempts:
@@ -682,7 +742,7 @@ class API:
                     exec(code)
             return
         # VLM review path
-        self.logger.info(PROGRESS + f"VLM review after attempt {self.task.attempt_number}/{max_attempts}..." + ENDC)
+        self.logger.info(PROGRESS + f"VLM review after attempt {self.task.attempt_number}/{max_attempts} | task=\"{self.task.title()}\"..." + ENDC)
         try:
             self.run_vlm_review()
         except Exception as e:

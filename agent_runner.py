@@ -41,7 +41,7 @@ from prompts.main_prompt import (
     INITIAL_PLANNING_2,
 )
 from prompts.error_correction_prompt import ERROR_CORRECTION_PROMPT
-from prompts.print_output_prompt import PRINT_OUTPUT_PROMPT
+from prompts.print_output_prompt import PRINT_OUTPUT_PROMPT, NO_TOOL_CALL_PROMPT, BLOCKS_NOT_EXECUTED_PROMPT
 from prompts.task_failure_prompt import TASK_FAILURE_PROMPT
 from prompts.task_summary_prompt import TASK_SUMMARY_PROMPT
 
@@ -480,6 +480,201 @@ class TaskResult:
 
 
 # --- Per-(sub)task execution -------------------------------------------
+def execute_python_blocks(ctx, task, assistant_content):
+    """Execute every ```python block of ONE assistant response and build the user
+    feedback prompt describing what actually happened.
+
+    Intent: this is the only place that runs LLM-generated code. It must never let
+    the LLM believe an action ran when it did not.
+
+    All blocks share one namespace (variables/imports from an earlier block are
+    visible to later ones), rebuilt per response.
+
+    Cases handled:
+      1. No ```python block in the response  -> NO_TOOL_CALL_PROMPT (nudge to emit a tool call).
+      2. Block raises                        -> ERROR_CORRECTION_PROMPT with the traceback;
+                                                remaining blocks are ABORTED.
+      3. Block prints                        -> output collected and prepended via
+                                                PRINT_OUTPUT_PROMPT; execution CONTINUES
+                                                (a print must not silently drop later
+                                                execute_trajectory blocks).
+      4. task_completed()/task_failed() fires -> remaining blocks are skipped on purpose
+                                                (attempt is over); no "not executed" notice.
+      5. Blocks skipped because of case 2     -> BLOCKS_NOT_EXECUTED_PROMPT telling the LLM
+                                                exactly which blocks never ran.
+
+    Returns: str feedback prompt for the next user turn (may be "").
+    Side effects: runs robot actions; may set task.completed_task / task.failed_task.
+    """
+    logger = ctx.logger
+    if len(assistant_content.split("```python")) <= 1:
+        return "" if task.completed_task else NO_TOOL_CALL_PROMPT
+
+    code_block = assistant_content.split("```python")
+    exec_env = globals().copy()
+    exec_env.update(ctx.exec_locals)
+
+    feedback = ""
+    error = False
+    block_number = 0
+    executed_blocks = 0
+    printed_outputs = []
+    total_blocks = sum(1 for b in code_block if len(b.split("```")) > 1)
+
+    for block in code_block:
+        if len(block.split("```")) <= 1:
+            continue
+        code = block.split("```")[0]
+        block_number += 1
+        if error or task.completed_task or task.failed_task:
+            continue
+        try:
+            f = StringIO()
+            with redirect_stdout(f):
+                exec(code, exec_env)
+        except Exception:
+            error_message = traceback.format_exc()
+            feedback += ERROR_CORRECTION_PROMPT.replace("[INSERT BLOCK NUMBER]", str(block_number)).replace("[INSERT ERROR MESSAGE]", error_message)
+            feedback += "\n"
+            error = True
+        else:
+            executed_blocks += 1
+            s = f.getvalue()
+            if s != "" and len(s) < 2000:
+                printed_outputs.append(s)
+
+    if printed_outputs:
+        feedback = PRINT_OUTPUT_PROMPT.replace("[INSERT PRINT STATEMENT OUTPUT]", "".join(printed_outputs)) + "\n" + feedback
+
+    skipped_blocks = total_blocks - executed_blocks
+    if skipped_blocks > 0 and not task.completed_task and not task.failed_task:
+        logger.info(WARNING + f"{skipped_blocks}/{total_blocks} code block(s) of this response were NOT executed (aborted at block {executed_blocks + 1})." + ENDC)
+        feedback += (
+            BLOCKS_NOT_EXECUTED_PROMPT
+            .replace("[INSERT EXECUTED BLOCKS]", str(executed_blocks))
+            .replace("[INSERT TOTAL BLOCKS]", str(total_blocks))
+            .replace("[INSERT FIRST SKIPPED BLOCK]", str(executed_blocks + 1))
+        )
+    return feedback
+
+
+def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, feedback):
+    """Close a FAILED attempt and open the next one (state: task.failed_task is True,
+    set by the VLM reviewer / task_failed() / the no-motion guard).
+
+    Steps:
+      1. Ask the LLM for a text summary of the failed attempt (images stripped to stay
+         under provider image caps) and append it to attempt_summaries.
+      2. Re-baseline the attempt: start_attempt_trajectory_step = current trajectory_step
+         (so the next review only looks at the new attempt's frames).
+      3. Build a FRESH conversation (messages = []) with the retry MAIN_PROMPT:
+         latest EE pose, no in-context example, no detect_object tool (the arm usually
+         occludes the target - reuse the first attempt's object coords) + TASK_FAILURE_PROMPT
+         carrying all attempt summaries so far.
+      4. Clear task.failed_task so the normal turn flow resumes on the retry.
+
+    Returns: new messages list (conversation for the retry attempt).
+    """
+    args, logger, api = ctx.args, ctx.logger, ctx.api
+    logger.info(FAIL + "FAILED TASK! Generating summary of the task execution attempt..." + ENDC)
+
+    summary_prompt = feedback + TASK_SUMMARY_PROMPT + "\n"
+    logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+    # Summary is text-only: drop accumulated images (perception, detect_object,
+    # review frames) so the request stays under provider image caps (Bedrock max 20).
+    messages = task.conversation_messages
+    models.strip_images_from_messages(messages)
+    messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, summary_prompt, messages, "user", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache})
+    task.conversation_messages = messages
+    logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
+
+    attempt_summaries.append(messages[-1]["content"])
+
+    logger.info(PROGRESS + f"RETRYING TASK (attempt {task.attempt_number + 1}/{task.max_attempts})..." + ENDC)
+    task.start_attempt_trajectory_step = api.trajectory_step
+
+    _, eef_pos = build_llm_context_images_and_pose(ctx.main_connection, api.trajectory_step, logger)
+    retry_prompt = _build_main_prompt(
+        NO_DETECT_OBJECT_TOOL, NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING,
+        eef_pos, prompt, ctx.coords_section, '',
+        scene_analysis=scene_analysis,
+    )
+    try:
+        logger.info(PROGRESS + f"Env state: {json.dumps(ctx.sim_state)}" + ENDC)
+    except Exception:
+        pass
+
+    combined_summary = "\n".join(
+        f"--- Attempt {i+1} Summary ---\n{s}"
+        for i, s in enumerate(attempt_summaries)
+    )
+    retry_prompt += "\n" + TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", combined_summary)
+
+    logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+    messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, retry_prompt, [], "system", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache})
+    task.conversation_messages = messages
+    task.failed_task = False  # reset to resume normal flow on the retry
+    return messages
+
+
+def continue_task_turn(ctx, task, feedback):
+    """Continue the CURRENT attempt (state: not completed, not failed): send the
+    execution feedback back to the LLM and get its next response.
+
+    Cases handled:
+      - Attaches the latest head/wrist frames + EE pose snippet when
+        config.ENABLE_EEF_POS_IMAGE and args.lm_images allow it.
+      - Never sends an empty user turn: a block may print nothing (logger output is not
+        captured) and, with images off, leave both feedback and image paths empty; some
+        providers (e.g. AWS Bedrock) reject a conversation ending on the assistant
+        message -> falls back to CONTINUE_TASK_PROMPT.
+
+    Returns: updated messages list.
+    """
+    args, logger = ctx.args, ctx.logger
+    logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+    img_paths, eef_pos = build_llm_context_images_and_pose(ctx.main_connection, ctx.api.trajectory_step, logger)
+    if config.ENABLE_EEF_POS_IMAGE and eef_pos:
+        feedback += f'\n{EEF_POS_SNIPPET}\n'.format(eef_pos=eef_pos)
+    else:
+        img_paths = None
+    if not args.lm_images:
+        img_paths = None
+    if not (feedback and feedback.strip()) and not img_paths:
+        feedback = CONTINUE_TASK_PROMPT
+
+    messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, feedback, task.conversation_messages, "user", image_paths=img_paths, options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache})
+    task.conversation_messages = messages
+    logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
+    return messages
+
+
+def run_task_agent_loop(ctx, task, prompt, scene_analysis, attempt_summaries):
+    """Drive one (sub)task to termination: execute -> feedback -> next LLM turn.
+
+    Loop invariant: task.conversation_messages always ends on an assistant response
+    whose code blocks still need executing.
+
+    Per iteration, exactly one of three outcomes:
+      - task.completed_task -> leave the loop (review passed, or final attempt accepted).
+      - task.failed_task    -> handle_task_failure(): summarize + start the next attempt.
+      - otherwise           -> continue_task_turn(): feed results back into this attempt.
+
+    Assumes the first assistant response was already generated by execute_task().
+    Returns: final messages list.
+    """
+    messages = task.conversation_messages
+    while not task.completed_task:
+        feedback = execute_python_blocks(ctx, task, messages[-1]["content"])
+        if task.completed_task:
+            break
+        if task.failed_task:
+            messages = handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, feedback)
+        else:
+            messages = continue_task_turn(ctx, task, feedback)
+    return task.conversation_messages
+
+
 def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_analysis=""):
     """Run a single (sub)task to completion.
 
@@ -520,7 +715,6 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     messages = []
     task.conversation_messages = messages
     attempt_summaries = []
-    error = False
 
     logger.info(PROGRESS + f"STARTING TASK... (max_attempts={max_attempts}) prompt={prompt!r}" + ENDC)
 
@@ -557,110 +751,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     task.conversation_messages = messages
     logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
 
-    while not task.completed_task:
-        new_prompt = ""
-        if len(messages[-1]["content"].split("```python")) > 1:
-            code_block = messages[-1]["content"].split("```python")
-            block_number = 0
-            # One shared namespace for all blocks in THIS assistant response, so a
-            # variable/import defined in an earlier block is visible to later blocks.
-            # It is rebuilt each turn (new assistant response) -> reset between responses.
-            exec_env = globals().copy()
-            exec_env.update(ctx.exec_locals)
-            for block in code_block:
-                if not error:
-                    if len(block.split("```")) > 1:
-                        code = block.split("```")[0]
-                        block_number += 1
-                        try:
-                            f = StringIO()
-                            with redirect_stdout(f):
-                                exec(code, exec_env)
-                        except Exception:
-                            error_message = traceback.format_exc()
-                            new_prompt += ERROR_CORRECTION_PROMPT.replace("[INSERT BLOCK NUMBER]", str(block_number)).replace("[INSERT ERROR MESSAGE]", error_message)
-                            new_prompt += "\n"
-                            error = True
-                        else:
-                            s = f.getvalue()
-                            error = False
-                            if s != "" and len(s) < 2000:
-                                new_prompt += PRINT_OUTPUT_PROMPT.replace("[INSERT PRINT STATEMENT OUTPUT]", s)
-                                new_prompt += "\n"
-                                error = True
-        else:
-            if not task.completed_task:
-                new_prompt += "No tool call detected. You must emit a ```python block calling actions or task_completed().\n"
-                
-
-        if not task.completed_task:
-            if task.failed_task:
-                logger.info(FAIL + "FAILED TASK! Generating summary of the task execution attempt..." + ENDC)
-
-                new_prompt += TASK_SUMMARY_PROMPT
-                new_prompt += "\n"
-
-                logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                # Summary is text-only: drop accumulated images (perception, detect_object,
-                # review frames) so the request stays under provider image caps (Bedrock max 20).
-                models.strip_images_from_messages(messages)
-                messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, "user", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
-                task.conversation_messages = messages
-                logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
-
-                attempt_summaries.append(messages[-1]["content"])
-
-                logger.info(PROGRESS + f"RETRYING TASK (attempt {task.attempt_number + 1}/{max_attempts})..." + ENDC)
-                task.start_attempt_trajectory_step = api.trajectory_step
-
-                _, eef_pos = build_llm_context_images_and_pose(main_connection, api.trajectory_step, logger)
-                # On retry: latest EE pos, no in-context example, and no detect_object tool
-                # (arm usually occludes the target; reuse first-attempt object coords instead).
-                new_prompt = _build_main_prompt(
-                    NO_DETECT_OBJECT_TOOL, NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING,
-                    eef_pos, prompt, coords_section, '',
-                    scene_analysis=scene_analysis,
-                )
-                try:
-                    _sim_state_str = json.dumps(sim_state)
-                    logger.info(PROGRESS + f"Env state: {_sim_state_str}" + ENDC)
-                except Exception:
-                    pass
-
-                combined_summary = "\n".join(
-                    f"--- Attempt {i+1} Summary ---\n{s}"
-                    for i, s in enumerate(attempt_summaries)
-                )
-                new_prompt += "\n"
-                new_prompt += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", combined_summary)
-                messages = []
-                error = False
-
-                logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, "system", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
-                task.conversation_messages = messages
-                task.failed_task = False  # reset to resume normal flow on the retry
-            else:
-                logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-                _imgs_paths, eef_pos = build_llm_context_images_and_pose(main_connection, api.trajectory_step, logger)
-                if config.ENABLE_EEF_POS_IMAGE and eef_pos:
-                    new_prompt += f'\n{EEF_POS_SNIPPET}\n'.format(eef_pos=eef_pos)
-                else:
-                    _imgs_paths = None
-                if not args.lm_images:
-                    _imgs_paths = None
-                # Never send an empty user turn: a successful code block may print
-                # nothing (only logger output, which is not captured) and, with
-                # ENABLE_EEF_POS_IMAGE/images off, leave both new_prompt and
-                # _imgs_paths empty. Some providers (e.g. AWS Bedrock) reject a
-                # conversation that ends on the assistant message. Add a concise
-                # continuation nudge so the turn always has user content.
-                if not (new_prompt and new_prompt.strip()) and not _imgs_paths:
-                    new_prompt = CONTINUE_TASK_PROMPT
-                messages = models.call_llm_cached(main_connection, client, args.language_model, new_prompt, messages, "user", image_paths=_imgs_paths, options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache})
-                task.conversation_messages = messages
-                logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
-                error = False
+    messages = run_task_agent_loop(ctx, task, prompt, scene_analysis, attempt_summaries)
 
     logger.info(OK + "FINISHED TASK!" + ENDC)
     return TaskResult(
