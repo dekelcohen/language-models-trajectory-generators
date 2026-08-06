@@ -92,13 +92,18 @@ class API:
         self.logger.info(vis_msg)
 
 
-    def _capture_head_image_and_depth(self):
+    def _capture_head_image_and_depth(self, capture=True):
         """Send CAPTURE_IMAGES, parse camera poses/cam_info, load head RGB + depth.
 
-        Shared by detect_object and convert_2d_point_to_3d_world. Sets
+        Shared by detect_object, convert_2d_point_to_3d_world and scene perception. Sets
         self.head/wrist camera pose fields, self.cam_info and self.head_image_size.
+        With capture=False the env is NOT asked for a new frame: the files on disk (and
+        the camera poses/cam_info from the previous capture) are reused - use it only
+        right after a capture, to avoid re-rendering the same state twice.
         Returns (rgb_image_head: PIL.Image, depth_array: np.ndarray[H,W] float32).
         """
+        if not capture:
+            return self._load_head_image_and_depth()
         self.logger.info(PROGRESS + "Capturing head and wrist camera images..." + ENDC)
         self.main_connection.send([CAPTURE_IMAGES])
         recv_payload = self.main_connection.recv()
@@ -128,6 +133,14 @@ class API:
         self.wrist_camera_position = wrist_camera_position
         self.wrist_camera_orientation_q = wrist_camera_orientation_q
 
+        return self._load_head_image_and_depth()
+
+    def _load_head_image_and_depth(self):
+        """Load the head RGB + depth already written to disk by the last capture.
+
+        No env round-trip. Sets self.head_image_size. Depth comes from the raw .npy when
+        present, else from the 8-bit depth PNG.
+        """
         rgb_image_head = Image.open(config.rgb_image_head_path).convert("RGB")
         self.head_image_size = rgb_image_head.size
         # Prefer raw depth from .npy if available; fall back to 8-bit image
@@ -169,18 +182,21 @@ class API:
             self.logger.info(PROGRESS + f"Warning: failed to save affordance-points overlay: {e}" + ENDC)
             return None
 
-    def convert_2d_point_to_3d_world(self, points_xy, object_name, print_out=False):
+    def convert_2d_point_to_3d_world(self, points_xy, object_name, print_out=False, capture=True):
         """Convert ranked 2D affordance pixel points to 3D world coordinates.
 
         Args:
             points_xy: list of [x, y] pixel points (already denormalized), ordered
                 best-first (descending predicted grasp quality).
             object_name: identifying name of the target object (for logging/overlay).
+            capture: re-capture the head camera first. Pass False when the caller has
+                just captured (e.g. scene perception): the 2D points refer to THAT image,
+                so re-rendering would risk mismatched pixels and waste a render.
         Returns:
             list of 3D world points (np.ndarray) aligned with the input order; entries
             for invalid/out-of-range points are None.
         """
-        rgb_image_head, depth_array = self._capture_head_image_and_depth()
+        rgb_image_head, depth_array = self._capture_head_image_and_depth(capture=capture)
         h, w = depth_array.shape[:2]
 
         world_points = []

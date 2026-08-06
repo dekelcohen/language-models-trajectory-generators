@@ -144,7 +144,7 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `task_state.py` | `TaskState`: per-subtask mutable state contract. |
 | `env.py` | Simulator process: message loop (`CAPTURE_IMAGES`, `EXECUTE_TRAJECTORY`, grippers, `GET_STATE`…), sim envs, camera capture, marker drawing. |
 | `helpers/main_utils.py` | `get_exec_locals` (subtask tool injection), `execute_blocks_from_log`, `learn_from_past_trajs`. |
-| `helpers/perception_scene_analysis.py` | `run_scene_perception` (perception VLM call + prompt assembly) and affordance pointing: `_parse_affordance_points_block`, `_process_affordance_points` (2D→3D + text splice). |
+| `helpers/perception_scene_analysis.py` | `run_scene_perception` (fresh head capture + perception VLM call + prompt assembly) and affordance pointing: `_capture_fresh_head_image`, `_parse_affordance_points_block`, `_process_affordance_points` (2D→3D + text splice). |
 | `helpers/video_utils.py` | Per-attempt review clip encoding + incremental `ffmpeg -c copy` growth of the per-camera full session video. |
 | `providers/llms/message_media.py` | Provider-agnostic multimodal message building: `encode_media`, `append_images`, `append_videos`, `append_to_messages` (canonical `image_url` / `video_url` parts each provider converts). |
 | `segmentation_adapter.py` | Provider-agnostic 2D segmentation dispatch. |
@@ -158,7 +158,7 @@ The planner is a **single continuous agentic conversation** (Arch 1). It does **
 generate motion code — only decomposition + dispatch.
 
 - **Scene perception (pre-step)**: before **every** planner LLM call, `run_scene_perception`
-  runs the `--planner-perception-vlm` model (default `or-google/gemini-3.5-flash`) on the current
+  **re-captures the head camera** and  runs the `--planner-perception-vlm` model (default `or-google/gemini-3.5-flash`) on 
   head image with `SCENE_PERCEPTION_PROMPT` (`[INSERT USER COMMAND TASK]` ← command). Its
   free-text answer (objects, target-affordance visibility/occluders, collision risks) is
   injected into the planner prompt's `[INSERT SCENE ANALYSIS]` section on the first call,
@@ -465,8 +465,10 @@ Per review, only the **new** attempt's frames are encoded; the full session vide
 by appending that clip — no O(n²) re-encode from frame 0 (the old code re-encoded every
 frame twice on every attempt).
 
-- `build_attempt_clip(base, start_idx)` → `config.video_folder/<base>_attempt_<start>_inf.mp4`
-  (cv2, `config.trajectory_video_fps`) — the reviewer's input.
+- `build_attempt_clip(base, start_idx)` → `config.video_folder/<base>_attempt_<start>_<end>.mp4`
+  (cv2, `config.trajectory_video_fps`), where `<end>` is the index of the last frame actually
+  written — `create_video_from_images` encodes to a temp file and resolves the `{end}` token
+  in `output_filename` on rename. This is the reviewer's input.
 - `update_full_video(base, clip)` → appends the clip to `config.video_folder/<base>_full.mp4` with
   `ffmpeg -f concat -c copy` (stream copy, no re-encode). First call copies the clip.
   Fallback when ffmpeg is missing / concat fails: re-encode the whole sequence from 0.
@@ -676,6 +678,29 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 ---
 
 ## Changelog
+
+- **Attempt clips named with the real end frame**: `<base>_attempt_<start>_inf.mp4` →
+  `<base>_attempt_<start>_<last_frame_idx>.mp4` (e.g. `rgb_image_attempt_261_410.mp4`).
+  `debug/dbg_utils.create_video_from_images` now supports an `{end}` token in
+  `output_filename` (and uses it in the default name when `end_idx` is infinite): frames are
+  encoded to a temp file and renamed once the last written index is known. Also fixed a
+  crash in the no-frames path (`find_available_frame` returns `(None, None)` → the error
+  message did `None + 1`), which had been silently swallowed by `build_review_clips`.
+
+- **Fix: stale scene-analysis image (perception saw the world BEFORE the last subtask)**:
+  `run_scene_perception` analysed `./images/rgb_image_head.png` as left by the previous
+  subtask's `detect_object` — the only capture happened *after* the VLM call, inside
+  `convert_2d_point_to_3d_world`. Symptom (log 06/08 18:12): `scene_analysis_head_410.png`
+  still showed the grey cylinder in front of the door although `trajectory/rgb_image_410.png`
+  showed it already cleared, so the analysis (and the affordance points + the planner's
+  attached image) kept describing a removed occluder.
+  Fix: `helpers/perception_scene_analysis._capture_fresh_head_image(ctx)` re-captures the
+  head camera at the start of every perception run (best-effort; falls back to the last
+  image on failure). `API._capture_head_image_and_depth(capture=True)` /
+  `API.convert_2d_point_to_3d_world(..., capture=True)` gained the flag, and perception
+  passes `capture=False` so the 2D→3D conversion reuses that exact frame instead of
+  re-rendering (also guarantees the points match the analysed pixels). The load half was
+  split out into `API._load_head_image_and_depth()`.
 
 - **All videos now written to `./images/videos`**: new `config.video_folder` const; every
   clip / full video (`helpers/video_utils.py`) and the generic

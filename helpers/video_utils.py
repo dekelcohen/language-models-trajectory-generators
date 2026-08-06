@@ -58,7 +58,8 @@ def concat_videos(base_video, clip, out_path):
 
 def build_attempt_clip(base_name, start_idx, fps=None, folder_path=None, out_dir=None):
     """Encode the frames of the CURRENT attempt (start_idx -> end of sequence) into
-    `<video_folder>/<base_name>_attempt_<start>_inf.mp4`.
+    `<video_folder>/<base_name>_attempt_<start>_<end>.mp4`, where <end> is the index of
+    the last frame actually written (resolved by create_video_from_images).
 
     Returns the clip path, or None when the attempt produced no frames.
     """
@@ -72,7 +73,7 @@ def build_attempt_clip(base_name, start_idx, fps=None, folder_path=None, out_dir
         start_idx=start_idx,
         end_idx=float("inf"),
         fps=fps or config.trajectory_video_fps,
-        output_filename=f"{base_name}_attempt_{start_idx}_inf.mp4",
+        output_filename=f"{base_name}_attempt_{start_idx}_{{end}}.mp4",
     )
 
 

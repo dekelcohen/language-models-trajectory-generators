@@ -23,6 +23,27 @@ import models
 from config import OK, PROGRESS, WARNING, ENDC
 
 
+def _capture_fresh_head_image(ctx):
+    """Re-render the head camera so perception analyses the CURRENT world state.
+
+    Without this the perception VLM (and the planner image + the reviewer's
+    start-of-attempt scene snapshot) saw `rgb_image_head.png` as left by the PREVIOUS
+    subtask's detect_object - i.e. the scene BEFORE that subtask executed. Symptom: after
+    the occluding cylinder had already been moved away, the analysis still reported it
+    standing in front of the door.
+
+    Best-effort: on failure the stale image is used rather than aborting the run.
+    """
+    if ctx.api is None:
+        return False
+    try:
+        ctx.api._capture_head_image_and_depth()
+        return True
+    except Exception as e:
+        ctx.logger.info(WARNING + f"Perception: head re-capture failed ({e}); using last head image." + ENDC)
+        return False
+
+
 def _save_scene_analysis_image(ctx):
     """Snapshot the head image the perception VLM analyzed.
 
@@ -73,10 +94,13 @@ def _parse_affordance_points_block(text):
     return analysis, points
 
 
-def _process_affordance_points(ctx, command, analysis_text, points):
+def _process_affordance_points(ctx, command, analysis_text, points, captured_fresh=False):
     """Convert parsed 2D affordance points to 3D world coords and splice them into
     the scene-analysis text (replacing the raw 2D points so the planner never sees
-    them). Stores the 2D->3D mapping on ctx for debugging. Returns updated text."""
+    them). Stores the 2D->3D mapping on ctx for debugging. Returns updated text.
+
+    `captured_fresh`: the head image was just re-captured by run_scene_perception, so the
+    2D points refer to it - skip the redundant re-capture inside the conversion."""
     args = ctx.args
     logger = ctx.logger
     if not points or ctx.api is None:
@@ -110,7 +134,7 @@ def _process_affordance_points(ctx, command, analysis_text, points):
 
     object_name = labels[0] if labels else str(command)
     try:
-        world_points = ctx.api.convert_2d_point_to_3d_world(points_xy, object_name)
+        world_points = ctx.api.convert_2d_point_to_3d_world(points_xy, object_name, capture=not captured_fresh)
     except Exception as e:
         logger.info(WARNING + f"Affordance 2D->3D conversion failed: {e}." + ENDC)
         return analysis_text
@@ -133,7 +157,11 @@ def _process_affordance_points(ctx, command, analysis_text, points):
 
 
 def run_scene_perception(ctx, command):
-    """Run the perception VLM (--planner-perception-vlm) on the current head image.
+    """Run the perception VLM (--planner-perception-vlm) on the head image.
+
+    First re-captures the head camera (`_capture_fresh_head_image`) so the analysis, the
+    saved scene-analysis snapshot and the planner's attached image all reflect the CURRENT
+    world state - not the state left over from the previous subtask's detect_object.
 
     Returns its free-text scene analysis, injected into the planner prompt's
     SCENE ANALYSIS section. The prompt also asks for a ranked JSON block of 2D
@@ -163,6 +191,7 @@ def run_scene_perception(ctx, command):
         .replace("[INSERT AFFORDANCE POINTING SECTION]", affordance_section)
     )
     image_paths = [config.rgb_image_head_path] if args.lm_images else None
+    captured_fresh = _capture_fresh_head_image(ctx)
     ctx.scene_analysis_image_path = _save_scene_analysis_image(ctx)
     try:
         logger.info(PROGRESS + f"Perception: analyzing scene with {args.planner_perception_vlm}..." + ENDC)
@@ -175,7 +204,7 @@ def run_scene_perception(ctx, command):
         text = (text or "").strip()
         analysis, points = _parse_affordance_points_block(text)
         if affordance_enabled:
-            analysis = _process_affordance_points(ctx, command, analysis, points)
+            analysis = _process_affordance_points(ctx, command, analysis, points, captured_fresh=captured_fresh)
         logger.info(OK + "Perception: scene analysis ready." + ENDC)
         return analysis or "(perception returned no analysis)"
     except Exception as e:

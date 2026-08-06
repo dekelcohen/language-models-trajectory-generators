@@ -33,7 +33,10 @@ def create_video_from_images(
         ext (str): File extension.
         fps (int): Frames per second.
         output_filename (str): Output .mp4 file name; defaults to
-            "<base_name>_<start_idx>_<end_idx>.mp4".
+            "<base_name>_<start_idx>_<end_idx>.mp4". May contain the token "{end}",
+            which is replaced by the index of the LAST frame actually written (so an
+            open-ended run is named e.g. "..._261_410.mp4" instead of "..._261_inf.mp4").
+            When end_idx is infinite the default name uses that real end index too.
 
     Returns:
         str | None: path of the written .mp4, or None when nothing could be written.
@@ -59,12 +62,15 @@ def create_video_from_images(
         print(f"[Info] Auto-detected base name: '{base_name}'")
 
     # 2. Find first valid frame to set Video Dimensions (use helper)
-    first_file_path, start_idx = find_available_frame(
+    first_file_path, found_idx = find_available_frame(
         folder_path, base_name, start_idx, end_idx, ext, lookahead_max, include_current=True
     )
     if first_file_path is None:
-        print(f"[Error] Could not find start frame ({start_idx}) or lookahead ({start_idx+1}) for base '{base_name}'")
-        return
+        # No frame in [start_idx, start_idx+lookahead_max] - e.g. an attempt where the
+        # robot never moved. `found_idx` is None here, so report the requested start_idx.
+        print(f"[Error] Could not find start frame ({start_idx}) or lookahead ({start_idx + lookahead_max}) for base '{base_name}'")
+        return None
+    start_idx = found_idx
 
     # 3. Setup Video Writer
     img = cv2.imread(first_file_path)
@@ -76,21 +82,28 @@ def create_video_from_images(
     
     end_label = "inf" if end_idx == float('inf') else end_idx
     if output_filename is None:
-        output_filename = f"{base_name}_{start_idx}_{end_label}.mp4"
-    
+        output_filename = f"{base_name}_{start_idx}_{{end}}.mp4" if end_idx == float('inf') \
+            else f"{base_name}_{start_idx}_{end_label}.mp4"
+
     if output_video_folder_path is None:
         output_video_folder_path = config.video_folder
     os.makedirs(output_video_folder_path, exist_ok=True)
-    output_path = os.path.join(output_video_folder_path, output_filename)
-    
+    # The final name may depend on the last frame written, which is only known after the
+    # loop -> encode into a temp file, then rename.
+    resolve_end = "{end}" in output_filename
+    tmp_path = os.path.join(output_video_folder_path, f"_tmp_{base_name}_{start_idx}_{os.getpid()}.mp4")
+    output_path = os.path.join(output_video_folder_path, output_filename.replace("{end}", str(end_label)))
+    write_path = tmp_path if resolve_end else output_path
+
     fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    out = cv2.VideoWriter(write_path, fourcc, fps, (width, height))
     
-    print(f"[Info] Writing: {output_filename} | Size: {width}x{height}")
+    print(f"[Info] Writing: {output_filename if resolve_end else os.path.basename(output_path)} | Size: {width}x{height}")
 
     # 4. Processing Loop
     current_idx = start_idx
     processed_frames = 0
+    last_written_idx = start_idx
     skip_events = 0  # count how many times we had to jump ahead
 
     try:
@@ -125,12 +138,22 @@ def create_video_from_images(
 
             out.write(frame)
             processed_frames += 1
+            last_written_idx = current_idx
             current_idx += 1
             
     finally:
         out.release()
         if skip_events > 0:
             print(f"[Warning] Skipped {skip_events} gap(s) due to missing frames (lookahead <= {lookahead_max}).")
+        if resolve_end:
+            if processed_frames > 0:
+                output_path = os.path.join(
+                    output_video_folder_path,
+                    output_filename.replace("{end}", str(last_written_idx)),
+                )
+                os.replace(tmp_path, output_path)
+            elif os.path.exists(tmp_path):
+                os.remove(tmp_path)
         print(f"[Success] Saved {output_path} ({processed_frames} frames).")
 
     return output_path if processed_frames > 0 else None
