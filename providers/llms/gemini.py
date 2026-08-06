@@ -28,6 +28,10 @@ def _oai_content_to_gemini(content):
 
     OpenAI image format:  {"type": "image_url", "image_url": {"url": "data:<mime>;base64,<data>"}}
     Gemini image format:  {"inline_data": {"mime_type": "<mime>", "data": "<data>"}}
+    OpenAI video format:  {"type": "video_url", "video_url": {"url": "data:video/mp4;base64,<data>"}}
+    Gemini video format:  same inline_data block (mime_type "video/mp4"); Gemini samples
+                          it at 1 FPS. Inline is capped at <100 MB per request; larger
+                          clips would need the Files API.
     """
     if isinstance(content, str):
         return [{"text": content}]
@@ -39,15 +43,15 @@ def _oai_content_to_gemini(content):
                 continue
             if item.get("type") == "text":
                 parts.append({"text": item["text"]})
-            elif item.get("type") == "image_url":
-                url = item["image_url"]["url"]
+            elif item.get("type") in ("image_url", "video_url"):
+                url = item[item["type"]]["url"]
                 if url.startswith("data:"):
                     # data:<mime_type>;base64,<data>
                     header, data = url.split(",", 1)
                     mime_type = header.split(";")[0][len("data:"):]
                     parts.append({"inline_data": {"mime_type": mime_type, "data": data}})
                 else:
-                    # Gemini supports remote files via file_data
+                    # Gemini supports remote files / YouTube URLs via file_data
                     parts.append({"file_data": {"file_uri": url}})
         return parts
 

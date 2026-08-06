@@ -27,15 +27,15 @@ def call_openrouter(messages, model, max_tokens=60000, temperature=0, reasoning_
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY environment variable is not set")
 
-    # Most providers don't support image_url in system messages — promote to user
+    # Most providers don't support image_url/video_url in system messages — promote to user
     sanitized = []
     for msg in messages:
         content = msg.get("content")
         if msg.get("role") == "system" and isinstance(content, list):
-            has_image = any(
-                item.get("type") == "image_url" for item in content if isinstance(item, dict)
+            has_media = any(
+                item.get("type") in ("image_url", "video_url") for item in content if isinstance(item, dict)
             )
-            if has_image:
+            if has_media:
                 sanitized.append({**msg, "role": "user"})
                 continue
         sanitized.append(msg)

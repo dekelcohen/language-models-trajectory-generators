@@ -22,9 +22,9 @@ def create_trajectory_videos(logger, start_idx=0):
     """Build this attempt's review clips (head + wrist) and grow the per-camera full videos.
 
     Only the frames from `start_idx` (the attempt's first trajectory step) are encoded;
-    each clip is then appended to `<base>_full.mp4` with ffmpeg stream copy, so the full
-    session video stays inspectable mid-run without re-encoding it from frame 0 every
-    time. See helpers/video_utils.py.
+    each clip is then appended to `<config.video_folder>/<base>_full.mp4` with ffmpeg
+    stream copy, so the full session video stays inspectable mid-run without re-encoding
+    it from frame 0 every time. See helpers/video_utils.py.
 
     Returns: list of attempt clip paths (head first, then wrist); [] when no frames.
     """

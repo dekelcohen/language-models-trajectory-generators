@@ -106,8 +106,8 @@ def visualize_segmentation_overlay(image, masks_any, boxes_any, labels, out_path
 
 
 def _strip_images_from_messages(messages, image_paths):
-    """Return a deep copy of messages with base64 image_url blobs replaced by a
-    reference to the copied image file under the 'images/' subfolder."""
+    """Return a deep copy of messages with base64 image/video blobs replaced by a
+    reference to the copied media file under the 'images/' subfolder."""
     import copy
     import os
     stripped = copy.deepcopy(messages)
@@ -116,9 +116,10 @@ def _strip_images_from_messages(messages, image_paths):
         content = msg.get("content")
         if isinstance(content, list):
             for item in content:
-                if isinstance(item, dict) and item.get("type") == "image_url":
-                    item.pop("image_url", None)
-                    item["type"] = "image_ref"
+                if isinstance(item, dict) and item.get("type") in ("image_url", "video_url"):
+                    kind = item.get("type")
+                    item.pop(kind, None)
+                    item["type"] = "video_ref" if kind == "video_url" else "image_ref"
                     src = next(img_iter, None)
                     item["image"] = f"images/{os.path.basename(src)}" if src else None
     return stripped
@@ -198,11 +199,13 @@ def call_llm_provider(client, model, messages, max_tokens, reasoning_effort):
             if chunk_content is not None:
                 new_output += chunk_content
     return new_output
-def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=None, image_paths=None, options=None):
+def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=None, image_paths=None, options=None, video_paths=None):
     """
     Call LLM (model - for azure or client - openai client) with new_prompt, existing conversation messages, role, image_paths - to attach images.
     new_prompt - optional: can be None or empty (only if image_paths is also None/empty)
     image_paths - optional: can be None or empty
+    video_paths - optional: mp4 clips inlined as base64 `video_url` parts. Only pass
+        these when model_supports_video(model) is True (Gemini direct / OpenRouter-Gemini).
     messages - existing conversation messages. will be updated with assistant response and returned.
       You can optionally add to messages before calling and pass new_prompt=None, image_paths=None
     options - optional dict merged over CHATGPT_DEFAULT_OPTIONS:
@@ -225,8 +228,10 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
     
     logger.info(f"{role}:\n{new_prompt}")    
     
-    from providers.llms.azure_openai import append_to_messages
-    messages = append_to_messages(new_prompt, image_paths, messages, role)
+    from providers.llms.message_media import append_to_messages
+    messages = append_to_messages(new_prompt, image_paths, messages, role, attach_videos=video_paths)
+    # Media files in prompt order (append_to_messages appends images, then videos).
+    media_paths = list(image_paths or []) + list(video_paths or [])
 
     produced = {"called": False}
     def _producer():
@@ -249,7 +254,7 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
         logger.info(f"Warning: Model response is empty or very short {new_output}. messages: {messages}")
     messages.append({"role": "assistant", "content": new_output})
     if log_msgs:
-        log_messages(messages, file, prefix=("vlm_review" if image_paths else "chat"), image_paths=image_paths)
+        log_messages(messages, file, prefix=("vlm_review" if media_paths else "chat"), image_paths=media_paths)
     return messages
 
 
@@ -271,25 +276,46 @@ def fetch_env_state(main_connection):
 
 
 def messages_have_images(messages):
-    """True if any message carries image content (image_url part or data: URL)."""
+    """True if any message carries media content (image/video part or data: URL)."""
     for m in messages or []:
         content = m.get("content") if isinstance(m, dict) else None
         if isinstance(content, list):
             for part in content:
                 if isinstance(part, dict):
-                    if part.get("type") == "image_url" or "image_url" in part:
+                    if part.get("type") in ("image_url", "video_url") or "image_url" in part or "video_url" in part:
                         return True
         elif isinstance(content, str) and content.startswith("data:") and "base64," in content:
             return True
     return False
 
 
-def strip_images_from_messages(messages, placeholder="[image omitted]"):
-    """Remove image content from a conversation, in place, preserving text/turns.
+def model_supports_video(model):
+    """True if `model` can take an inline video part in its request.
 
-    Each `image_url` part is replaced by a short text placeholder so the turn
-    structure and any accompanying text are kept. Prevents accumulated images
-    (perception, detect_object, review frames) from being resent on later
+    Verified support matrix (2026):
+      - gemini-*                : YES (REST inline_data, video/mp4, <100 MB per request)
+      - or-<google/gemini-*>    : YES (OpenRouter `video_url` part -> Gemini)
+      - aws-*                   : NO  - Claude on Bedrock has no video modality; video
+                                  blocks exist only on the Converse API for Amazon Nova,
+                                  which this repo does not use.
+      - azure-*                 : NO  - Azure OpenAI chat completions accept images only.
+      - other OpenAI-compatible : NO.
+    Callers (e.g. api.run_vlm_review) fall back to key frames when this is False.
+    """
+    m = (model or "").lower()
+    if m.startswith("gemini-"):
+        return True
+    if m.startswith("or-"):
+        return "gemini" in m
+    return False
+
+
+def strip_images_from_messages(messages, placeholder="[image omitted]"):
+    """Remove image/video content from a conversation, in place, preserving text/turns.
+
+    Each `image_url` / `video_url` part is replaced by a short text placeholder so the
+    turn structure and any accompanying text are kept. Prevents accumulated media
+    (perception, detect_object, review frames/clips) from being resent on later
     text-only calls, which would otherwise blow past provider image caps
     (e.g. Bedrock's max 20 images per request). Returns the same list.
     """
@@ -300,8 +326,11 @@ def strip_images_from_messages(messages, placeholder="[image omitted]"):
         if isinstance(content, list):
             new_parts = []
             for part in content:
-                if isinstance(part, dict) and (part.get("type") == "image_url" or "image_url" in part):
-                    new_parts.append({"type": "text", "text": placeholder})
+                if isinstance(part, dict) and (
+                    part.get("type") in ("image_url", "video_url") or "image_url" in part or "video_url" in part
+                ):
+                    text = "[video omitted]" if (part.get("type") == "video_url" or "video_url" in part) else placeholder
+                    new_parts.append({"type": "text", "text": text})
                 else:
                     new_parts.append(part)
             m["content"] = new_parts
@@ -310,22 +339,22 @@ def strip_images_from_messages(messages, placeholder="[image omitted]"):
     return messages
 
 
-def call_llm_cached(main_connection, client, model, new_prompt, messages, role, file=None, image_paths=None, options=None):
+def call_llm_cached(main_connection, client, model, new_prompt, messages, role, file=None, image_paths=None, options=None, video_paths=None):
     """Wrapper that fetches the current env state (GET_STATE) and threads it
     into the cache, then delegates to _call_llm_provider_wrapper.
 
     The GET_STATE round-trip and level-2 env-state comparison are only used
-    when images are involved (image_paths given or messages already contain
-    image content). Text-only calls are deterministic w.r.t. the env, so a
+    when media is involved (image_paths/video_paths given or messages already
+    contain media). Text-only calls are deterministic w.r.t. the env, so a
     single cache entry (env_state=None) is sufficient.
 
     If options["cache"] is None the GET_STATE round-trip is skipped entirely.
     """
     opts = dict(options or {})
     if opts.get("cache") is not None and opts.get("cache_env_state") is None:
-        if image_paths or messages_have_images(messages):
+        if image_paths or video_paths or messages_have_images(messages):
             opts["cache_env_state"] = fetch_env_state(main_connection)
-    return _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=file, image_paths=image_paths, options=opts)
+    return _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=file, image_paths=image_paths, options=opts, video_paths=video_paths)
 
 
 

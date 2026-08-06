@@ -63,6 +63,12 @@ def _oai_content_to_bedrock(content):
 
     OpenAI image format:  {"type": "image_url", "image_url": {"url": "data:<mime>;base64,<data>"}}
     Bedrock image format: {"type": "image", "source": {"type": "base64", "media_type": "<mime>", "data": "<data>"}}
+
+    Video: NOT supported on this path. Anthropic Claude models on Bedrock accept
+    images only; video content blocks ({"video": {"format": "mp4", ...}}) exist solely
+    on the Converse API for Amazon Nova models. `models.model_supports_video` therefore
+    reports False for aws-* and callers fall back to key frames; a video part reaching
+    here is a bug, so fail loudly instead of silently dropping evidence.
     """
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
@@ -72,6 +78,12 @@ def _oai_content_to_bedrock(content):
         for item in content:
             if item.get("type") == "text":
                 result.append({"type": "text", "text": item["text"]})
+            elif item.get("type") == "video_url":
+                raise ValueError(
+                    "Video input is not supported by Anthropic Claude models on Bedrock "
+                    "(invoke_model / Anthropic Messages API). Use frames, or a Nova model "
+                    "via the Converse API."
+                )
             elif item.get("type") == "image_url":
                 url = item["image_url"]["url"]
                 if url.startswith("data:"):

@@ -1,7 +1,7 @@
 import os
 import shutil
 from typing import Iterable
-from config import images_folder, trajectory_folder, overlay_folder
+from config import images_folder, trajectory_folder, overlay_folder, video_folder
 
 class Trajectory:
     def __init__(self, points, desc):
@@ -15,6 +15,7 @@ def ensure_image_dirs_exist(delete: bool = False, extra_dirs: Iterable[str] | No
     - ./images
     - ./images/trajectory
     - ./images/overlay
+    - ./images/videos
 
     If delete is True, removes these directories (if present) before recreating.
     Extra directories can be provided via extra_dirs.
@@ -23,6 +24,7 @@ def ensure_image_dirs_exist(delete: bool = False, extra_dirs: Iterable[str] | No
         images_folder,
         trajectory_folder,
         overlay_folder,
+        video_folder,
     ]
     if extra_dirs:
         for d in extra_dirs:

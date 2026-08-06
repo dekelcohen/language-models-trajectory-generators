@@ -145,6 +145,8 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `env.py` | Simulator process: message loop (`CAPTURE_IMAGES`, `EXECUTE_TRAJECTORY`, grippers, `GET_STATE`…), sim envs, camera capture, marker drawing. |
 | `helpers/main_utils.py` | `get_exec_locals` (subtask tool injection), `execute_blocks_from_log`, `learn_from_past_trajs`. |
 | `helpers/perception_scene_analysis.py` | `run_scene_perception` (perception VLM call + prompt assembly) and affordance pointing: `_parse_affordance_points_block`, `_process_affordance_points` (2D→3D + text splice). |
+| `helpers/video_utils.py` | Per-attempt review clip encoding + incremental `ffmpeg -c copy` growth of the per-camera full session video. |
+| `providers/llms/message_media.py` | Provider-agnostic multimodal message building: `encode_media`, `append_images`, `append_videos`, `append_to_messages` (canonical `image_url` / `video_url` parts each provider converts). |
 | `segmentation_adapter.py` | Provider-agnostic 2D segmentation dispatch. |
 | `utils.py` | Point-cloud → bounding cube, 3D↔2D projection, intrinsics/extrinsics. |
 
@@ -448,7 +450,8 @@ precomputed GraspGen candidates from `outputs/graspgen/grasp_poses_{object}.npz`
 
 ### Reviewer & correction (`task_completed` → `run_vlm_review`)
 - `task_completed()`:
-  - render trajectory videos; `attempt_number += 1`;
+  - build this attempt's trajectory videos (`create_trajectory_videos(logger, start_attempt_trajectory_step)`
+    → `task.review_clips`, see *Trajectory videos* below); `attempt_number += 1`;
   - **no-motion guard** (non-replay): if `trajectory_step <= start_attempt_trajectory_step`
     the robot never moved in this attempt (generated blocks did not reach the env), so the
     claim is rejected — `failed_task=True` (retry), or on the last attempt
@@ -456,20 +459,45 @@ precomputed GraspGen candidates from `outputs/graspgen/grasp_poses_{object}.npz`
   - **final attempt** (`attempt_number >= max_attempts`, non-replay) → accept without
     review: `completed_task=True`, `accepted_without_review=True`;
   - else `TASK_COMPLETED` then dispatch review by `--review-provider`.
-- `run_vlm_review()` (default `vlm`): subsample head RGB frames (stride 5) from
-  `start_attempt_trajectory_step` + wrist frames (stride 7), cap at
-  `config.max_allowed_vlm_images`; ask the review model (`vlm` = main model, `vlm:<model>`
-  = override) for strict JSON `{success, reasoning, improvement_steps}`.
-  - **Zero-frame guard**: if no frames exist from `start_attempt_trajectory_step`, the VLM is
-    **not** called — `success=False` with reason "no trajectory frames captured / robot did
-    not move". Without it the reviewer judged from conversation text alone and hallucinated
-    key frames ("the door is clearly swung open") that were never rendered.
+
+#### Trajectory videos (`helpers/video_utils.py`)
+Per review, only the **new** attempt's frames are encoded; the full session video is grown
+by appending that clip — no O(n²) re-encode from frame 0 (the old code re-encoded every
+frame twice on every attempt).
+
+- `build_attempt_clip(base, start_idx)` → `config.video_folder/<base>_attempt_<start>_inf.mp4`
+  (cv2, `config.trajectory_video_fps`) — the reviewer's input.
+- `update_full_video(base, clip)` → appends the clip to `config.video_folder/<base>_full.mp4` with
+  `ffmpeg -f concat -c copy` (stream copy, no re-encode). First call copies the clip.
+  Fallback when ffmpeg is missing / concat fails: re-encode the whole sequence from 0.
+- `build_review_clips(logger, start_idx)` does both for head + wrist and returns the clip
+  paths (`[]` when the attempt produced no frames → drives the zero-frame guard).
+
+#### Review media: video (preferred) vs key frames (fallback)
+- `models.model_supports_video(model)`: `gemini-*` ✅, `or-*gemini*` ✅ (OpenRouter
+  `video_url`), `aws-*` ❌ (Claude on Bedrock has no video modality; video blocks are
+  Converse-API/Nova-only), `azure-*` ❌ (images only), other OpenAI-compatible ❌.
+- **Video mode**: scene image first, then the 2 attempt clips (head, wrist); key frames are
+  dropped entirely. Prompt uses `REVIEW_MEDIA_VIDEO_SECTION` (lists the clips + fps and
+  asks for `cam @ MM:SS` references).
+- **Frames mode** (auto-fallback): the legacy stride-5 head + stride-7 wrist key frames,
+  capped by `config.max_allowed_vlm_images`; prompt uses `REVIEW_MEDIA_FRAMES_SECTION`.
+- The `REVIEW_SCENE_ANALYSIS_SECTION` sentence about "the remaining attachments" switches
+  between `REMAINING_MEDIA_SENTENCE_VIDEO` / `..._FRAMES` accordingly.
+- `run_vlm_review()` (default `vlm`): attaches the attempt clips (video mode) or the
+  subsampled head/wrist key frames (fallback, capped at `config.max_allowed_vlm_images`);
+  asks the review model (`vlm` = main model, `vlm:<model>` = override) for strict JSON
+  `{success, reasoning, improvement_steps}`.
+  - **Zero-frame guard**: if neither clips nor frames exist from `start_attempt_trajectory_step`,
+    the VLM is **not** called — `success=False` with reason "no trajectory frames captured /
+    robot did not move". Without it the reviewer judged from conversation text alone and
+    hallucinated key frames ("the door is clearly swung open") that were never rendered.
   - **Start-of-attempt scene**: the head image the perception VLM analyzed (saved by
     `run_scene_perception` to `config.scene_analysis_image_path`) is attached **first**,
-    before the key frames, and `REVIEW_SCENE_ANALYSIS_SECTION` (from `task.scene_analysis` /
-    `task.scene_analysis_image_path`) tells the reviewer that image is *not* a trajectory
-    frame and that the rest are the listed key frames — an unambiguous "before" reference.
-    One image slot is reserved for it in the `max_allowed_vlm_images` budget.
+    before the clips/key frames, and `REVIEW_SCENE_ANALYSIS_SECTION` (from `task.scene_analysis` /
+    `task.scene_analysis_image_path`) tells the reviewer that image is *not* execution
+    evidence and what the remaining attachments are — an unambiguous "before" reference.
+    One image slot is reserved for it in the `max_allowed_vlm_images` budget (frames mode).
   - success → `completed_task=True`, `review_succeeded=True`;
   - failure → `failed_task=True` (drives the retry path in `execute_task`).
   - captures `review_reason` / `review_improvement_steps` on `task`.
@@ -648,6 +676,34 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 ---
 
 ## Changelog
+
+- **All videos now written to `./images/videos`**: new `config.video_folder` const; every
+  clip / full video (`helpers/video_utils.py`) and the generic
+  `debug/dbg_utils.create_video_from_images` default output dir point there (previously the
+  parent of the frames folder, i.e. `./images`). `common_utils.ensure_image_dirs_exist`
+  creates (and with `--delete-images` clears) it alongside `images/trajectory` and
+  `images/overlay`; the IPC/metaworld tests assert the new location.
+
+- **VLM reviewer takes VIDEO instead of dozens of key frames**:
+  - New `providers/llms/message_media.py` — one canonical multimodal message builder shared by
+    every provider (`encode_media`, `append_images`, `append_videos`, `append_to_messages`),
+    moved out of `azure_openai.py` (which now re-exports it). Video parts use the OpenRouter
+    `{"type":"video_url","video_url":{"url":"data:video/mp4;base64,…"}}` shape; Gemini converts
+    to `inline_data`, Bedrock raises a clear error (Claude has no video modality — video blocks
+    are Converse-API/Nova-only), Azure OpenAI is images-only.
+  - `models.model_supports_video(model)` gates it; `run_vlm_review` sends scene image + the 2
+    attempt clips when supported, else auto-falls back to the old key-frame path.
+    `models.call_llm_cached/_call_llm_provider_wrapper` gained `video_paths`; the
+    strip/has-media helpers and prompt logging now cover video parts too.
+  - `prompts/review_prompt.py`: `[INSERT MEDIA SECTION]` with `REVIEW_MEDIA_VIDEO_SECTION` /
+    `REVIEW_MEDIA_FRAMES_SECTION` variants (+ matching "remaining attachments" sentence).
+  - **Perf**: `helpers/video_utils.py` encodes ONLY the current attempt's frames
+    (`<base>_attempt_<start>_inf.mp4`) and appends them to `<base>_full.mp4` via
+    `ffmpeg -f concat -c copy`. Previously every `task_completed` re-encoded all frames from
+    step 0 for both cameras (589 frames × 2, per attempt). The full video is still updated
+    before each review so long runs stay inspectable mid-execution.
+  - Verified live end-to-end against `or-google/gemini-3.6-flash` (OpenRouter) and
+    `gemini-2.5-flash` (direct REST): both correctly describe motion direction and final frames.
 
 - **Phantom-success fix (multi-block execution + review guards)** — a `door` run removed the
   occluding cylinder, never touched the handle, yet reported success. Three chained defects,

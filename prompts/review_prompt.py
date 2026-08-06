@@ -1,13 +1,13 @@
 REVIEW_PROMPT = (
     "You are a robotics VLM reviewer. Use the full conversation history you just saw (planning and execution). "
-    "verify whether the robot executed the task as planned by inspecting the provided key frames.\n\n"
+    "verify whether the robot executed the task as planned by inspecting the provided visual evidence.\n\n"
     "Task: [INSERT TASK]\n\n"
     "3D Coordinates Context:\n[INSERT 3D COORDINATES PROMPT SECTION]\n\n"
     "[INSERT SCENE ANALYSIS SECTION]"
-    "Key frame file paths (chronological):\n[INSERT FRAME PATHS]\n\n"
+    "[INSERT MEDIA SECTION]"
     "Instructions:\n\n"
     "Define the success criteria according to task prompt core goal (and not if all traj were executed as expected). Ex: 1) if the target object was not visible and an occluding object is removed and not the target object is visible (no matter what happened) --> success=True. 2) if the object was to open the door and it was opened --> success=True"
-    "Carefully compare the plan and execution in the conversation history with the visual evidence in the provided frames (reference cam+frame numbers). focus on positions and orientation of robot arm gripper in relation to the target object(s). Only use the rendered text on the image as the plan desc, it should match actual visual state" 
+    "Carefully compare the plan and execution in the conversation history with the visual evidence provided (reference cam + frame number or video timestamp). focus on positions and orientation of robot arm gripper in relation to the target object(s). Only use the rendered text on the image as the plan desc, it should match actual visual state" 
     "Did all executed trajectories succeeded as planned ?"
     "If grasping: Did the gripper actually grasped the target object ?"
     "If grasping: Did the grasp pose ensured a stable post-grasp actions / trajectory (object moved?) or can it be improved ?"
@@ -19,14 +19,37 @@ REVIEW_PROMPT = (
     "Output strictly one JSON object with exactly these keys: success (true/false), reasoning (string), improvement_steps (list of strings for trajectories - inc new/delete/update)"
 )
 
+# --- [INSERT MEDIA SECTION] variants ------------------------------------------------
+# Frames mode (review model cannot take video): subsampled key frames are attached.
+REVIEW_MEDIA_FRAMES_SECTION = (
+    "Key frame file paths (chronological):\n[INSERT FRAME PATHS]\n\n"
+)
+
+# Video mode (Gemini direct / via OpenRouter): one mp4 per camera, covering ONLY the
+# current attempt, is attached instead of dozens of key frames.
+REVIEW_MEDIA_VIDEO_SECTION = (
+    "TRAJECTORY VIDEO(S) of THIS attempt (attached after the scene image, in this order):\n"
+    "[INSERT VIDEO LIST]\n"
+    "Each clip covers ONLY the current attempt (from the START-OF-ATTEMPT SCENE above to the final state), "
+    "recorded at [INSERT VIDEO FPS] fps. Watch them end-to-end; the LAST frames are the final state that "
+    "determines success. Reference evidence as 'head cam @ MM:SS' / 'wrist cam @ MM:SS'.\n\n"
+)
+
 # Filled into [INSERT SCENE ANALYSIS SECTION] when a scene analysis exists for the attempt.
-# Its image is attached FIRST, before the trajectory key frames, and must not be mistaken
-# for one of them.
+# Its image is attached FIRST, before the trajectory key frames / videos, and must not be
+# mistaken for one of them.
 REVIEW_SCENE_ANALYSIS_SECTION = (
     "START-OF-ATTEMPT SCENE (before any robot motion in this attempt):\n"
     "The FIRST attached image is NOT a trajectory key frame - it is the head-camera image "
     "([INSERT SCENE ANALYSIS IMAGE PATH]) that the perception VLM analyzed at the beginning of this attempt. "
     "Use it as the 'before' reference to judge what actually changed during execution. "
-    "All the REMAINING attached images are the trajectory key frames, in the order listed below.\n\n"
+    "[INSERT REMAINING MEDIA SENTENCE]\n\n"
     "Scene analysis of that image (perception VLM):\n[INSERT SCENE ANALYSIS]\n\n"
+)
+
+REMAINING_MEDIA_SENTENCE_FRAMES = (
+    "All the REMAINING attached images are the trajectory key frames, in the order listed below."
+)
+REMAINING_MEDIA_SENTENCE_VIDEO = (
+    "The REMAINING attachments are the trajectory VIDEOS of this attempt, in the order listed below."
 )

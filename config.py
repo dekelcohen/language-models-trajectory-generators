@@ -148,6 +148,7 @@ runs_dir = "./runs"
 # Only write trajectory frames every N steps (>=1)
 trajectory_log_every = 5
 trajectory_folder = "./images/trajectory"
+video_folder = images_folder + "/videos"
 trajectory_video_fps = 15
 trajectory_image_base = "rgb_image"
 trajectory_wrist_image_base = "wrist_image"

@@ -18,19 +18,25 @@ def create_video_from_images(
     ext: str = 'png', 
     fps: int = 30,
     lookahead_max: int = 50,
+    output_filename: str = None,
 ):
     """
     Creates an .mp4 video from images in the format: <base_name>_<idx>.<ext>
     
     Args:
         folder_path (str): Directory containing images.
-        output_video_folder_path (str): Directory to write the video into - if None (default) --> folder_path.paret folder 
+        output_video_folder_path (str): Directory to write the video into - if None (default) --> config.video_folder
         base_name (str): The prefix of the files (e.g., 'rgb_image' for 'rgb_image_0.png'). 
                          If None, tries to auto-detect.
         start_idx (int): Start index.
         end_idx (int): End index.
         ext (str): File extension.
         fps (int): Frames per second.
+        output_filename (str): Output .mp4 file name; defaults to
+            "<base_name>_<start_idx>_<end_idx>.mp4".
+
+    Returns:
+        str | None: path of the written .mp4, or None when nothing could be written.
     """
     
     # 1. Determine Base Name
@@ -69,11 +75,12 @@ def create_video_from_images(
     height, width, _ = img.shape
     
     end_label = "inf" if end_idx == float('inf') else end_idx
-    output_filename = f"{base_name}_{start_idx}_{end_label}.mp4"
+    if output_filename is None:
+        output_filename = f"{base_name}_{start_idx}_{end_label}.mp4"
     
     if output_video_folder_path is None:
-        output_video_folder_path = os.path.join(folder_path, '..')
-        
+        output_video_folder_path = config.video_folder
+    os.makedirs(output_video_folder_path, exist_ok=True)
     output_path = os.path.join(output_video_folder_path, output_filename)
     
     fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
@@ -125,6 +132,8 @@ def create_video_from_images(
         if skip_events > 0:
             print(f"[Warning] Skipped {skip_events} gap(s) due to missing frames (lookahead <= {lookahead_max}).")
         print(f"[Success] Saved {output_path} ({processed_frames} frames).")
+
+    return output_path if processed_frames > 0 else None
         
 # -------------------------
 # Debug reminder utilities

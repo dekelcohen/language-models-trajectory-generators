@@ -34,6 +34,9 @@ This repository also contains the [full prompts](https://github.com/kwonathan/la
 - [🧑‍💻 Getting Started](#-getting-started)
   - [Quick Installation Guide](#quick-installation-guide)
   - [Step-By-Step Installation Guide](#step-by-step-installation-guide)
+  - [Installing ffmpeg](#installing-ffmpeg)
+  - [XMem (Optional)](#xmem-optional)
+  - [API Keys and Environment Variables](#api-keys-and-environment-variables)
 - [🦾 Running the Code](#-running-the-code)
   - [Setting Your OpenAI API Key](#setting-your-openai-api-key)
   - [Starting the Simulator](#starting-the-simulator)
@@ -54,10 +57,13 @@ git clone --recurse-submodules https://github.com/kwonathan/language-models-traj
 cd language-models-trajectory-generators;
 pip install -r requirements.txt;
 pip install -U git+https://github.com/luca-medeiros/lang-segment-anything.git;
-mkdir XMem/saves;
-mkdir -p images/trajectory;
-wget -P XMem/saves https://github.com/hkchengrex/XMem/releases/download/v1.0/XMem.pth
+conda install -c conda-forge "ffmpeg>=7";
+mkdir -p images/trajectory
 ```
+
+The XMem steps (`mkdir XMem/saves` + downloading `XMem.pth`) are **optional** — see [XMem (Optional)](#xmem-optional).
+
+Before running, set the API keys required by the providers you select on the command line — see [API Keys and Environment Variables](#api-keys-and-environment-variables).
 
 ### Step-By-Step Installation Guide
 
@@ -65,7 +71,7 @@ First, clone the repository with the `--recurse-submodules` flag to initialise t
 ```
 git clone --recurse-submodules https://github.com/kwonathan/language-models-trajectory-generators.git
 ```
-The XMem object tracking model will be used at the end of each task execution for success detection, by obtaining the poses of the relevant objects over the duration of the task execution and providing them to the LLM to determine whether the task was completed successfully or not.
+XMem is an optional object-tracking based success detector (`--review-provider xmem`). The default success detection in this fork is the VLM reviewer, so the submodule can be skipped (`git clone` without `--recurse-submodules`) if you do not intend to use it.
 
 Once the repository has been cloned, navigate to the project directory:
 ```
@@ -83,30 +89,70 @@ pip install -U git+https://github.com/luca-medeiros/lang-segment-anything.git
 ```
 [LangSAM](https://github.com/luca-medeiros/lang-segment-anything) is a language-conditioned object segmentation model based on [Grounding DINO](https://github.com/IDEA-Research/GroundingDINO) and [Segment Anything](https://github.com/facebookresearch/segment-anything). It will be used to detect and segment objects to obtain bounding boxes and provide object poses to the LLM. Note that this is all performed automatically, and no human intervention is required.
 
-Several directories also need to be created. First, create the `XMem/saves` directory for the XMem model:
-```
-mkdir XMem/saves
-```
-
 Then, create the `images` and `images/trajectory` directories:
 ```
 mkdir -p images/trajectory
 ```
 The images generated from running the system will be saved in these directories.
 
-Finally, download the XMem model into the `XMem/saves` directory:
+### Installing ffmpeg
+
+`ffmpeg` is used to build the per-attempt trajectory video clips that are sent to the VLM reviewer, and to concatenate each new clip onto the full run video without re-encoding. Install version 7.x (latest) from conda-forge:
 ```
+conda install -c conda-forge "ffmpeg>=7"
+```
+Verify with:
+```
+ffmpeg -version
+```
+If `ffmpeg` is missing, the system still works: it falls back to re-encoding the full video with OpenCV, which is significantly slower on long runs.
+
+### XMem (Optional)
+
+XMem is only needed when running with `--review-provider xmem`. The XMem object tracking model obtains the poses of the relevant objects over the duration of the task execution and provides them to the LLM to determine whether the task was completed successfully or not. The default (`--review-provider vlm`) uses the VLM reviewer instead and requires none of the steps below.
+
+To enable XMem, create the `XMem/saves` directory and download the model weights into it:
+```
+mkdir XMem/saves
 wget -P XMem/saves https://github.com/hkchengrex/XMem/releases/download/v1.0/XMem.pth
 ```
+
+### API Keys and Environment Variables
+
+The system talks to several third-party APIs. **Which keys you need depends entirely on the command line arguments you pass** (i.e. which model/provider you select) — you only need the keys for the providers you actually use. All of these services require creating an account with the provider first.
+
+| Environment variable | Required when | Where to get it |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | Any model prefixed with `or-` is used, e.g. `-lm or-google/gemini-3.6-flash`, `--review-provider vlm:or-openai/gpt-5.5`, `--planner-perception-vlm or-…` | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `GEMINI_API_KEY` | Any model called directly against the Gemini API (names starting with `gemini-`), e.g. `--planner-perception-vlm gemini-3.5-flash` (the default) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `AWS_PROFILE`, `AWS_REGION` | Any AWS Bedrock model is used. `AWS_PROFILE` selects the local AWS credentials profile (default `default`), `AWS_REGION` the Bedrock region (default `eu-central-1`) | Your AWS account / `aws configure` |
+| `AWS_BEDROCK_GUARDRAIL_ID` | Optional, Bedrock only — applies a Bedrock Guardrail to each invocation (with optional `AWS_BEDROCK_GUARDRAIL_VERSION`, default `DRAFT`) | AWS Bedrock console |
+| `MOONDREAM_API_KEY` | `--seg-provider moondream` (the default segmentation provider) | [moondream.ai](https://moondream.ai/) console |
+| `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT_NAME` | Any model prefixed with `azure-` is used, e.g. the default `-lm azure-gpt-5` | Your Azure OpenAI resource |
+| `OPENAI_API_KEY` | Plain OpenAI models (e.g. `-lm gpt-4o`) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+
+Using `--seg-provider langsam` runs locally and needs no key.
+
+Keys are read from the process environment; `main.py` calls `load_dotenv()` on startup, so the simplest option is a local `.env` file in the project root:
+```
+# .env  — placeholders only, never commit real keys
+OPENROUTER_API_KEY=<your-openrouter-key>
+GEMINI_API_KEY=<your-gemini-key>
+MOONDREAM_API_KEY=<your-moondream-key>
+AWS_PROFILE=<your-aws-profile>
+AWS_REGION=<your-aws-region>
+```
+`.env` is listed in `.gitignore`. **Never commit real API keys or secrets to this repository** — use placeholders in any file that is checked in, and prefer environment variables or your OS keychain for the real values.
 
 ## 🦾 Running the Code
 
 ### Setting Your OpenAI API Key
 
-Before running the code, make sure to set your OpenAI API key as an environment variable, or manually set the `openai.api_key` in `main.py`:
+If you use plain OpenAI models, set your OpenAI API key as an environment variable (or in `.env`):
 ```python
 openai.api_key = os.getenv("OPENAI_API_KEY")
 ```
+For every other provider (OpenRouter, Gemini, AWS Bedrock, Azure OpenAI, Moondream), see [API Keys and Environment Variables](#api-keys-and-environment-variables).
 
 ### Starting the Simulator
 
