@@ -67,30 +67,33 @@ def call_openrouter(messages, model, max_tokens=60000, temperature=0, reasoning_
 if __name__ == "__main__":
     from providers.llms.azure_openai import encode_image
 
-    MODEL = 'openai/gpt-5.5' # "google/gemini-2.5-flash"
+    MODEL = 'qwen/qwen3.8-max' # "google/gemini-2.5-flash"
 
-    # --- Test 1: Simple text query ---
-    print("=" * 60)
-    print(f"Test 1: Text-only query  (model: {MODEL})")
-    print("=" * 60)
-    messages_text = [
-        {"role": "user", "content": [{"type": "text", "text": "What is 2+2? Answer in one word."}]}
-    ]
-    response_text = call_openrouter(messages_text, model=MODEL)
-    print(f"Response: {response_text}\n")
+    TEXT_PROMPT = False 
+    if TEXT_PROMPT:
+        # --- Test 1: Simple text query ---
+        print("=" * 60)
+        print(f"Test 1: Text-only query  (model: {MODEL})")
+        print("=" * 60)
+        messages_text = [
+            {"role": "user", "content": [{"type": "text", "text": "What is 2+2? Answer in one word."}]}
+        ]
+        response_text = call_openrouter(messages_text, model=MODEL)
+        print(f"Response: {response_text}\n")
 
     # --- Test 2: Text + image query ---
     print("=" * 60)
     print(f"Test 2: Text + image query  (model: {MODEL})")
     print("=" * 60)
     image_path = "./images/rgb_image_head.png"
+    object_name = "door handle lever"
     if os.path.exists(image_path):
         mime_type, base64_image = encode_image(image_path)
         messages_image = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe this image in one sentence."},
+                    {"type": "text", "text": f"Point at the {object_name} affordance. use pixel coordinates x,y within image width/height"},
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
