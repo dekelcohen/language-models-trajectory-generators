@@ -93,7 +93,7 @@ python main.py -s metaworld --task sawyer_door_v3 --transport ws
 | `--timeout` | `15.0` | Timeout secs; `<=0` disables. |
 | `--delete-images` | off | Wipe image folders before recreating. |
 | `--review-provider` | `vlm` | Success check: `vlm`, `vlm:<model>` (e.g. `vlm:or-openai/gpt-5.5`), or `xmem`. |
-| `--planner-perception-vlm` | `or-google/gemini-3.5-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
+| `--planner-perception-vlm` | `or-google/gemini-3.7-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
 | `--affordance-points` / `--no-affordance-points` | on | Ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis. Disable to drop the pointing block from the perception prompt entirely. |
 | `--attempts` | `2` | Global default per-task attempts (1 first + retries with review between). |
 | `--no-plan` | off | Skip planner; run command as a single `execute_task`. |
@@ -158,7 +158,7 @@ The planner is a **single continuous agentic conversation** (Arch 1). It does **
 generate motion code — only decomposition + dispatch.
 
 - **Scene perception (pre-step)**: before **every** planner LLM call, `run_scene_perception`
-  **re-captures the head camera** and  runs the `--planner-perception-vlm` model (default `or-google/gemini-3.5-flash`) on 
+  **re-captures the head camera** and  runs the `--planner-perception-vlm` model on 
   head image with `SCENE_PERCEPTION_PROMPT` (`[INSERT USER COMMAND TASK]` ← command). Its
   free-text answer (objects, target-affordance visibility/occluders, collision risks) is
   injected into the planner prompt's `[INSERT SCENE ANALYSIS]` section on the first call,
@@ -727,8 +727,7 @@ re-dispatches — or calls `plan_failed()` if unreachable.
     `ffmpeg -f concat -c copy`. Previously every `task_completed` re-encoded all frames from
     step 0 for both cameras (589 frames × 2, per attempt). The full video is still updated
     before each review so long runs stay inspectable mid-execution.
-  - Verified live end-to-end against `or-google/gemini-3.6-flash` (OpenRouter) and
-    `gemini-2.5-flash` (direct REST): both correctly describe motion direction and final frames.
+  
 
 - **Phantom-success fix (multi-block execution + review guards)** — a `door` run removed the
   occluding cylinder, never touched the handle, yet reported success. Three chained defects,
@@ -814,8 +813,7 @@ re-dispatches — or calls `plan_failed()` if unreachable.
   `{executed, success, result, remaining}`; `max_iterations` default 8 → 16. Fixes: after
   removing an occluding gray cylinder, the open-door subtask started while the robot arm
   itself occluded the door handle. Prompt/example in `prompts/planner_prompt.py` updated.
-- **Scene perception pre-step**: new `--planner-perception-vlm` (default
-  `or-google/gemini-3.5-flash`) + `prompts/scene_perception_prompt.py`. Runs on the head
+- **Scene perception pre-step**: new `--planner-perception-vlm`  `prompts/scene_perception_prompt.py`. Runs on the head
   image before every planner LLM call; its text is injected into the planner prompt's
   `[INSERT SCENE ANALYSIS]` section; `DECOMPOSITION RULES` now reference that section
   instead of the raw image.

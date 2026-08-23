@@ -124,7 +124,7 @@ The system talks to several third-party APIs. **Which keys you need depends enti
 | Environment variable | Required when | Where to get it |
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | Any model prefixed with `or-` is used, e.g. `-lm or-google/gemini-3.6-flash`, `--review-provider vlm:or-openai/gpt-5.5`, `--planner-perception-vlm or-…` | [openrouter.ai/keys](https://openrouter.ai/keys) |
-| `GEMINI_API_KEY` | Any model called directly against the Gemini API (names starting with `gemini-`), e.g. `--planner-perception-vlm gemini-3.5-flash` (the default) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `GEMINI_API_KEY` | Any model called directly against the Gemini API (names starting with `gemini-`), e.g. `--planner-perception-vlm gemini-3.7-flash` (the default) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `AWS_PROFILE`, `AWS_REGION` | Any AWS Bedrock model is used. `AWS_PROFILE` selects the local AWS credentials profile (default `default`), `AWS_REGION` the Bedrock region (default `eu-central-1`) | Your AWS account / `aws configure` |
 | `AWS_BEDROCK_GUARDRAIL_ID` | Optional, Bedrock only — applies a Bedrock Guardrail to each invocation (with optional `AWS_BEDROCK_GUARDRAIL_VERSION`, default `DRAFT`) | AWS Bedrock console |
 | `MOONDREAM_API_KEY` | `--seg-provider moondream` (the default segmentation provider) | [moondream.ai](https://moondream.ai/) console |

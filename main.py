@@ -32,7 +32,7 @@ def build_arg_parser():
     parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
     parser.add_argument("--review-provider", default="vlm", help="review provider for success verification: 'vlm' (uses main model), 'vlm:<model>' (e.g. vlm:or-openai/gpt-5.5), or 'xmem'")
-    parser.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="gemini-3.5-flash", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
+    parser.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="gemini-3.7-flash", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
     parser.add_argument("--affordance-points", dest="affordance_points", action=argparse.BooleanOptionalAction, default=True, help="ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis (default: True, use --no-affordance-points to disable)")
     parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")
     parser.add_argument("--ovr-obj",  type=str, default=None, help=(
