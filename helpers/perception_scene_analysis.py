@@ -21,6 +21,7 @@ from PIL import Image
 import config
 import models
 from config import OK, PROGRESS, WARNING, ENDC
+from providers.llms.model_registry import get_model_info
 
 
 def _capture_fresh_head_image(ctx):
@@ -106,7 +107,7 @@ def _process_affordance_points(ctx, command, analysis_text, points, captured_fre
     if not points or ctx.api is None:
         return analysis_text
 
-    is_gemini = "gemini" in args.planner_perception_vlm.lower()
+    is_y_x_nrm_1000_coords = get_model_info(args.planner_perception_vlm).pointing_coords_format == "yx_norm_1000"
     try:
         rgb = Image.open(config.rgb_image_head_path)
         width, height = rgb.size
@@ -120,13 +121,13 @@ def _process_affordance_points(ctx, command, analysis_text, points, captured_fre
         if not p or not isinstance(p, (list, tuple)) or len(p) < 2:
             continue
         labels.append(item.get("label") or item.get("name") or str(command))
-        if is_gemini:
+        if is_y_x_nrm_1000_coords:
             if width is None:
                 continue
             from features_markers.bbox_providers.gemini_bbox_provider import denormalize_yx_point_to_xy_pixels
             points_xy.append(denormalize_yx_point_to_xy_pixels(p, width, height))
         else:
-            # Non-gemini VLMs return [x, y] pixel coordinates directly.
+            # VLMs using "xy_pixels" format return [x, y] pixel coordinates directly.
             points_xy.append([float(p[0]), float(p[1])])
 
     if not points_xy:
@@ -176,12 +177,8 @@ def run_scene_perception(ctx, command):
     logger = ctx.logger
     affordance_enabled = args.affordance_points
     if affordance_enabled:
-        is_gemini = "gemini" in args.planner_perception_vlm.lower()
-        coords_format = (
-            config.affordance_coords_format_gemini
-            if is_gemini else
-            config.affordance_coords_format_pixels
-        )
+        coords_key = get_model_info(args.planner_perception_vlm).pointing_coords_format
+        coords_format = config.affordance_coords_format_by_key[coords_key]
         affordance_section = AFFORDANCE_POINTING_SECTION.replace("COORDINATES_FORMAT_PLACEHOLDER", coords_format)
     else:
         affordance_section = ""

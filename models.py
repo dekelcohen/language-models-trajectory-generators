@@ -4,6 +4,7 @@ import sys
 import torch
 import config
 import utils
+from providers.llms.model_registry import get_model_info
 from PIL import Image
 from torchvision import transforms
 from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
@@ -292,22 +293,19 @@ def messages_have_images(messages):
 def model_supports_video(model):
     """True if `model` can take an inline video part in its request.
 
-    Verified support matrix (2026):
-      - gemini-*                : YES (REST inline_data, video/mp4, <100 MB per request)
-      - or-<google/gemini-*>    : YES (OpenRouter `video_url` part -> Gemini)
-      - aws-*                   : NO  - Claude on Bedrock has no video modality; video
-                                  blocks exist only on the Converse API for Amazon Nova,
-                                  which this repo does not use.
-      - azure-*                 : NO  - Azure OpenAI chat completions accept images only.
-      - other OpenAI-compatible : NO.
+    Video support is transport-constrained on top of the model family's own
+    capability (see providers.llms.model_registry.ModelInfo.supports_video):
+      - azure-* : NO  - Azure OpenAI chat completions accept images only.
+      - aws-*   : NO  - Bedrock's Converse video blocks only exist for Amazon Nova,
+                  which this repo does not use (Claude on Bedrock has no video modality).
+      - gemini-*, or-<google/gemini-*> : YES (matched via the model registry).
+      - other OpenAI-compatible : NO (no registry entry -> DEFAULT_MODEL_INFO).
     Callers (e.g. api.run_vlm_review) fall back to key frames when this is False.
     """
     m = (model or "").lower()
-    if m.startswith("gemini-"):
-        return True
-    if m.startswith("or-"):
-        return "gemini" in m
-    return False
+    if m.startswith("azure-") or m.startswith("aws-"):
+        return False
+    return get_model_info(m).supports_video
 
 
 def strip_images_from_messages(messages, placeholder="[image omitted]"):

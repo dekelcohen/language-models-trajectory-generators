@@ -67,7 +67,7 @@ def call_openrouter(messages, model, max_tokens=60000, temperature=0, reasoning_
 if __name__ == "__main__":
     from providers.llms.azure_openai import encode_image
 
-    MODEL = 'qwen/qwen3.8-max' # "google/gemini-2.5-flash"
+    MODEL = 'z-ai/glm-5.3-flash' # "google/gemini-2.5-flash"
 
     TEXT_PROMPT = False 
     if TEXT_PROMPT:
@@ -85,15 +85,15 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"Test 2: Text + image query  (model: {MODEL})")
     print("=" * 60)
-    image_path = "./images/rgb_image_head.png"
-    object_name = "door handle lever"
+    image_path = r"D:\NLP\Robotics\VLM_Robotics\language-models-trajectory-generators\outputs\bugs\door_rgb_image_head.png" # r"./images/rgb_image_head.png"
+    object_name = "door hinge axis that the door rotates around to be opened. consider the door handle location and reason step by step"
     if os.path.exists(image_path):
         mime_type, base64_image = encode_image(image_path)
         messages_image = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"Point at the {object_name} affordance. use pixel coordinates x,y within image width/height"},
+                    {"type": "text", "text": f"Point at the {object_name}. use pixel coordinates x,y within image width/height"},
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},

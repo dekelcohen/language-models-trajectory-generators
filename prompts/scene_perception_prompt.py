@@ -18,8 +18,9 @@ Answer the following, concisely:
 [INSERT AFFORDANCE POINTING SECTION]"""
 
 # Appended to SCENE_PERCEPTION_PROMPT only when --affordance-points is enabled (default).
-# COORDINATES_FORMAT_PLACEHOLDER is replaced at runtime by config.affordance_coords_format_gemini
-# or config.affordance_coords_format_pixels depending on the perception VLM family.
+# COORDINATES_FORMAT_PLACEHOLDER is replaced at runtime by one of
+# config.affordance_coords_format_by_key, selected via the perception VLM's
+# ModelInfo.pointing_coords_format (see providers.llms.model_registry).
 AFFORDANCE_POINTING_SECTION = """
 After the free-text answer above, output a separate block, delimited exactly as:
 AFFORDANCE_POINTS:

@@ -177,9 +177,12 @@ seg_overlay_image_path = "./images/seg_overlay_{provider}_{object}.png"
 scene_analysis_image_path = "./images/scene_analysis_head_{step}.png"
 
 # Affordance-pointing coordinate format text injected into SCENE_PERCEPTION_PROMPT
-# (replaces COORDINATES_FORMAT_PLACEHOLDER), selected by the perception VLM family.
-affordance_coords_format_gemini = "The points are in [y, x] format normalized to 0-1000"
-affordance_coords_format_pixels = "The points are in [x, y] pixel coordinates"
+# (replaces COORDINATES_FORMAT_PLACEHOLDER). Selected by the perception VLM's
+# ModelInfo.pointing_coords_format (see providers.llms.model_registry).
+affordance_coords_format_by_key = {
+    "yx_norm_1000": "The points are in [y, x] format normalized to 0-1000",
+    "xy_pixels": "The points are in [x, y] pixel coordinates",
+}
 
 # Output - ANSI escape color codes:
 OK = "\033[92m"       # Bright Green
