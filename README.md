@@ -40,6 +40,7 @@ This repository also contains the [full prompts](https://github.com/kwonathan/la
 - [🦾 Running the Code](#-running-the-code)
   - [Setting Your OpenAI API Key](#setting-your-openai-api-key)
   - [Starting the Simulator](#starting-the-simulator)
+  - [Simulation Environments (`sim_envs/`)](#simulation-environments-sim_envs)
   - [Adding Other Robots](#adding-other-robots)
   - [Adding Other Objects](#adding-other-objects)
   - [Adding Other LLMs](#adding-other-llms)
@@ -165,6 +166,50 @@ The available arguments and their options are as follows:
 - `--language_model` or `-lm`: select the language model from `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-4` or `gpt-3.5-turbo`; default is `gpt-4o`. `gpt-4o` performs better than `gpt-4o-mini` but is slower and more expensive, and `gpt-4-turbo`, `gpt-4` and `gpt-3.5-turbo` are older versions of the GPT language model family. More model variants and details can be found [here](https://platform.openai.com/docs/models).
 - `--robot` or `-r`: select the robot from `sawyer`, or `franka`; default is `sawyer`, which was used for the real-world experiments.
 - `--mode` or `-m`: select the mode to run from `default`, or `debug`; default is `default`. The `debug` mode will start the PyBullet simulator with various debug windows which may be useful for visualisation.
+- `--task`: select the scene/task. For the MetaWorld backend (`-s metaworld`) this is the MetaWorld env id. For PyBullet it selects a **sim-env profile** (see below): `grasp`, `door` (aliases `sawyer_door_v3`, `franka_door`), or a namespaced Franka Kitchen task `franka_kitchen:<microwave|kettle|slide_cabinet|hinge_cabinet|light_switch|top_burner|bottom_burner>`. Franka Kitchen tasks force `-r franka`. An unknown id fails with the list of valid ones.
+- `--list-tasks`: print every selectable PyBullet sim-env task id (grouped by suite) and exit. The list is read from the registry, so it is always current:
+```
+python main.py --list-tasks
+```
+
+For the full argument reference, see [`document.md` §2](document.md).
+
+### Simulation Environments (`sim_envs/`)
+
+PyBullet scenes are defined as **sim-env profiles** under `sim_envs/`, selected by `--task`:
+
+```
+sim_envs/
+  registry.py                     get_simenv(task_name) / list_task_ids()
+  pybullet/
+    base.py                       SimEnvBase - the profile interface
+    grasp.py, door.py             the original YCB-grasp and Adroit-door scenes
+    pb_utils.py                   camera-pose maths shared by all profiles
+    franka_kitchen/               the 7 D4RL Franka Kitchen tasks
+```
+
+A profile owns everything scene-specific: assets, robot base/joint/EE start pose, head- and
+wrist-camera framing, physics tuning, a per-step hook for coupled mechanisms, ground-truth
+success criteria, and the 3D-coordinate-system paragraph given to the LLM. `env.py` keeps
+only the generic simulator process and message loop. Adding a scene = adding one
+`SimEnvBase` subclass plus a registry entry; no `env.py` or `main.py` changes.
+
+Any scene can be inspected interactively, without the LLM stack:
+
+```bash
+python main.py --list-tasks                        # every selectable --task id
+python env.py --task franka_kitchen:microwave      # GUI, drag joints, live task-state readout
+python env.py --task door --disable-forces         # free the joints for mouse dragging
+python env.py --task grasp --direct                # headless load smoke test
+python env.py --help                               # also lists every available task id
+```
+
+Franka Kitchen assets live in `my_assets/franka_kitchen/`, ported from
+[franka-kitchen-pybullet](https://github.com/kwonathan/franka-kitchen-pybullet); goals and
+success thresholds follow the D4RL / Gymnasium-Robotics MuJoCo reference. See
+[`document.md` §11](document.md) for camera/coordinate rationale, physics tuning and known
+limitations.
+
 
 Once the system and the models have been loaded upon starting the simulator, you will see the following prompt:
 ```

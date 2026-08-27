@@ -15,6 +15,19 @@ print = functools.partial(print, flush=True)
 load_dotenv()
 
 
+def _pybullet_task_help():
+    """Build the --task help from the sim-env registry so it can't drift.
+
+    Imported lazily and defensively: --help must still work if the sim_envs
+    import chain (pybullet, assets) is unavailable.
+    """
+    try:
+        from sim_envs.registry import list_task_ids
+        return ", ".join(f"'{t}'" for t in list_task_ids())
+    except Exception:
+        return "'grasp', 'door', 'franka_kitchen:<task>'"
+
+
 def build_arg_parser():
     parser = argparse.ArgumentParser(description="Main Program.")
     parser.add_argument("-lm", "--language_model", default="azure-gpt-5", help="select language model (e.g. azure-gpt-5, gpt-4o, or-google/gemini-2.5-flash)")
@@ -26,7 +39,13 @@ def build_arg_parser():
     parser.add_argument("-m", "--mode", choices=["default", "debug"], default="default", help="select mode to run")
     parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
     parser.add_argument("--transport", choices=["auto", "pipe", "ws"], default="auto", help="connection transport override; auto: pipe for pybullet, ws for metaworld")
-    parser.add_argument("--task", type=str, default="sawyer_door_v3", help="task/environment name (metaworld only)")
+    parser.add_argument("--task", type=str, default="sawyer_door_v3",
+                        help="task/environment name. Metaworld (-s metaworld): the Metaworld env id. "
+                             f"PyBullet: a sim-env task id, one of: {_pybullet_task_help()} "
+                             "('sawyer_door_v3'/'franka_door' are aliases of 'door'). "
+                             "franka_kitchen:* tasks force -r franka. See --list-tasks.")
+    parser.add_argument("--list-tasks", action="store_true",
+                        help="print every available PyBullet sim-env task id (--task values) and exit")
     parser.add_argument("--seg-provider", choices=["langsam", "sam3", "moondream"], default="moondream", help="select segmentation provider (LangSAM, RoboFlow SAM3, or Moondream)")
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
     parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
@@ -60,8 +79,36 @@ def build_arg_parser():
     return parser
 
 
+def print_task_ids():
+    """Print every selectable PyBullet sim-env task id, grouped by suite."""
+    from sim_envs.registry import list_task_ids
+
+    ids = list_task_ids()
+    flat = [t for t in ids if ":" not in t]
+    print("PyBullet sim-env tasks (--task <id>):\n")
+    print("  legacy / un-namespaced:")
+    for t in flat:
+        print(f"    {t}")
+    print("    door aliases: sawyer_door_v3, franka_door")
+    suites = {}
+    for t in ids:
+        if ":" in t:
+            suite, _, task = t.partition(":")
+            suites.setdefault(suite, []).append(task)
+    for suite, tasks in suites.items():
+        print(f"\n  {suite}:  (forces -r franka)")
+        for task in tasks:
+            print(f"    {suite}:{task}")
+    print("\nMetaWorld (-s metaworld) uses MetaWorld env ids instead, e.g. sawyer_door_v3.")
+    print("Inspect any scene in a GUI with:  python env.py --task <id>")
+
+
 def main():
     args = build_arg_parser().parse_args()
+
+    if args.list_tasks:
+        print_task_ids()
+        return
 
     try:
         os.makedirs(config.images_folder, exist_ok=True)

@@ -11,6 +11,7 @@ import math
 from robot import Robot
 from common_utils import Trajectory
 from providers.env_sim_util import _rotmat_to_quat_xyzw
+from sim_envs.registry import get_simenv
 from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
 # --- Debug helpers ------------------------------------------------------
@@ -300,381 +301,10 @@ def handle_add_trajectory_points(trajectory, color_spec, permanent, marker_spec,
         except Exception:
             pass
     return marker_steps, permanent_ids, color_cycle_idx
-# --- Task Profiles ------------------------------------------------------
+
 # --- Simulation Environment Profiles -----------------------------------
-
-def _get_joint_index_by_name(body_id, joint_name):
-    try:
-        for j in range(p.getNumJoints(body_id)):
-            info = p.getJointInfo(body_id, j)
-            if info[1].decode("utf-8") == joint_name:
-                return j
-    except Exception as e:
-        print(f"[Env] Error reading joints of body {body_id}:", e)
-        traceback.print_exc()
-    return None
-
-
-def _get_link_index_by_name(body_id, link_name):
-    """Return the link index (same as the joint index in PyBullet)
-    by matching the child link name from getJointInfo(...)[12].
-
-    Example: for a URDF joint named 'latch_joint' with child link 'latch',
-    this helper returns the index to use with p.getLinkState(...).
-    """
-    try:
-        for j in range(p.getNumJoints(body_id)):
-            info = p.getJointInfo(body_id, j)
-            # info[12] is the child link name (bytes)
-            child_link_name = info[12].decode("utf-8") if isinstance(info[12], (bytes, bytearray)) else str(info[12])
-            if child_link_name == link_name:
-                return j
-    except Exception as e:
-        print(f"[Env] Error reading links of body {body_id}:", e)
-        traceback.print_exc()
-    return None
-class SimEnvBase:
-    """Base environment profile. Applies hard-coded runtime overrides and
-    loads any required assets. No global config edits elsewhere."""
-
-    def __init__(self):
-        # Base class does not change defaults
-        pass
-
-    def apply(self, env):
-        # Default: leave config values as-is
-        return
-
-    def load_assets(self, env):
-        # Default: no additional assets
-        return
-
-    def get_state(self):
-        """Return a dict with environment-specific state for diagnostics.
-        Base env has no special state.
-        """
-        return {}
-
-    def configure_robot_pose(self):
-        """Per-task hook to set robot/base/joint starting pose.
-        Default is no-op (grasp task defaults).
-        """
-        return
-        
-    def move_to_start_pos(self):
-        """
-        Return True to move the robot to start ee position + orientation
-        """
-        return True    
-
-    def get_3d_coordinates_prompt_section(self):
-        """Return the 3D coordinate system prompt section (default)."""
-        return config.three_d_coordinates_prompt_section
-
-
-class SimEnvGrasp(SimEnvBase):
-    """Grasp task: keep existing camera/robot poses and load a YCB object."""
-
-    def __init__(self):
-        # Keep defaults from config for cameras and robot
-        self.object_id = None
-
-    def apply(self, env):
-        # Nothing additional to set for grasp
-        return
-
-    def load_assets(self, env):
-        try:
-            object_start_position = config.object_start_position
-            object_start_orientation_q = p.getQuaternionFromEuler(config.object_start_orientation_e)
-            self.object_id = p.loadURDF(
-                "ycb_assets/003_cracker_box.urdf",
-                object_start_position,
-                object_start_orientation_q,
-                useFixedBase=False,
-                globalScaling=config.global_scaling,
-            )
-            
-        except Exception as e:
-            print("[Env] Warning: failed to load grasp object:", e)
-            traceback.print_exc()
-
-    def get_3d_coordinates_prompt_section(self):
-        return config.three_d_coordinates_prompt_section
-
-    def get_state(self):
-        """Return pos + dims of the grasp object (self.object_id)."""
-        state = {"object_id": self.object_id, "object_pos": None, "object_dims": None}
-        try:
-            if self.object_id is not None:
-                pos, _ori = p.getBasePositionAndOrientation(self.object_id)
-                aabb_min, aabb_max = p.getAABB(self.object_id, -1)
-                dims = [float(aabb_max[0] - aabb_min[0]), float(aabb_max[1] - aabb_min[1]), float(aabb_max[2] - aabb_min[2])]
-                state["object_pos"] = list(map(float, pos))
-                state["object_dims"] = dims
-        except Exception as e:
-            print("[Env] Warning: SimEnvGrasp.get_state failed:", e)
-            traceback.print_exc()
-        return state
-
-
-class SimEnvDoor(SimEnvBase):
-    """Door task: face robot toward door, set cameras, and load the door.
-
-    Head camera pose is set to match the GUI debug visualizer camera.
-    URDF loading and controller force setup occur here.
-    """
-
-    def __init__(self):
-        # Debug visualizer camera (GUI) used in run_gui_demo
-        config.camera_distance = 1.0
-        config.camera_yaw = 190.0
-        config.camera_pitch = -40.0
-        config.camera_target_position = [0.0, 0.64, 0.70]
-
-        # Door members initialized for later direct access in get_state
-        self.door_id = None
-        self.door_hinge_index = None
-        self.latch_index = None
-        self.door_handle_latch = None
-        self.board_id = None
-        self.pole_id = None
-
-        # Compute head camera pose identical to GUI spherical camera
-        # and use it statically in DIRECT (no dynamic debug mirroring).
-        pos, ori_e = self._head_from_debug(
-            config.camera_distance,
-            config.camera_yaw,
-            config.camera_pitch,
-            config.camera_target_position,
-        )
-        config.head_camera_position = pos
-        config.head_camera_orientation_e = ori_e
-        # Decide camera behavior by connection type
-        # In GUI: mirror the debug visualizer; in DIRECT: use spherical view
-        try:
-            _is_gui = p.isConnected() and p.getConnectionInfo()[1] == p.GUI
-        except Exception:
-            _is_gui = False
-        config.head_camera_use_debug_view = bool(_is_gui)
-        config.head_camera_use_spherical_view = not bool(_is_gui)
-
-        # Do NOT change robot base orientation/pose here; we want grasp defaults
-        # so the robot stands upright and stable (not looking at the door).
-        
-
-    def _head_from_debug(self, distance, yaw_deg, pitch_deg, target):
-        # Keep this helper small and correct; used only to print params.
-        yaw = np.deg2rad(float(yaw_deg))
-        pitch = np.deg2rad(float(pitch_deg))
-        tx, ty, tz = list(map(float, target))
-        fx = np.cos(pitch) * np.cos(yaw)
-        fy = np.cos(pitch) * np.sin(yaw)
-        fz = np.sin(pitch)
-        cx = tx - distance * fx
-        cy = ty - distance * fy
-        cz = tz - distance * fz
-        return [float(cx), float(cy), float(cz)], [0.0, float(pitch), float(yaw)]
-
-    def apply(self, env):
-        # Camera and door assets handled here; robot pose remains grasp default
-        return
-
-    def load_assets(self, env):
-        # Load Adroit door and set strong hold forces
-        try:
-            door_start_position = [-0.11, 0.04, 0.25]
-            door_start_orientation_q = p.getQuaternionFromEuler([0.0, 0.0, 4.0])
-            self.door_id = p.loadURDF(
-                "my_assets/adroit_door/adroit_door.urdf",
-                door_start_position,
-                door_start_orientation_q,
-                useFixedBase=True,
-            )
-            # Cosmetics:
-            # 2. Load the image texture into PyBullet
-            wood_texture_id = p.loadTexture("my_assets/adroit_door/wood.png")
-
-            # 3. Apply the texture to the Frame (Base Link: index -1)
-            p.changeVisualShape(self.door_id, 0, textureUniqueId=wood_texture_id)
-
-            # 4. Apply the texture to the Door Panel (Link: index 0)
-            p.changeVisualShape(self.door_id, 1, textureUniqueId=wood_texture_id)
-
-            # Resolve indices based on the newly loaded door
-            self.door_hinge_index = _get_joint_index_by_name(self.door_id, "door_hinge")
-            self.latch_index = _get_joint_index_by_name(self.door_id, "latch_joint")
-            # Door handle is the child link named 'latch' in URDF; look it up by link name
-            self.door_handle_latch = _get_link_index_by_name(self.door_id, "latch")            
-            
-            if self.door_hinge_index is not None:
-                # p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
-                # Instead of rigidly holding it at 0.0 with 200 force, give it a resting friction
-                p.setJointMotorControl2(
-                    self.door_id, 
-                    self.door_hinge_index, 
-                    controlMode=p.VELOCITY_CONTROL, 
-                    targetVelocity=0.0, 
-                    force=2.0  # Just enough force to keep it from swinging on its own, but weak enough for the robot to pull
-                )
-                # Increase friction on the handle (latch link)
-                p.changeDynamics(self.door_id, self.door_handle_latch, lateralFriction=2.0, spinningFriction=1.0)
-
-            if self.latch_index is not None:
-                p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
-            
-            HIDE_DOOR_WITH_OBJECT = True    
-            if HIDE_DOOR_WITH_OBJECT:
-                self._load_pole()
-                #self._load_board()
-        except Exception as e:
-            print("[Env] Failed to load or initialize adroit_door URDF:", e)
-            traceback.print_exc()
-
-    def _load_pole(self):
-        """Add a vertical pole standing between the robot arm and the door.
-
-        The pole has mass and a collision shape, so the robot arm can push it
-        over and make it fall to the ground.
-        """
-        # Robot base ~[-0.3, 0.5, 0.0], door ~[-0.11, 0.04, 0.25]; place pole between
-        # them WITHOUT overlapping the door. Overlapping the door at spawn causes a
-        # large contact/penetration force that ejects the pole and topples it at
-        # sim start. This clear position spawns upright and stable, yet the robot
-        # arm can still push it over later.
-        pole_height = 1.0
-        pole_radius = 0.15
-        pole_position = [-0.15, 0.30, pole_height / 2.0]
-        pole_collision = p.createCollisionShape(
-            p.GEOM_CYLINDER, radius=pole_radius, height=pole_height
-        )
-        pole_visual = p.createVisualShape(
-            p.GEOM_CYLINDER,
-            radius=pole_radius,
-            length=pole_height,
-            rgbaColor=[0.5, 0.5, 0.55, 1.0],
-        )
-        self.pole_id = p.createMultiBody(
-            baseMass=1.0,
-            baseCollisionShapeIndex=pole_collision,
-            baseVisualShapeIndex=pole_visual,
-            basePosition=pole_position,
-        )
-        p.changeDynamics(self.pole_id, -1, lateralFriction=1.0, spinningFriction=0.5)
-        return self.pole_id
-        
-    def _load_board(self):
-        """Add a vertical board leaning against the door.
-
-        The board has mass and a collision shape, so the robot arm can push it
-        over. It starts tilted toward the door so it comes to rest leaning on
-        the door panel (it may settle/fall onto the door when the sim starts).
-        """
-        # Robot base ~[-0.3, 0.5, 0.0], door ~[-0.11, 0.04, 0.25]; lean board on the door.
-        board_height = 0.6
-        board_width = 0.6   # 10x the previous pole width (0.06)
-        board_depth = 0.06
-        half_extents = [board_width / 2.0, board_depth / 2.0, board_height / 2.0]
-
-        # Tilt the board toward the door (pitch about y-axis) so it leans instead
-        # of standing upright (a thin tall board is unstable and would topple).        
-        board_orientation_q = p.getQuaternionFromEuler([0.1422, 0.0000, 0.1975])
-        # Place the base near the door so the tilted top rests against the panel.                
-        board_position = [-0.2429, 0.2063, 0.4992]
-
-        board_collision = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents)
-        board_visual = p.createVisualShape(
-            p.GEOM_BOX,
-            halfExtents=half_extents,
-            rgbaColor=[0.5, 0.5, 0.55, 1.0],
-        )
-        self.board_id = p.createMultiBody(
-            baseMass=1.0,
-            baseCollisionShapeIndex=board_collision,
-            baseVisualShapeIndex=board_visual,
-            basePosition=board_position,
-            baseOrientation=board_orientation_q,
-        )
-        p.changeDynamics(self.board_id, -1, lateralFriction=1.0, spinningFriction=0.5)
-        return self.board_id
-
-    def get_state(self):
-        """Return door-related indices and world positions for diagnostics.       
-        """
-        state = {
-            "door_id": self.door_id,
-            "door_hinge_index": self.door_hinge_index,
-            "latch_index": self.latch_index,
-            "door_handle_latch": self.door_handle_latch,
-            "door_handle_pos": None,
-            "latch_pos": None,
-            "hinge_pos": None,
-            "pole_id": self.pole_id,
-            "pole_pos": None,
-            "pole_dims": None,
-        }
-        try:
-            if self.door_id is not None:
-                if self.door_handle_latch is not None and self.door_handle_latch >= 0:
-                    _dhl = p.getLinkState(self.door_id, int(self.door_handle_latch), computeForwardKinematics=True)
-                    state["door_handle_pos"] = list(map(float, _dhl[0]))
-                if self.latch_index is not None and self.latch_index >= 0:
-                    _lat = p.getLinkState(self.door_id, int(self.latch_index), computeForwardKinematics=True)
-                    state["latch_pos"] = list(map(float, _lat[0]))
-                if self.door_hinge_index is not None and self.door_hinge_index >= 0:
-                    _hinge = p.getLinkState(self.door_id, int(self.door_hinge_index), computeForwardKinematics=True)
-                    state["hinge_pos"] = list(map(float, _hinge[0]))
-
-        except Exception as e:
-            print("[Env] Warning: SimEnvDoor.get_state failed to read positions:", e)
-            traceback.print_exc()
-        try:
-            if self.pole_id is not None:
-                pos, _ori = p.getBasePositionAndOrientation(self.pole_id)
-                aabb_min, aabb_max = p.getAABB(self.pole_id, -1)
-                state["pole_pos"] = list(map(float, pos))
-                state["pole_dims"] = [
-                    float(aabb_max[0] - aabb_min[0]),
-                    float(aabb_max[1] - aabb_min[1]),
-                    float(aabb_max[2] - aabb_min[2]),
-                ]
-        except Exception as e:
-            print("[Env] Warning: SimEnvDoor.get_state failed to read pole:", e)
-            traceback.print_exc()
-        return state
-
-    def configure_robot_pose(self):
-        """
-        Override robot pose for door task to be identical to grasp defaults.
-        This keeps the robot upright and stable (not facing the door).
-        """        
-        config.base_start_position_franka = [-0.3, 0.5, 0.0]
-        # Euler angles [roll, pitch, yaw]; yaw = -pi/2 faces the door
-        config.base_start_orientation_e_franka = [0.0, 0.0, -np.pi / 3]            
-        # Problem: robot eef collapses into the door and hides the handled
-        # Solution: Make the robot 'lean back' by rotating the joint above the base (idx 1)
-        config.joint_start_positions_franka[1] = -1.5 
-                
-    def move_to_start_pos(self):
-        """
-        Return False, since if moved - it collides with the door and collapses 
-        """
-        return False
-
-    def get_3d_coordinates_prompt_section(self):
-        return (
-            "The 3D coordinate system of the environment is as follows:\n"
-            "  1. The x-axis is in the horizontal direction, increasing to the left.\n"
-            "  2. The y-axis is in the depth direction, decreasing away from you.\n"
-            "  3. The z-axis is in the vertical direction, increasing upwards."
-        )
-
-
-def _get_simenv(task_name):
-    t = (task_name or "").lower()
-    if any(k in t for k in ["door", "open_door", "opendoor", "sawyer_door_v3", "franka_door"]):
-        return SimEnvDoor()
-    return SimEnvGrasp()
+# Sim-env profiles (grasp / door / franka_kitchen / ...) live in the
+# sim_envs package. Resolve a --task name via sim_envs.registry.get_simenv.
 
 class Environment:
 
@@ -682,7 +312,32 @@ class Environment:
         self.mode = args.mode
         # Make pybullet honor --task similarly to Metaworld
         self.task = getattr(args, "task", None)
-        self.simenv = _get_simenv(self.task)
+        self.simenv = get_simenv(self.task)
+        self._apply_required_robot(args)
+
+    def _apply_required_robot(self, args):
+        """Force the robot model when the scene only works with one.
+
+        Runs in the environment subprocess, so mutating args is local to it and
+        never rewrites the user's CLI choice for the rest of the pipeline.
+        """
+        try:
+            required = self.simenv.required_robot()
+        except Exception as e:
+            print("[Env] Warning: required_robot() failed:", e)
+            return
+        if not required:
+            return
+        current = getattr(args, "robot", None)
+        if current != required:
+            print(
+                f"[Env] Task '{self.task}' requires robot '{required}'; "
+                f"overriding --robot {current}."
+            )
+            try:
+                args.robot = required
+            except Exception as e:
+                print("[Env] Warning: could not override robot selection:", e)
 
     def load(self):
         # Apply per-task overrides and load assets via the selected SimEnv
@@ -707,6 +362,13 @@ class Environment:
             print("[Env] Warning: failed to load SimEnv assets:", e)
             traceback.print_exc()
 
+        # Scene-specific friction / joint motor setup
+        try:
+            self.simenv.tune_physics()
+        except Exception as e:
+            print("[Env] Warning: failed to tune SimEnv physics:", e)
+            traceback.print_exc()
+
         if self.mode == "default":
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
             p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 0)
@@ -714,6 +376,14 @@ class Environment:
 
 
     def update(self):
+
+        # Scenes with coupled mechanisms PyBullet cannot simulate on its own
+        # (e.g. Franka Kitchen knob -> burner plate) drive them here, every step.
+        try:
+            self.simenv.step_hook()
+        except Exception as e:
+            print("[Env] Warning: SimEnv step_hook failed:", e)
+            traceback.print_exc()
 
         p.stepSimulation()
         time.sleep(config.control_dt)
@@ -1035,9 +705,15 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
             task = task_p
 
         env = Environment(_Args)
+        # Same ordering as the production path (run_simulation_environment): the sim-env
+        # may override the robot base pose, which must be set before the robot is loaded.
+        env.simenv.configure_robot_pose()
         env.load()
-        
-        DRAW_GRASP_POST_MAT = True
+
+        # The blocks below are door-task debug scratch space; skip them for other sim-envs.
+        is_door_task = getattr(env.simenv, "door_id", None) is not None
+
+        DRAW_GRASP_POST_MAT = is_door_task
         if DRAW_GRASP_POST_MAT:
             grasp_pose =   np.array([
                 [ 0.854062,   -0.5120964,   0.09129835, -0.34211737], #-0.34211737
@@ -1059,7 +735,7 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
                     trajectory = trajectory, color_spec='blue', permanent=True, marker_spec='line', logger=logger,
                     marker_steps = [], permanent_ids = [], color_cycle_idx = 0)
                 
-        OVERLAY_COORD_TEST = True
+        OVERLAY_COORD_TEST = is_door_task
         if OVERLAY_COORD_TEST:
             # Temp coordinates check 
             # door_handle_pos = [-0.07745519744833454, -0.00880230021590278, 0.672376] # from pybullet 
@@ -1098,8 +774,6 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
         print(f"  position={config.head_camera_position}")
         print(f"  orientation_e={config.head_camera_orientation_e}")
         
-        env.simenv.configure_robot_pose()    
-        
         # Hold the door closed at startup with stronger motor forces (optional)
         if strengthen_door:
             try:
@@ -1118,14 +792,20 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
 
         robot = Robot(_Args, logger)
         if env.simenv.move_to_start_pos():
-            # Compute a safe EE pose near and above the robot base to avoid falling into the door
-            base_x, base_y, base_z = config.base_start_position_franka
-            safe_ee_pos = [
-                base_x + ee_offset_from_base[0],
-                base_y + ee_offset_from_base[1],
-                base_z + ee_offset_from_base[2],
-            ]
-            safe_ee_ori = ee_orientation_e_override if ee_orientation_e_override is not None else config.ee_start_orientation_e        
+            # Prefer the sim-env's declared home pose (set by configure_robot_pose); fall back
+            # to a safe EE pose near and above the robot base to avoid falling into the door.
+            simenv_home = env.simenv.get_ee_start_pose()
+            if simenv_home is not None:
+                safe_ee_pos, home_ee_ori = list(simenv_home[0]), list(simenv_home[1])
+            else:
+                base_x, base_y, base_z = config.base_start_position_franka
+                safe_ee_pos = [
+                    base_x + ee_offset_from_base[0],
+                    base_y + ee_offset_from_base[1],
+                    base_z + ee_offset_from_base[2],
+                ]
+                home_ee_ori = config.ee_start_orientation_e
+            safe_ee_ori = ee_orientation_e_override if ee_orientation_e_override is not None else home_ee_ori
             print(f'safe_ee_pos={safe_ee_pos}')
             # Place the gripper above base immediately; do not let gravity + IK swing it into the door
             try:
@@ -1217,7 +897,31 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
             print(tag + " Click in the viewport to print the board's current pose "
                         "(paste it into SimEnvDoor._load_board).")
             board_id = getattr(env.simenv, "board_id", None)
+            # Scenes with machine-checkable success (e.g. franka_kitchen:*) print their
+            # live task state so a manual drag can be checked against the goal.
+            has_criteria = bool(env.simenv.get_success_criteria())
+            if has_criteria:
+                print(tag + " Task criteria:", env.simenv.get_success_criteria())
+                print(tag + " Drag the target joint/object; task state prints once a second.")
+            last_state_print = 0.0
             while p.isConnected():
+                # Real-time stepping is handled by PyBullet, but coupled
+                # mechanisms still need their per-step hook driven manually.
+                try:
+                    env.simenv.step_hook()
+                except Exception:
+                    pass
+                if has_criteria and (time.time() - last_state_print) >= 1.0:
+                    last_state_print = time.time()
+                    try:
+                        st = env.simenv.get_state()
+                        tgt = st.get('target_link_pos')
+                        tgt_s = None if tgt is None else [round(v, 3) for v in tgt]
+                        print(f"{tag} task={st.get('task')} error={st.get('task_error')} "
+                              f"success={st.get('success')} target_link={st.get('target_link')} "
+                              f"target_link_pos={tgt_s}")
+                    except Exception as e:
+                        print(tag + " get_state() failed:", e)
                 # On any mouse button press, print the board pose so it can be
                 # copied back into _load_board() as the initial position/orientation.
                 if board_id is not None:
@@ -1239,8 +943,31 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
 
 
 if __name__ == "__main__":
-    # Entry point for quick, no-code door kinematics testing in GUI mode.
-    run_sim_demo(disable_forces=False, connection_mode=p.GUI)
+    # Entry point for quick, no-code sim-env inspection in GUI mode.
+    #   python env.py                                   # door (default)
+    #   python env.py --task franka_kitchen:microwave
+    #   python env.py --task grasp --direct
+    import argparse as _argparse
+    from sim_envs.registry import list_task_ids as _list_task_ids
+
+    _parser = _argparse.ArgumentParser(
+        description="Manual/debug visualisation of a PyBullet sim-env. "
+                    "Drag joints with the mouse; task state is printed live.")
+    _parser.add_argument("--task", default="door",
+                         help=f"sim-env task id. Available: {', '.join(_list_task_ids())}")
+    _parser.add_argument("--direct", action="store_true",
+                         help="headless p.DIRECT instead of the GUI (load smoke test)")
+    _parser.add_argument("--disable-forces", action="store_true",
+                         help="zero the joint motor forces so joints can be freely dragged")
+    _parser.add_argument("--no-strengthen-door", dest="strengthen_door",
+                         action="store_false", default=True,
+                         help="door task only: do not hold the door shut at startup")
+    _cli = _parser.parse_args()
+
+    run_sim_demo(task_p=_cli.task,
+                 disable_forces=_cli.disable_forces,
+                 connection_mode=p.DIRECT if _cli.direct else p.GUI,
+                 strengthen_door=_cli.strengthen_door)
 
 
 

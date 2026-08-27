@@ -5,6 +5,7 @@ import math
 import config
 from config import OK, PROGRESS, FAIL, ENDC
 from helpers.image_utils import draw_text_overlay_image
+from sim_envs.pybullet.pb_utils import spherical_camera_pose
 from PIL import Image
 from config import fov, aspect, near_plane, far_plane
 
@@ -290,13 +291,25 @@ class Robot:
                 camera_vector = rotation_matrix.dot(init_camera_vector)
                 
                 wrist_pos = np.array(camera_position)
-                
+
+                # Framing offsets come from the active sim-env so each scene can
+                # tune them; config values are the fallback default.
+                wrist_params = {
+                    "pullback": config.wrist_camera_pullback,
+                    "up_shift": config.wrist_camera_up_shift,
+                    "lateral_shift": config.wrist_camera_lateral_shift,
+                }
+                try:
+                    wrist_params.update(env.simenv.get_wrist_camera_params() or {})
+                except Exception:
+                    pass
+
                 # --- "Drone" Over-the-Shoulder Tracking ---
                 # 1. Pull straight back along the line of sight
-                pullback_pos = wrist_pos - (config.wrist_camera_pullback * camera_vector)
+                pullback_pos = wrist_pos - (wrist_params["pullback"] * camera_vector)
                 
                 # 2. Vertical offset (negative lowers the pose to see the hinged handle)
-                global_up_shift = np.array([0.0, 0.0, config.wrist_camera_up_shift])
+                global_up_shift = np.array([0.0, 0.0, wrist_params["up_shift"]])
                 
                 # 3. Shift sideways (right->left view) to peek around the elbow/forearm
                 # We calculate global 'right' by taking the cross product of where we are looking and the ceiling
@@ -306,7 +319,7 @@ class Robot:
                 else:
                     right_vector = np.array([1, 0, 0]) # Fallback if looking straight down
                 
-                lateral_shift = config.wrist_camera_lateral_shift * right_vector
+                lateral_shift = wrist_params["lateral_shift"] * right_vector
                 
                 # Apply all shifts to get the final camera position
                 camera_position = pullback_pos + global_up_shift + lateral_shift
@@ -411,10 +424,7 @@ class Robot:
 
             yaw = np.deg2rad(yaw_deg)
             pitch = np.deg2rad(pitch_deg)
-            fx = np.cos(pitch) * np.cos(yaw)
-            fy = np.cos(pitch) * np.sin(yaw)
-            fz = np.sin(pitch)
-            camera_pos = [tx - dist * fx, ty - dist * fy, tz - dist * fz]
+            camera_pos, _ = spherical_camera_pose([tx, ty, tz], dist, yaw_deg, pitch_deg)
             return view_matrix, projection_matrix, camera_pos
         except Exception:
             # Fallback: compute view + position from spherical params
@@ -444,14 +454,7 @@ class Robot:
         yaw = np.deg2rad(float(yaw_deg))
         pitch = np.deg2rad(float(pitch_deg))
         tx, ty, tz = list(map(float, target))
-        fx = np.cos(pitch) * np.cos(yaw)
-        fy = np.cos(pitch) * np.sin(yaw)
-        fz = np.sin(pitch)
-        camera_position = [
-            tx - distance * fx,
-            ty - distance * fy,
-            tz - distance * fz,
-        ]
+        camera_position, _ = spherical_camera_pose(target, distance, yaw_deg, pitch_deg)
         return view_matrix, camera_position
 
 

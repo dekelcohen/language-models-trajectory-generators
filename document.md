@@ -64,6 +64,10 @@ are appended to the home file only. Uses stdlib `readline` on Unix; on Windows u
 # Default agentic run (planner on, PyBullet, moondream seg, VLM review)
 python main.py
 
+# List every selectable PyBullet sim-env task id, then run one
+python main.py --list-tasks
+python main.py --task franka_kitchen:microwave
+
 # Bypass planner: run the raw command as ONE subtask
 python main.py --no-plan
 
@@ -73,6 +77,9 @@ python main.py -lm or-google/gemini-2.5-flash --no-lm-images
 
 # MetaWorld backend on a specific task
 python main.py -s metaworld --task sawyer_door_v3 --transport ws
+
+# PyBullet Franka Kitchen (forces -r franka); see §11
+python main.py --task franka_kitchen:kettle --no-plan
 ```
 
 ### Argument reference
@@ -87,7 +94,8 @@ python main.py -s metaworld --task sawyer_door_v3 --transport ws
 | `-m, --mode` | `default` | `default` \| `debug`. |
 | `-s, --sim` | `pybullet` | `pybullet` \| `metaworld`. |
 | `--transport` | `auto` | `auto`(pipe for pybullet, ws for metaworld) \| `pipe` \| `ws`. |
-| `--task` | `sawyer_door_v3` | Env name (MetaWorld only). |
+| `--task` | `sawyer_door_v3` | Env/task name. **MetaWorld**: the MetaWorld env id. **PyBullet**: a sim-env task id — `grasp`, `door` (aliases `sawyer_door_v3`, `franka_door`), or `franka_kitchen:<microwave\|kettle\|slide_cabinet\|hinge_cabinet\|light_switch\|top_burner\|bottom_burner>` (see §11). The help text is generated from the registry, so it never drifts. Unknown ids raise with the valid list. |
+| `--list-tasks` | off | Print every selectable PyBullet sim-env task id (grouped by suite) and exit. |
 | `--seg-provider` | `moondream` | 2D segmentation: `langsam` \| `sam3` \| `moondream`. |
 | `--depth-format` | `norm_1m` | Depth reconstruction: `norm_1m` \| `norm_zfar` \| `raw`. |
 | `--timeout` | `15.0` | Timeout secs; `<=0` disables. |
@@ -142,7 +150,8 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `prompts/main_prompt.py` | Subtask `MAIN_PROMPT` (now with a `SCENE ANALYSIS` section) + shared vars (`COLLISION_AVOIDANCE`, `INITIAL_PLANNING_1/2`, detect-object tool variants), `IN_CONTEXT_EXAMPLE`. |
 | `api.py` | `API`: `detect_object`, `get_grasp_poses`, trajectory gen/exec, gripper, `task_completed`/`task_failed`, `run_vlm_review`. |
 | `task_state.py` | `TaskState`: per-subtask mutable state contract. |
-| `env.py` | Simulator process: message loop (`CAPTURE_IMAGES`, `EXECUTE_TRAJECTORY`, grippers, `GET_STATE`…), sim envs, camera capture, marker drawing. |
+| `env.py` | Simulator process: `Environment`, message loop (`CAPTURE_IMAGES`, `EXECUTE_TRAJECTORY`, grippers, `GET_STATE`…), camera capture, marker drawing, `run_sim_demo`. Scene-specific logic lives in `sim_envs/`. |
+| `sim_envs/` | PyBullet sim-env profiles (§11): `registry.py` (`get_simenv`/`list_task_ids`), `pybullet/base.py` (`SimEnvBase` interface), `pybullet/{grasp,door}.py`, `pybullet/franka_kitchen/{simenv,tasks}.py`, `pybullet/pb_utils.py` (camera-pose maths). |
 | `helpers/main_utils.py` | `get_exec_locals` (subtask tool injection), `execute_blocks_from_log`, `learn_from_past_trajs`. |
 | `helpers/perception_scene_analysis.py` | `run_scene_perception` (fresh head capture + perception VLM call + prompt assembly) and affordance pointing: `_capture_fresh_head_image`, `_parse_affordance_points_block`, `_process_affordance_points` (2D→3D + text splice). |
 | `helpers/video_utils.py` | Per-attempt review clip encoding + incremental `ffmpeg -c copy` growth of the per-camera full session video. |
@@ -677,9 +686,250 @@ re-dispatches — or calls `plan_failed()` if unreachable.
 
 ---
 
+## 11. Simulation environments (`sim_envs/`)
+
+PyBullet scene profiles live in `sim_envs/`, **not** in `env.py`. `env.py` owns only the
+generic pieces (process, IPC loop, robot control, camera capture, marker drawing); every
+scene-specific decision — assets, robot pose, camera framing, physics, success criteria,
+coordinate-system prompt — belongs to a sim-env profile.
+
+- **Selection**: `--task` → `sim_envs.registry.get_simenv(name)`, called from
+  `Environment.__init__` (inside the env subprocess). `list_task_ids()` enumerates
+  everything selectable and backs both `python main.py --list-tasks` and the generated
+  `--task` / `python env.py --help` text, so no hand-written task list can go stale.
+- **Naming**: new suites are namespaced `<suite>:<task>` (e.g. `franka_kitchen:microwave`).
+  Legacy flat names still work: `door` / `sawyer_door_v3` / `franka_door` → `SimEnvDoor`,
+  anything else → `SimEnvGrasp`. An unknown **suite** or an unknown **task inside a known
+  suite** raises `ValueError` listing the valid ids (a silent grasp fallback would hide typos).
+- **Robot forcing**: `required_robot()` lets a scene demand a robot model. `franka_kitchen:*`
+  returns `"franka"`, applied in `Environment.__init__` with a warning if `-r sawyer` was
+  passed. `main.py` never special-cases a task.
+
+### Lifecycle (`SimEnvBase`)
+
+| Hook | When | Purpose |
+|------|------|---------|
+| `configure_robot_pose()` | **before** any URDF loads | Set `config.base_start_position_*`, `joint_start_positions_*`, `ee_start_position/orientation_e`. |
+| `required_robot()` | env ctor | Force `franka`/`sawyer`, or `None` to honour `--robot`. |
+| `apply(env)` | after ctor | Runtime config overrides (usually calls `configure_cameras()`). |
+| `load_assets(env)` | load | Scene URDFs + textures. |
+| `tune_physics()` | right after load | Friction / mass / joint-motor setup. |
+| `step_hook()` | every `p.stepSimulation()` | Coupled mechanisms PyBullet can't simulate. Must be cheap and never raise. |
+| `get_state()` / `get_success_criteria()` / `check_success()` | handshake, `GET_STATE`, review | Ground truth. |
+| `configure_cameras()` / `get_wrist_camera_params()` | load | Per-scene head framing; wrist "drone" offsets (defaults to the `config.wrist_camera_*` globals). |
+| `move_to_start_pos()` / `get_ee_start_pose()` | after robot load | Whether to home at startup, and to where. |
+| `get_3d_coordinates_prompt_section()` | handshake | The coordinate-system paragraph handed to the LLM. |
+
+All defaults are no-ops, so grasp/door behaviour is unchanged.
+
+### Manual / debug visualisation
+
+`env.py` is runnable standalone to inspect any sim-env in a GUI without the LLM stack
+(`run_sim_demo`): it loads the scene + robot, homes the arm, saves a head-camera render,
+then real-time-steps so joints can be dragged with the mouse. `step_hook()` is driven every
+iteration, and scenes with machine-checkable success print live task state once a second.
+
+```bash
+python env.py                                       # door (default)
+python env.py --task franka_kitchen:microwave       # any registry task id
+python env.py --task franka_kitchen:kettle --disable-forces   # free joints for mouse dragging
+python env.py --task grasp --direct                 # headless load smoke test
+python env.py --help                                # lists every available task id
+```
+
+| Arg | Purpose |
+|-----|---------|
+| `--task` | Any id from `sim_envs.registry.list_task_ids()`. |
+| `--direct` | `p.DIRECT` instead of GUI — loads, renders once, exits (CI-friendly smoke test). |
+| `--disable-forces` | Zero the joint motor forces so joints can be dragged freely. |
+| `--no-strengthen-door` | Door task only: don't hold the door shut at startup. |
+
+### Franka Kitchen (`franka_kitchen:*`)
+
+Seven D4RL tasks: `microwave`, `kettle`, `slide_cabinet`, `hinge_cabinet`, `light_switch`,
+`top_burner`, `bottom_burner`. Assets copied to `my_assets/franka_kitchen/` (URDF + item
+URDFs + meshes + textures); implementation in `sim_envs/pybullet/franka_kitchen/`
+(`simenv.py` = behaviour, `tasks.py` = the 7-task table + all tuning tables).
+
+- Kitchen loaded fixed-base at `[0.6, 0.1, 0]`, yaw `-pi/2`, `globalScaling=0.75`; the
+  kettle is the only free body. Panda is bolted to the counter at `z=1.25`.
+- Textures are applied by **name-resolved** link indices (upstream hardcodes indices valid
+  only for its exact URDF).
+- `step_hook()` ports upstream's `updateFrankaKitchen()`: knob angle → burner-plate
+  prismatic target, light-switch angle → light block position + link colour. Purely
+  cosmetic, but must run every step or it desyncs.
+- Success uses MuJoCo's `OBS_ELEMENT_GOALS` + `BONUS_THRESH = 0.3` (kettle: a `0.12 m`
+  position threshold — see below).
+
+#### Cameras
+
+**Neither source repo has a head or a wrist camera.** The MuJoCo env exposes only a free
+debug camera; the PyBullet port only calls `resetDebugVisualizerCamera`. Both of our
+cameras are synthesized by this repo: the head via the spherical mechanism
+(`head_camera_use_spherical_view`), the wrist from the Panda EE link (`ee_index_franka = 11`).
+Wrist framing is now per-scene through `get_wrist_camera_params()` (with `config.*` fallback).
+
+The wrist camera itself is unchanged and scene-independent: it is rigidly attached to the EE
+link (`p.getLinkState(ee_index)`) and looks down the gripper's local `+z`. What *is* per-scene
+are the three "drone" framing offsets applied on top of that attachment — `pullback` along the
+line of sight, `up_shift`, and `lateral_shift` to peek around the forearm. These were already
+tunable, but only *globally* via `config.wrist_camera_*`; `get_wrist_camera_params()` just makes
+the same triple overridable per sim-env, defaulting to those config values so grasp/door are
+unaffected. The kitchen overrides them (`0.30 / -0.10 / 0.20` vs the `0.4 / -0.2 / 0.3` default)
+because it is a tight scene: the arm works inside cabinet recesses and under the upper cabinets
+at `z=1.95`, so a 0.4 m pullback puts the virtual camera *inside* geometry and the render
+becomes a wall of cabinet interior.
+
+Head yaw is **pinned** to `HEAD_CAMERA_YAW = 270` (camera on `-x` looking towards `+x`);
+only distance / pitch / target offset are tuned per task. That axis-aligned pose is what
+makes the coordinates prompt literally true:
+
+> x increases away from you, y increases to the left, z increases upwards.
+
+Verified empirically with probe spheres: `+y` → pixel_x 158 (left), `-y` → 354 (right),
+`+x` → towards the horizon, `+z` → up.
+
+**What is safe to re-tune.** Because yaw is pinned, `fwd = (cos p, 0, sin p)` has no `y`
+component, so camera-right works out to exactly `(0, −1, 0)` at *any* pitch. Therefore:
+
+| Knob | Effect on the coordinates prompt |
+|------|----------------------------------|
+| `camera_target_offset` y / z | **none** — at a pinned yaw these translate the camera without rotating it |
+| `camera_distance` | **none** — pure translation |
+| `camera_pitch` | the only one that costs anything |
+
+"+y is left" stays exact at any pitch; "+z is up" and "+x is away" stay true for
+\|pitch\| < 90°. What pitch costs is *separability*: image-up is `(−sin p, 0, cos p)`, so a
++x move shifts the image up by `−sin p` — negligible at −5°, noticeable at −20°, where +x
+and +z start to look alike to the VLM. Hence pitch is kept shallow and only steepened when
+it is the only way to clear an occlusion (`top_burner`).
+
+##### Framing is measured, not eyeballed
+
+`tests/tools/tune_kitchen_head_camera.py` renders each task twice — once normally, once
+with the Panda teleported out of the world — and compares the target link's pixel counts.
+That ratio is the exact fraction of the target the arm hides.
+
+```bash
+python -m tests.tools.tune_kitchen_head_camera --audit                 # all 7 tasks
+python -m tests.tools.tune_kitchen_head_camera --task slide_cabinet    # sweep + renders
+```
+
+`tests/test_franka_kitchen_head_camera.py` locks the result in: every task must have
+≤ 15 % of its target occluded, sit within 0.35 of frame centre, and cover ≥ 60 px.
+
+This replaced a first pass of hand-eyeballed values, which were wrong in ways that were
+invisible in a screenshot: `top_burner` had **43 % of the knob hidden behind the forearm**,
+and every task carried a negative `camera_target_offset.z` that pushed its target up to
+0.39 of the way to the frame edge while centring the view on the arm instead. Zeroing the
+offsets and tilting `top_burner` to −20° gives **0 % occlusion and < 0.01 off-centre on all
+seven tasks**, with 2–6× more target pixels. The kettle keeps a non-zero offset on purpose:
+it is a *transport* task, so the frame is deliberately widened to hold both the start and
+goal burners.
+
+#### Known limitations
+
+- **`EXECUTE_TRAJECTORY` is yaw-only** (every orientation is `ee_start_orientation_e + [0,0,yaw]`).
+  Fine for the microwave / slide / hinge pulls; **insufficient for the knobs and the light
+  switch**, which need roll about an axis pointing along `±x`.
+- The Panda's elbow always reaches `z≈1.9` and the upper cabinets sit at `z=1.95`, so any
+  target at `y≈0` is occluded from a `-x` camera. Task targets are chosen accordingly.
+- The burner↔knob naming map (front burners = MuJoCo "bottom burner", back = "top") matches
+  upstream's coupling but is not independently confirmed against MuJoCo.
+
+<details><summary>Implementation details, gotchas and the bugs this integration surfaced</summary>
+
+**Camera-pose convention (repo-wide bug, fixed).** `robot._view_and_pos_from_spherical`,
+`robot._debug_view_matrices_and_pos` and `SimEnvDoor._head_from_debug` all computed
+`cam = target − d·(cos p·cos y, cos p·sin y, sin p)`, which is rotated 90° from PyBullet's
+actual convention. Correct: `fwd = (−cos p·sin y, cos p·cos y, sin p); cam = target − d·fwd`,
+now the single source of truth in `sim_envs/pybullet/pb_utils.spherical_camera_pose()`.
+Rendering was never affected (the view matrix comes from `computeViewMatrixFromYawPitchRoll`),
+but the **reported** `camera_position` was wrong, which corrupted
+`get_bounding_cube_from_point_cloud`'s "DBSCAN cluster closest to the camera" selection.
+Decomposition: yaw 0 → cam at `-y`; 90 → `+x`; 180 → `+y`; 270 → `-x` looking `+x`.
+
+**`globalScaling` scales prismatic joints but not revolute.** PyBullet multiplies prismatic
+joint limits/positions by `globalScaling` (0.75), leaving revolute untouched. Pre-scaling the
+MuJoCo goals silently shrank tasks: `slide_cabinet` 0.37 → 0.2775, *below* `BONUS_THRESH=0.3`,
+so it reported `success=True` at `t=0`. **Fix**: `tasks.py` stores goals in **unscaled MuJoCo
+units**; measured prismatic positions are converted back via `unscaled()` before comparison.
+Start errors now match MuJoCo exactly (microwave 0.75, slide 0.37, hinge 1.45, light 0.6918,
+top burner 0.92, bottom burner 0.88).
+
+**Link frame origins are not where the geometry is.** Many kitchen links have origins metres
+from their meshes (`slidelink_1` origin `[0.585, −0.031, 1.95]` vs AABB centre
+`[0.528, 0.106, 1.95]`; all slide links share one origin). `_target_link_position()` therefore
+returns the **AABB centre**, and every task targets a real handle link:
+`microdoorroot_1`, `slidelink_1`, `hingerightdoor_1`, `lightswitchroot`, `knob 1_1`, `knob 3_1`,
+`Burner 2_link`.
+
+**Upstream has zero physics setup** — no `changeDynamics`; all 14 movable joints carry only
+`damping="1.0"`, `effort="0"` (⇒ zero-force default motors ⇒ free-swinging joints), and URDF
+masses come from mesh volume at absurd density (cabinet doors 20–45 kg, microwave door 10 kg,
+counters 4442 kg). Before tuning, knobs moved 18 % of their travel per second and the slide
+cabinet 26 %. `tune_physics()` adds `JOINT_DAMPING` (0.1 doors / 0.02 knobs), re-masses only
+the *movable* links (fixed links' mass never enters the dynamics), and sets handle friction.
+Result: 100 % of travel under 4× resting force, zero drift over 600 steps on all 9 joints.
+
+**Kettle.** Was invisible — the Panda's start pose parked the gripper directly on top of it at
+Burner 3 (back-right). Moved to `Burner 2_link` (front-left, in *front* of the arm ⇒ no
+occlusion) with a Burner 4 goal; start error 0.333 m. MuJoCo's 0.3 threshold would be
+near-trivial for a 0.33 m move, so the kettle uses `POSITION_SUCCESS_THRESHOLD = 0.12`. Its
+URDF mass was 10.2 kg (the Panda's payload is 3 kg) → retuned to 1.0 kg.
+
+**`RESET_EEF` bug (found by the IPC audit).** Re-home targets `robot.ee_start_position`, which
+was the repo default `[0.0, 0.6, 0.55]` — **below the kitchen counter** — so re-homing drove the
+arm through the cabinetry. `configure_robot_pose()` now also sets `config.ee_start_position`
+(`[0.35, 0, 1.55]`: IK error 0.002 m, 0 contacts, task state undisturbed). This also matters for
+`EXECUTE_TRAJECTORY`, which expresses every orientation relative to `ee_start_orientation_e`.
+`SimEnvBase.get_ee_start_pose()` exposes the same pose so `run_sim_demo` agrees with production.
+
+**`run_sim_demo` ordering.** It used to call `configure_robot_pose()` *after* `load()` while
+production calls it *before* — which silently changed the door's camera framing and would have
+loaded the Panda on the floor for the kitchen. Now fixed to the production order; its
+door-specific debug blocks are gated on the active sim-env.
+
+**Test-process gotcha.** The env runs in a child process, so `config` mutations made by
+`configure_robot_pose()` are invisible to the parent. Tests must assert against the sim-env
+constants, not `config.*`.
+
+</details>
+
+#### Tests
+
+| Test | Covers |
+|------|--------|
+| `tests/test_2d_pixel_coords_to_3d_world_coords.py` | Parametrized over `door` + all 7 kitchen tasks. Runs the **production** path (`env.Environment` → `Robot.get_camera_image` → `utils.project_3d_world_pos_to_2d_pixel` → `utils.get_world_point_world_frame`) against ground-truth link positions. Two-tier assertion: reprojection round-trip ≤ 1 px always; distance-to-target ≤ 0.12 m **unless** the depth sample is ≥ 0.05 m nearer the camera than the target (occlusion), in which case the task must be listed in `KNOWN_OCCLUDED_TASKS`. Kitchen: 7/7 at 2–5 cm, 0 px. |
+| `tests/test_franka_kitchen_ipc.py` | Walks every IPC message for kitchen semantics: handshake (coords + task state + EEF above the counter), `CAPTURE_IMAGES` (head cam on `-x`), `RESET_EEF` (re-home above the counter — this is the assertion that caught the bug above), gripper commands, `EXECUTE_TRAJECTORY`, `ADD_BOUNDING_CUBES` / `ADD_TRAJECTORY_POINTS` / `GET_ROBOT_STATE`. Passes `robot = "sawyer"` deliberately, to prove the sim-env forces franka. |
+| `tests/test_franka_kitchen_head_camera.py` | 21 tests (3 × 7 tasks). Scores head-camera framing with `tests/tools/tune_kitchen_head_camera.py`: target must be in frame, ≤ 15 % occluded by the arm, ≤ 0.35 off frame centre and ≥ 60 px. Guards against the arm creeping back in front of a target when camera params are touched. |
+
+`KNOWN_OCCLUDED_TASKS = ["door"]`: in the door scene's head view a free-standing pole sits
+between the camera and the handle, so the depth sample lands on the pole (0.49 m error). This
+is **pre-existing** and unrelated to the camera fix (the rendering path never changed); it is
+asserted so it cannot silently spread to other tasks.
+
+---
+
 ## Changelog
 
-- **Attempt clips named with the real end frame**: `<base>_attempt_<start>_inf.mp4` →
+- **Franka Kitchen sim-env + `sim_envs/` refactor** (§11): PyBullet scene profiles moved out
+  of `env.py` into a `sim_envs/` package with a registry (`--task <suite>:<task>`); added all
+  7 D4RL `franka_kitchen:*` tasks with per-task cameras, physics tuning, ground-truth success
+  and an axis-aligned coordinates prompt. Fixed along the way: a repo-wide camera-pose
+  convention bug (wrong reported `camera_position` → corrupted point-cloud cluster selection),
+  a `globalScaling` goal-rescale that made `slide_cabinet` succeed at `t=0`, and a `RESET_EEF`
+  home pose below the kitchen counter. New/rewritten tests: parametrized pinhole suite over
+  door + 7 kitchen tasks, and a full kitchen IPC audit.
+- **Measured head-camera framing for all 7 kitchen tasks** (§11): added
+  `tests/tools/tune_kitchen_head_camera.py`, which measures arm occlusion exactly by
+  rendering each scene with and without the robot and diffing the target link's segmentation
+  pixels. The audit found `top_burner` **43 % occluded** and every task pushed off frame
+  centre (up to 0.39) by a stray `camera_target_offset`. Zeroing the offsets and re-pitching
+  `top_burner` to −20° gives 0 % occlusion and < 0.01 off-centre on all seven, locked in by
+  the new `tests/test_franka_kitchen_head_camera.py` (21 tests). The coordinates prompt is
+  unaffected: at the pinned yaw, camera-right is `(0, −1, 0)` at any pitch.
+: `<base>_attempt_<start>_inf.mp4` →
   `<base>_attempt_<start>_<last_frame_idx>.mp4` (e.g. `rgb_image_attempt_261_410.mp4`).
   `debug/dbg_utils.create_video_from_images` now supports an `{end}` token in
   `output_filename` (and uses it in the default name when `end_idx` is infinite): frames are
