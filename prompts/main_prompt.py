@@ -68,6 +68,8 @@ You are, however, able to call any of the following Python functions, if require
      self.desc # short sentence to describe the motion and its end_pose
    This helper is provided by the environment and already logs motion details. do not call logger for trajectory/motion. 
 6. execute_trajectory(trajectory: Trajectory) -> None: This function will execute the trajectory on the robot arm end-effector, and will also not return anything.
+[INSERT SKILL TOOLS]
+[INSERT SKILLS]
 ENVIRONMENT SET-UP:
 [INSERT 3D COORDINATES PROMPT SECTION]
 

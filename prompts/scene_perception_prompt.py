@@ -15,6 +15,9 @@ Answer the following, concisely:
    - If the affordance needed to perform the user command (e.g. a handle, lever, lid, knob, opening, grasp point) IS clearly visible, say so explicitly and finish.
    - If it is NOT clearly visible, estimate where the target object and its affordance are likely located, describe that estimate, and list the top objects that may be occluding it (including the robot arm)
 3. Collision risks: if the robot arm, on its way to the target object's affordance, may collide with objects in the scene that are not easy to bypass, state them. Otherwise say there are no significant collision risks.
+4. Articulated objects: if the target object(s) is has articulated joints - describe them:
+   - revolute (rotating) or prismatic ? direction of movement / rotation ? (state confidence: Low/Med/High)
+   
 [INSERT AFFORDANCE POINTING SECTION]"""
 
 # Appended to SCENE_PERCEPTION_PROMPT only when --affordance-points is enabled (default).

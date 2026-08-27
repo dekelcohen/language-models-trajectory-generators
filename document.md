@@ -54,7 +54,7 @@ fresh-per-subtask (conversation, attempts, review outcome). See
 Entry point: `python main.py [options]`. Interactive loop prompts `Enter a command:` and
 calls `run_plan(ctx, command)` per line until an empty line / Ctrl+C. Prompt supports
 bash-like command history: arrow-up/down recalls previous commands (see `helpers/command_utils.py`).
-History merges a repo-committed seed file `config/vlm_traj_user_commands.txt` with a
+History merges a repo-committed seed file `prompts/user_prompts/vlm_traj_user_commands.txt` with a
 per-user file `~/vlm_traj_user_commands.txt` (duplicates removed); newly entered commands
 are appended to the home file only. Uses stdlib `readline` on Unix; on Windows uses
 `pyreadline3`'s line editor directly (built-in `input()` bypasses it there).
@@ -136,6 +136,16 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 
 </details>
 
+<details><summary>Skills args (§12)</summary>
+
+| Arg | Purpose |
+|-----|---------|
+| `--skills` / `--no-skills` | Enable lazily-loaded `SKILL.md` know-how (default: on). |
+| `--skills-dir PATH` | Root of the skill tree (default `./prompts/skills`). |
+| `--list-skills` | Print every discovered skill (name, scope, description) per scope and exit. |
+
+</details>
+
 ---
 
 ## 3. Modules map
@@ -148,6 +158,9 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `prompts/planner_prompt.py` | Merged `PLANNER_PROMPT` + static `RECOVERY_FROM_FAILURE`. |
 | `prompts/scene_perception_prompt.py` | `SCENE_PERCEPTION_PROMPT` run by the perception VLM before each planner call. |
 | `prompts/main_prompt.py` | Subtask `MAIN_PROMPT` (now with a `SCENE ANALYSIS` section) + shared vars (`COLLISION_AVOIDANCE`, `INITIAL_PLANNING_1/2`, detect-object tool variants), `IN_CONTEXT_EXAMPLE`. |
+| `skill_registry.py` | Lazily-loaded agent skills (§12): discovery + scope filtering of `SKILL.md` files, index rendering, sandboxed reads, `SkillSession` (`load_skill`/`read_file` tools). |
+| `prompts/skills_prompt.py` | `SKILLS_SECTION` / `SKILL_TOOLS_SECTION` — the skill catalog + tool docs injected into both prompts. |
+| `prompts/skills/` | The `SKILL.md` content tree (`open-door-cabinet-drawer`, `clear-occluders-before-manipulation`) + authoring guide. |
 | `api.py` | `API`: `detect_object`, `get_grasp_poses`, trajectory gen/exec, gripper, `task_completed`/`task_failed`, `run_vlm_review`. |
 | `task_state.py` | `TaskState`: per-subtask mutable state contract. |
 | `env.py` | Simulator process: `Environment`, message loop (`CAPTURE_IMAGES`, `EXECUTE_TRAJECTORY`, grippers, `GET_STATE`…), camera capture, marker drawing, `run_sim_demo`. Scene-specific logic lives in `sim_envs/`. |
@@ -911,7 +924,101 @@ asserted so it cannot silently spread to other tasks.
 
 ---
 
+## 12. Skills (lazily-loaded `SKILL.md` know-how)
+
+Deep, task-specific procedures live in `prompts/skills/` instead of the always-on prompt.
+Each agent sees only the **names + descriptions** of skills matching its scope (~50-100 tokens
+each) and pulls the full text in with `load_skill(...)` only when it decides the skill applies.
+The loaded text then sits in the conversation exactly as if it had been part of the prompt.
+
+Format: the `SKILL.md` open standard (agentskills.io — Claude Code / Copilot / Gemini CLI),
+with one repo-specific addition: a **mandatory `scope`** key.
+
+**Three disclosure levels**
+
+| Level | Content | Loaded when | Cost |
+|---|---|---|---|
+| 1 — index | `name` + `description` of scope-matching skills | every turn, in the system prompt | ~50-100 tok/skill |
+| 2 — body | the full `SKILL.md` markdown | `load_skill("<name>")` | on demand |
+| 3 — resources | `references/`, `scripts/`, `assets/` files | `read_file("<name>/references/x.md")` | on demand |
+
+**Scope: two independent catalogs.** `scope: planner | subtask | both` decides which agent the
+skill is listed to. Discovery greps the frontmatter head for `scope` **before** parsing YAML,
+so a subtask skill's description never reaches the planner's context, and vice versa. The grep
+is lenient (indentation, quotes, case, CRLF, key order), but the key itself is required.
+
+**Flow**
+
+1. `init_agent` → `resolve_skills_root` discovers both catalogs once and stores `ctx.skills_root`.
+2. `execute_task` creates a per-subtask `SkillSession("subtask")` on `task.skills`;
+   `run_plan` creates a per-command `SkillSession("planner")`.
+3. The session's `index_text()` fills `[INSERT SKILLS]` (catalog) and `[INSERT SKILL TOOLS]`
+   (tool docs) in `MAIN_PROMPT` / `PLANNER_PROMPT`. Both render to `""` when no skill matches.
+4. The LLM emits ```` ```python load_skill("open-door-cabinet-drawer") ```` and ends its turn.
+5. The body is buffered on the session (**not** printed) and appended verbatim to the next user
+   turn by `execute_python_blocks` / `_run_planner_code_blocks`.
+6. On a failed attempt, `handle_task_failure` rebuilds the conversation from scratch — so
+   `loaded_block()` re-injects everything the task had loaded (**sticky**), under a
+   "SKILLS LOADED EARLIER" header.
+
+Shipped skills: `open-door-cabinet-drawer` (subtask — handle location, gripper pose, lever
+unlatch, hinge arc vs lateral slide vs drawer pull, retry triage) and
+`clear-occluders-before-manipulation` (planner — occlusion decomposition, dependency-first
+ordering, arm self-occlusion). Authoring guide: `prompts/skills/README.md`.
+
+<details><summary>Code-level details</summary>
+
+**`skill_registry.py`**
+
+| Function | Behaviour |
+|---|---|
+| `discover(root, scope, logger)` | Globs `root/*/SKILL.md` and `root/*/*/SKILL.md`. For each: `_read_head` reads at most 8 KB (up to the closing `---`), `_SCOPE_RE` prefilters on scope, then `_parse_head` + `_validate`. Dedups by name, caches per `(root, scope)`. |
+| `_SCOPE_RE` | `^[ \t]*['"]?scope['"]?[ \t]*:[ \t]*['"]?(planner\|subtask\|both)['"]?[ \t]*\r?$` with `re.I\|re.M`. Non-matching files are dropped **without** parsing YAML or touching the description. |
+| `_parse_head` | `yaml.safe_load` → retry with unquoted values quoted → `_regex_fallback` (regex extraction of `name`/`description`/`scope`, reassembling `>` block scalars). Frontmatter cosmetics never lose a skill. |
+| `_validate` | `scope` ∈ {planner, subtask, both} (else skip); `name` `[a-z0-9-]`, ≤ 64 chars, falls back to the directory name on mismatch; `description` required, truncated at 1024 chars. |
+| `render_index` | `<available_skills><skill><name/><description/></skill>…` — or `""` when the list is empty. |
+| `read_body` | Strips frontmatter, wraps in `<skill_content name="…">`, appends a `<skill_resources>` listing of `scripts/references/assets/prompts` files, truncates at 60 k chars. |
+| `resolve_in_root` / `read_resource` | `realpath` sandbox: rejects `..`, absolute paths outside the root, symlink escapes, directories and missing files. |
+
+**`SkillSession`** — per-agent state: `index` (scope-filtered), `loaded` (name → body),
+`pending` (buffer). `load_skill` validates the name against the index (unknown → prints the
+valid names, no exception, so the block does not abort), dedups (already-loaded prints a
+notice and injects nothing), and buffers the body. `read_file` does the same for level-3 files.
+`drain_pending()` is consumed by the exec loops; `loaded_block()` feeds retry prompts;
+`exec_locals()` returns `{load_skill, read_file}`.
+
+**Why buffering instead of printing.** `execute_python_blocks` drops captured stdout of
+2000+ chars (`if s != "" and len(s) < 2000`). A printed skill body would be silently swallowed
+and the LLM would carry on *believing* it had the instructions. Skill text therefore never goes
+through stdout: the tool prints one confirmation line, and the text is appended to the feedback
+after the print/error sections, behind `SKILLS_FEEDBACK_HEADER`.
+
+**Planner loop interaction.** `run_plan` only re-runs scene perception when the turn actually
+executed a subtask (`len(planner.subtask_results)` grew). A `load_skill`-only turn changes
+nothing in the world, so perception is skipped and the previous analysis still stands.
+
+**Tests** — `tests/test_skill_registry.py` (21 tests): scope isolation in both directions
+(including "the subtask description string is absent from the rendered planner index"), the
+lenient prefilter variants (indented / quoted / upper-case / CRLF / no opening fence / key
+order), invalid-skill skipping, name-vs-directory mismatch, malformed YAML recovery, category
+subdirectories, body/resource wrapping, `load_skill` dedup + unknown-name output, sandbox
+escapes, prompt wiring (index, tool docs, sticky block, and clean prompts when disabled),
+`IN_CONTEXT_EXAMPLE` still always-on, the moved command-history seed file, and the >2000-char
+body surviving the feedback path.
+
+</details>
+
+---
+
 ## Changelog
+
+- **Lazily-loaded agent skills** (§12): `SKILL.md` tree under `prompts/skills/` with a mandatory
+  `scope` key (planner vs subtask catalogs, enforced by a lenient frontmatter grep before any
+  YAML parsing); `load_skill(...)` / sandboxed `read_file(...)` tools injected into both exec
+  environments; bodies buffered and appended to the next turn (bypassing the 2000-char stdout
+  cap) and re-injected into retry prompts. Added `--skills/--no-skills`, `--skills-dir`,
+  `--list-skills`. Nothing was removed from `main_prompt.py` — skills are purely additive.
+  Also moved `config/` → `prompts/user_prompts/`.
 
 - **Franka Kitchen sim-env + `sim_envs/` refactor** (§11): PyBullet scene profiles moved out
   of `env.py` into a `sim_envs/` package with a registry (`--task <suite>:<task>`); added all

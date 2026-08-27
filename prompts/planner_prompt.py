@@ -37,7 +37,9 @@ AVAILABLE FUNCTIONS (already injected into the Python interpreter; do NOT import
    You may pass the whole remaining plan, but ONLY the first subtask runs before you are re-invoked. Reevaluate the fresh scene analysis on every turn before dispatching the next subtask.
 2. plan_completed() -> None: call when the overall user command is satisfied. You MUST end by calling this (or plan_failed()).
 3. plan_failed() -> None: call when the overall goal is unreachable.
+[INSERT SKILL TOOLS]
 
+[INSERT SKILLS]
 
 CODE GENERATION CONVENTIONS:
 [INSERT CODE BLOCK CONVENTIONS]

@@ -411,7 +411,7 @@ def main():
     
 
     def _resolve_selected_cameras():
-        sel = (getattr(args, "cameras", "both") or "both").strip().lower()
+        sel = (args.cameras or "both").strip().lower()
         requested = []
         if sel in ("both", "all", "head+wrist"):
             requested = [("head", head_id), ("wrist", wrist_id)]

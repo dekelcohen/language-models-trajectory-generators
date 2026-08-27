@@ -76,6 +76,9 @@ def build_arg_parser():
     parser.add_argument("--replay-log", type=str, default=None, help="Path to a log file of conversation with ```python blocks to execute. LLM-less execution")
     parser.add_argument("--replay-vlm-review", action="store_true", default=False, help="When replaying a log, also execute VLM-review code blocks between attempts (default: False, skip VLM review)")
     parser.add_argument("--learn-from-trajs", type=str, default=None, help="Path to a text file of past trajectories to learn from. Generates an improved in-context example via LLM and exits.")
+    parser.add_argument("--skills", dest="skills", action=argparse.BooleanOptionalAction, default=True, help="enable lazily-loaded agent skills (SKILL.md files); the planner/subtask prompts list matching skill names+descriptions and the LLM pulls a full skill in with load_skill(...) (default: True, use --no-skills to disable)")
+    parser.add_argument("--skills-dir", dest="skills_dir", type=str, default=None, help="root directory of the SKILL.md tree (default: ./prompts/skills)")
+    parser.add_argument("--list-skills", action="store_true", help="print every discovered skill (name, scope, description) and exit")
     return parser
 
 
@@ -103,11 +106,35 @@ def print_task_ids():
     print("Inspect any scene in a GUI with:  python env.py --task <id>")
 
 
+def print_skills(args):
+    """Print every discovered skill, grouped by scope (--list-skills)."""
+    import skill_registry
+
+    root = os.path.abspath(args.skills_dir or skill_registry.DEFAULT_SKILLS_DIR)
+    print(f"Skills root: {root}\n")
+    if not os.path.isdir(root):
+        print("  (directory does not exist)")
+        return
+    for scope in ("planner", "subtask"):
+        metas = skill_registry.discover(root, scope)
+        print(f"  {scope} skills ({len(metas)}):")
+        for meta in metas:
+            print(f"    {meta.name}  [scope: {meta.scope}]")
+            print(f"      {meta.description}")
+        if not metas:
+            print("    (none)")
+        print()
+
+
 def main():
     args = build_arg_parser().parse_args()
 
     if args.list_tasks:
         print_task_ids()
+        return
+
+    if args.list_skills:
+        print_skills(args)
         return
 
     try:

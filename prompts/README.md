@@ -7,8 +7,19 @@ All the prompts used for the main system can be found in this folder.
 
 This is the main prompt for the trajectory generation, and instructs the LLM to generate Python code which outputs a sequence of poses for the robot end-effector to follow, to complete the given task. It contains details such as available functions which the LLM can call, the environment set-up, and guidance on collision avoidance, velocity control, code generation and planning.
 
-##### `print_output_prompt.py`:
+##### `skills_prompt.py`:
 
+This prompt renders the *skills catalog* (level-1 index) that is injected into both the planner prompt and the subtask `main_prompt`: the name and description of every skill whose `scope` matches that agent, plus instructions on loading one with `load_skill(...)`. The skills themselves live in `skills/` as `SKILL.md` files and are only pulled into the conversation on demand — see `skills/README.md`.
+
+##### `skills/`:
+
+Lazily-loaded `SKILL.md` know-how packages (planner- and subtask-scoped), and their authoring guide.
+
+##### `user_prompts/`:
+
+`vlm_traj_user_commands.txt` — the repo-committed seed list of user commands offered as arrow-up history at the interactive `Enter a command:` prompt.
+
+##### `print_output_prompt.py`:
 This prompt is used if the LLM calls the `print` function while it is generating the code for the trajectory, and the printed outputs are provided directly to the LLM. The `print` function is also used in the `detect_object` API call, and this prompt will be used to provide the relevant object information automatically back to the LLM for further reasoning and trajectory generation.
 
 ##### `error_correction_prompt.py`:

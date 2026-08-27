@@ -71,7 +71,7 @@ class API:
 
     def _visualize_matched_bounding_boxes(self, bounding_cubes_world_coordinates, segmentation_texts):
         """Visualize matched 3D bounding boxes when --vis-box is enabled."""
-        vis_box_regex = getattr(self.args, "vis_box", None)
+        vis_box_regex = self.args.vis_box
         if not vis_box_regex or len(bounding_cubes_world_coordinates) == 0:
             return
 
@@ -266,14 +266,14 @@ class API:
             self.langsam_model,
             segmentation_texts,
             self.task.segmentation_count,
-            provider=getattr(self.args, "seg_provider", "langsam"),
+            provider=self.args.seg_provider,
         )
         self.logger.info(OK + "Finished segmenting head camera image!" + ENDC)
 
         # Save a segmentation overlay image for observability across all providers
         try:
             from models import visualize_segmentation_overlay
-            prov = getattr(self.args, "seg_provider", "langsam")
+            prov = self.args.seg_provider
             out_path = config.seg_overlay_image_path.format(provider=str(prov), object=self.task.segmentation_count)
             status = visualize_segmentation_overlay(rgb_image_head, model_predictions, boxes, segmentation_texts, out_path)
             fname = os.path.join(os.path.dirname(out_path), os.path.basename(out_path))
@@ -378,7 +378,7 @@ class API:
         Args:
             poses: A single 4x4 matrix or an (N, 4, 4) array of grasp poses.
         """
-        if not getattr(self.args, "vis_grasp", False):
+        if not self.args.vis_grasp:
             self.logger.info(PROGRESS + "Skipping grasp visualization (--vis-grasp not set)." + ENDC)
             return
         poses = np.array(poses, dtype=float)

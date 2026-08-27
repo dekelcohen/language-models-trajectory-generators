@@ -311,7 +311,7 @@ class Environment:
     def __init__(self, args):
         self.mode = args.mode
         # Make pybullet honor --task similarly to Metaworld
-        self.task = getattr(args, "task", None)
+        self.task = args.task
         self.simenv = get_simenv(self.task)
         self._apply_required_robot(args)
 
@@ -328,7 +328,7 @@ class Environment:
             return
         if not required:
             return
-        current = getattr(args, "robot", None)
+        current = args.robot
         if current != required:
             print(
                 f"[Env] Task '{self.task}' requires robot '{required}'; "

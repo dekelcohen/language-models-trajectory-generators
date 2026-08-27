@@ -1,7 +1,7 @@
 """Bash-like command history for the interactive `Enter a command:` prompt.
 
 History is merged from two sources (duplicates removed, order preserved):
-  1. A repo-committed seed file: <repo root>/config/vlm_traj_user_commands.txt
+  1. A repo-committed seed file: <repo root>/prompts/user_prompts/vlm_traj_user_commands.txt
   2. A per-user file in the home dir: ~/vlm_traj_user_commands.txt (newly recorded
      commands are persisted here; repo-seeded commands are not duplicated into it).
 
@@ -16,7 +16,7 @@ import sys
 from config import WARNING, ENDC
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REPO_HISTORY_FILE = os.path.join(_REPO_ROOT, "config", "vlm_traj_user_commands.txt")
+REPO_HISTORY_FILE = os.path.join(_REPO_ROOT, "prompts", "user_prompts", "vlm_traj_user_commands.txt")
 HOME_HISTORY_FILE = os.path.join(os.path.expanduser("~"), "vlm_traj_user_commands.txt")
 
 

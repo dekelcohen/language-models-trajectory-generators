@@ -46,6 +46,11 @@ class TaskState:
         self.scene_analysis = ""
         self.scene_analysis_image_path = None
 
+        # Lazily-loaded skills for this task (skill_registry.SkillSession). Holds the
+        # scope-filtered index shown in the prompt plus the bodies loaded so far, which
+        # are re-injected when a retry attempt rebuilds the conversation from scratch.
+        self.skills = None
+
     def title(self, max_len=90):
         """Short single-line task name for log lines."""
         text = " ".join(str(self.command or "(no task)").split())

@@ -44,6 +44,20 @@ from prompts.error_correction_prompt import ERROR_CORRECTION_PROMPT
 from prompts.print_output_prompt import PRINT_OUTPUT_PROMPT, NO_TOOL_CALL_PROMPT, BLOCKS_NOT_EXECUTED_PROMPT
 from prompts.task_failure_prompt import TASK_FAILURE_PROMPT
 from prompts.task_summary_prompt import TASK_SUMMARY_PROMPT
+from prompts.skills_prompt import build_skills_section, build_skill_tools_section, build_detect_batching_line
+
+# Header for skill/resource text pulled in by load_skill()/read_file(). The text is appended
+# to the next user turn instead of being printed, because printed output above 2000 chars is
+# dropped by execute_python_blocks (see there) - a skill body would be silently swallowed.
+SKILLS_FEEDBACK_HEADER = (
+    "The instructions you requested with load_skill()/read_file() are below (they follow any "
+    "printed output above). Treat them as part of your instructions for the rest of this task, "
+    "then continue.\n"
+)
+# Prefix used when previously-loaded skills are re-injected into a rebuilt prompt (retries).
+LOADED_SKILLS_HEADER = (
+    "\nSKILLS LOADED EARLIER IN THIS TASK (still in force - do not load them again):\n"
+)
 
 EEF_POS_SNIPPET = 'Current end-effector pos (x,y,z): {eef_pos}'
 
@@ -286,6 +300,30 @@ def process_cli_viz_point_arg(args, conn, logger):
         logger.info(FAIL + f"Failed to add viz point(s): {e}" + ENDC)
 
 
+def resolve_skills_root(args, logger):
+    """Absolute path of the SKILL.md tree, or None when skills are disabled/missing."""
+    import skill_registry
+
+    if not args.skills:
+        logger.info(PROGRESS + "Skills disabled (--no-skills)." + ENDC)
+        return None
+    root = os.path.abspath(args.skills_dir or skill_registry.DEFAULT_SKILLS_DIR)
+    if not os.path.isdir(root):
+        logger.info(WARNING + f"Skills directory not found: {root} (continuing without skills)" + ENDC)
+        return None
+    planner = skill_registry.discover(root, "planner", logger)
+    subtask = skill_registry.discover(root, "subtask", logger)
+    logger.info(PROGRESS + f"Skills: {len(planner)} planner, {len(subtask)} subtask (root={root})" + ENDC)
+    return root
+
+
+def make_skill_session(ctx, scope):
+    """Create the per-agent skill loading state for `scope` ('planner' or 'subtask')."""
+    from skill_registry import SkillSession
+
+    return SkillSession(ctx.skills_root, scope, ctx.logger, enabled=ctx.skills_root is not None)
+
+
 # --- Agent context ------------------------------------------------------
 class AgentContext:
     """Bundle of long-lived handles produced by init_agent and consumed by
@@ -304,6 +342,9 @@ class AgentContext:
         self.coords_section = None
         self.sim_state = {}
         self.ee_pos_for_prompt = None
+        # Root directory of the SKILL.md tree, or None when --no-skills. Per-agent skill
+        # loading state lives on a SkillSession (per subtask / per planner run), not here.
+        self.skills_root = None
         # 2D->3D affordance-point mappings from perception, kept for debugging.
         # Each entry: {"object": str, "points_2d": [[x,y],...], "points_3d": [...]}.
         self.affordance_points = []
@@ -407,6 +448,7 @@ def init_agent(args, logger):
     ctx.coords_section = coords_section
     ctx.sim_state = sim_state
     ctx.ee_pos_for_prompt = ee_pos_for_prompt
+    ctx.skills_root = resolve_skills_root(args, logger)
     return ctx
 
 
@@ -432,9 +474,19 @@ def teardown_agent(ctx):
 
 
 # --- Prompt builders ----------------------------------------------------
-def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section, in_context_example, scene_analysis=""):
-    """Fill all placeholders of the subtask MAIN_PROMPT."""
-    return (
+def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section, in_context_example,
+                       scene_analysis="", skills_index="", loaded_skills="", detect_object_available=True):
+    """Fill all placeholders of the subtask MAIN_PROMPT.
+
+    `skills_index` is the level-1 catalog of subtask-scoped skills (empty when skills are
+    disabled). `loaded_skills` re-injects skill bodies already loaded for this task, so a
+    retry attempt - which starts a brand-new conversation - keeps the know-how it earned.
+    `detect_object_available` is False on retries (no detect_object tool), where there is no
+    read-only call left to batch load_skill into.
+    """
+    if detect_object_available:
+        detect_initial += build_detect_batching_line(skills_index)
+    prompt = (
         MAIN_PROMPT
         .replace("[INSERT DETECT_OBJECT_TOOL]", detect_tool)
         .replace("[INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]", detect_initial)
@@ -447,7 +499,12 @@ def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section
         .replace("[INSERT TASK]", task)
         .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
         .replace("[INSERT IN CONTEXT EXAMPLE]", in_context_example)
+        .replace("[INSERT SKILL TOOLS]", build_skill_tools_section(skills_index, start_number=7))
+        .replace("[INSERT SKILLS]", build_skills_section(skills_index))
     )
+    if loaded_skills:
+        prompt += LOADED_SKILLS_HEADER + loaded_skills
+    return prompt
 
 
 class TaskResult:
@@ -502,17 +559,24 @@ def execute_python_blocks(ctx, task, assistant_content):
                                                 (attempt is over); no "not executed" notice.
       5. Blocks skipped because of case 2     -> BLOCKS_NOT_EXECUTED_PROMPT telling the LLM
                                                 exactly which blocks never ran.
+      6. load_skill()/read_file() called      -> the requested text is appended VERBATIM to the
+                                                feedback, bypassing the <2000 char print cap
+                                                below (a skill body would otherwise be dropped
+                                                silently and the LLM would act without it).
 
     Returns: str feedback prompt for the next user turn (may be "").
     Side effects: runs robot actions; may set task.completed_task / task.failed_task.
     """
     logger = ctx.logger
+    skills = task.skills
     if len(assistant_content.split("```python")) <= 1:
         return "" if task.completed_task else NO_TOOL_CALL_PROMPT
 
     code_block = assistant_content.split("```python")
     exec_env = globals().copy()
     exec_env.update(ctx.exec_locals)
+    if skills is not None:
+        exec_env.update(skills.exec_locals())
 
     feedback = ""
     error = False
@@ -555,6 +619,11 @@ def execute_python_blocks(ctx, task, assistant_content):
             .replace("[INSERT TOTAL BLOCKS]", str(total_blocks))
             .replace("[INSERT FIRST SKIPPED BLOCK]", str(executed_blocks + 1))
         )
+
+    # Skill/resource text never travels through stdout (it would hit the 2000 char cap above).
+    skill_text = skills.drain_pending() if skills is not None else ""
+    if skill_text:
+        feedback = (feedback + "\n" if feedback else "") + SKILLS_FEEDBACK_HEADER + skill_text
     return feedback
 
 
@@ -594,10 +663,14 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
     task.start_attempt_trajectory_step = api.trajectory_step
 
     _, eef_pos = build_llm_context_images_and_pose(ctx.main_connection, api.trajectory_step, logger)
+    skills = task.skills
     retry_prompt = _build_main_prompt(
         NO_DETECT_OBJECT_TOOL, NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING,
         eef_pos, prompt, ctx.coords_section, '',
         scene_analysis=scene_analysis,
+        skills_index=skills.index_text() if skills is not None else "",
+        loaded_skills=skills.loaded_block() if skills is not None else "",
+        detect_object_available=False,
     )
     try:
         logger.info(PROGRESS + f"Env state: {json.dumps(ctx.sim_state)}" + ENDC)
@@ -711,6 +784,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     task = TaskState(command=prompt, max_attempts=max_attempts, start_trajectory_step=api.trajectory_step)
     task.scene_analysis = scene_analysis
     task.scene_analysis_image_path = ctx.scene_analysis_image_path
+    task.skills = make_skill_session(ctx, "subtask")
     api.task = task
     messages = []
     task.conversation_messages = messages
@@ -734,6 +808,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
         DETECT_OBJECT_TOOL, DETECT_OBJECT_TOOL_INITIAL_PLANNING,
         ee_pos_for_prompt, first_command, coords_section, ic,
         scene_analysis=scene_analysis,
+        skills_index=task.skills.index_text(),
     )
 
     try:
@@ -766,7 +841,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
 
 
 # --- Planner + orchestration (single agentic loop) ----------------------
-def _build_planner_prompt(ctx, command, scene_analysis=""):
+def _build_planner_prompt(ctx, command, scene_analysis="", skills_index=""):
     """Fill the merged PLANNER_PROMPT placeholders."""
     from prompts.planner_prompt import PLANNER_PROMPT, RECOVERY_FROM_FAILURE
     return (
@@ -780,6 +855,8 @@ def _build_planner_prompt(ctx, command, scene_analysis=""):
         .replace("[INSERT 3D COORDINATES PROMPT SECTION]", ctx.coords_section)
         .replace("[INSERT EE POSITION]", str(ctx.ee_pos_for_prompt))
         .replace("[INSERT TASK]", command)
+        .replace("[INSERT SKILL TOOLS]", build_skill_tools_section(skills_index, start_number=4, scope="planner"))
+        .replace("[INSERT SKILLS]", build_skills_section(skills_index, scope="planner"))
     )
 
 
@@ -812,10 +889,13 @@ def run_plan(ctx, command, max_iterations=None):
 
     planner = PlannerAPI(ctx, execute_task, logger)
     planner_locals = get_planner_exec_locals(planner, logger)
+    planner_skills = make_skill_session(ctx, "planner")
+    planner_locals.update(planner_skills.exec_locals())
 
     scene_analysis = run_scene_perception(ctx, command)
     planner.scene_analysis = scene_analysis
-    prompt = _build_planner_prompt(ctx, command, scene_analysis=scene_analysis)
+    prompt = _build_planner_prompt(ctx, command, scene_analysis=scene_analysis,
+                                   skills_index=planner_skills.index_text())
     image_paths = [config.rgb_image_head_path] if args.lm_images else None
     logger.info(PROGRESS + "Planner: generating plan / dispatch..." + ENDC)
     messages = models.call_llm_cached(
@@ -827,7 +907,8 @@ def run_plan(ctx, command, max_iterations=None):
     iteration = 0
     while not (planner.plan_completed_flag or planner.plan_failed_flag) and iteration < max_iterations:
         iteration += 1
-        new_prompt = _run_planner_code_blocks(messages, planner_locals)
+        subtasks_before = len(planner.subtask_results)
+        new_prompt = _run_planner_code_blocks(messages, planner_locals, planner_skills)
 
         if planner.plan_completed_flag or planner.plan_failed_flag:
             break
@@ -836,12 +917,15 @@ def run_plan(ctx, command, max_iterations=None):
         # changed the scene (cleared occluders, opened a door, or left the arm
         # occluding the next target). The planner reevaluates this fresh analysis
         # and may insert a new subtask (e.g. move the arm away) before continuing.
-        scene_analysis = run_scene_perception(ctx, command)
-        planner.scene_analysis = scene_analysis
-        new_prompt = (
-            "UPDATED SCENE ANALYSIS (perception VLM, current head-camera image):\n"
-            f"{scene_analysis}\n\n" + new_prompt
-        )
+        # Turns that ran no subtask (e.g. a load_skill call) leave the world untouched,
+        # so perception is skipped and the previous analysis still stands.
+        if len(planner.subtask_results) > subtasks_before:
+            scene_analysis = run_scene_perception(ctx, command)
+            planner.scene_analysis = scene_analysis
+            new_prompt = (
+                "UPDATED SCENE ANALYSIS (perception VLM, current head-camera image):\n"
+                f"{scene_analysis}\n\n" + new_prompt
+            )
 
         logger.info(PROGRESS + f"Planner: iteration {iteration}/{max_iterations}..." + ENDC)
         messages = models.call_llm_cached(
@@ -858,9 +942,10 @@ def run_plan(ctx, command, max_iterations=None):
     return planner
 
 
-def _run_planner_code_blocks(messages, planner_locals):
+def _run_planner_code_blocks(messages, planner_locals, skills=None):
     """Execute the ```python blocks in the planner's latest message; return the
-    follow-up user prompt built from captured stdout / errors."""
+    follow-up user prompt built from captured stdout / errors (plus any skill text
+    requested via load_skill/read_file, which is appended verbatim rather than printed)."""
     new_prompt = ""
     content = messages[-1]["content"] if messages and isinstance(messages[-1], dict) else ""
     code_block = content.split("```python")
@@ -889,5 +974,9 @@ def _run_planner_code_blocks(messages, planner_locals):
     else:
         new_prompt += ("No planner tool call detected. Emit a ```python block calling "
                        "execute_subtasks([...]), or plan_completed()/plan_failed().")
+
+    skill_text = skills.drain_pending() if skills is not None else ""
+    if skill_text:
+        new_prompt += "\n" + SKILLS_FEEDBACK_HEADER + skill_text
     return new_prompt
 
