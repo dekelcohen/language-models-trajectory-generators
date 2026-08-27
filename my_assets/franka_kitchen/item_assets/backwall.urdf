@@ -1,0 +1,126 @@
+<?xml version="1.0" ?>
+<robot name="backwall_urdf">
+    <link name="backwall">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+
+    <!-- wall 1 -->
+    <link name="wallroot_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="1080.57602"/>
+			<inertia ixx="131.97436" ixy="0" ixz="0" iyy="701.50995" iyz="0" izz="574.14605"/>
+		</inertial>
+        <visual>
+            <origin xyz="-.11 0.06 .6" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.52 0.14 1.2"/>
+            </geometry>
+            <material name="wall_blue">
+                <color rgba=".66 .7 .8 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-.11 0.06 .6" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.52 0.14 1.2"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="wallroot_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="1080.57602"/>
+			<inertia ixx="131.97436" ixy="0" ixz="0" iyy="701.50995" iyz="0" izz="574.14605"/>
+		</inertial>
+        <visual>
+            <origin xyz="-0.11 0.06 0.145" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.52 0.16 0.29"/>
+            </geometry>
+            <material name="wall_white">
+                <color rgba="1 1 1 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.11 0.06 0.145" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.52 0.16 0.29"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- wall 2 -->
+    <link name="wall2_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="925.35042"/>
+			<inertia ixx="113.01614" ixy="0" ixz="0" iyy="470.15236" iyz="0" izz="361.08438"/>
+		</inertial>
+        <visual>
+            <origin xyz="0.044 .06 0.6" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.158 0.14 1.2"/>
+            </geometry>
+            <material name="wall_blue">
+                <color rgba=".66 .7 .8 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.044 .06 0.6" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.158 0.14 1.2"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="wall2_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="925.35042"/>
+			<inertia ixx="113.01614" ixy="0" ixz="0" iyy="470.15236" iyz="0" izz="361.08438"/>
+		</inertial>
+        <visual>
+            <origin xyz="0.044 .06 0.145" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.158 0.16 0.29"/>
+            </geometry>
+            <material name="wall_white">
+                <color rgba="1 1 1 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.044 .06 0.145" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.158 0.16 0.29"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- wall 1 joints -->
+    <joint name="backwall_wallroot_1" type="fixed">
+        <origin xyz="0.059 0.584 1.587" rpy="0 0 0"/>
+        <parent link="backwall"/>
+        <child link="wallroot_1"/>
+    </joint>
+    <joint name="backwall_wallroot_2" type="fixed">
+        <origin xyz="0.059 0.584 1.587" rpy="0 0 0"/>
+        <parent link="backwall"/>
+        <child link="wallroot_2"/>
+    </joint>
+
+    <!-- wall 2 joints -->
+    <joint name="backwall_wall2_1" type="fixed">
+        <origin xyz="-1.305 -0.546 1.587" rpy="0 0 1.57"/>
+        <parent link="backwall"/>
+        <child link="wall2_1"/>
+    </joint>
+    <joint name="backwall_wall2_2" type="fixed">
+        <origin xyz="-1.305 -0.546 1.587" rpy="0 0 1.57"/>
+        <parent link="backwall"/>
+        <child link="wall2_2"/>
+    </joint>
+</robot>

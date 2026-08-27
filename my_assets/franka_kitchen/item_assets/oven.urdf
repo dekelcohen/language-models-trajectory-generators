@@ -1,0 +1,869 @@
+<?xml version="1.0" ?>
+<robot name="oven_urdf">
+    <link name="oven">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+
+    <!-- oven -->
+    <link name="ovenroot_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="3966.27050"/>
+			<inertia ixx="1508.10986" ixy="0" ixz="0" iyy="1294.96774" iyz="0" izz="979.85454"/>
+		</inertial>
+        <visual>
+            <origin xyz="0.203 0.323 0.619" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/stoverim.stl"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.24 -0.12 0.619" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/stoverim.stl"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.237 0.323 0.619" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/stoverim.stl"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="0.207 -0.12 0.619" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/stoverim.stl"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.017 -.326 .455" rpy="0 0 0"/>
+            <geometry>
+                <box size="1 0.032 0.24"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.017 -.326 -.795" rpy="0 0 0"/>
+            <geometry>
+                <box size="1 0.032 0.37"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.017 -.326 -.14" rpy="0 0 0"/>
+            <geometry>
+                <box size="1 0.032 0.93"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.017 0.295 -0.2" rpy="0 0 0"/>
+            <geometry>
+                <box size="1 1.204 1.56"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.017 0.28 -0.175" rpy="0 0 0"/>
+            <geometry>
+                <box size="1 1.25 1.62"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="ovenroot_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="3966.27050"/>
+			<inertia ixx="1508.10986" ixy="0" ixz="0" iyy="1294.96774" iyz="0" izz="979.85454"/>
+		</inertial>
+        <visual>
+            <origin xyz="-0.011 -.327 -.05" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.7 0.032 0.44"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="0.9793 0.2921 -1.1877" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/ovenwindow.stl"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.017 0.275 0.607" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/oventop.stl"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.24 -0.119 0.629" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/burnerplate.stl"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.237 0.322 0.629" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/burnerplate.stl"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="0.204 0.322 0.629" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/burnerplate.stl"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="0.206 -0.119 0.629" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/burnerplate.stl"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-.215 -0.36 -0.682" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.018" length="0.06"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-.215 -0.36 -0.682" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.018" length="0.06"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz=".184 -0.36 -0.682" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.018" length="0.06"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz=".184 -0.36 -0.682" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.018" length="0.06"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-0.015 -0.39 -0.682" rpy="0 1.57 0"/>
+            <geometry>
+                <cylinder radius="0.022" length="0.56"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.015 -0.39 -0.682" rpy="0 1.57 0"/>
+            <geometry>
+                <cylinder radius="0.022" length="0.56"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-.215 -0.36 0.254" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.018" length="0.06"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-.215 -0.36 0.254" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.018" length="0.06"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz=".184 -0.36 0.254" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.018" length="0.06"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz=".184 -0.36 0.254" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.018" length="0.06"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-0.015 -0.39 0.254" rpy="0 1.57 0"/>
+            <geometry>
+                <cylinder radius="0.022" length="0.56"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.015 -0.39 0.254" rpy="0 1.57 0"/>
+            <geometry>
+                <cylinder radius="0.022" length="0.56"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- hood knobs -->
+    <link name="knob 1_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+    <link name="knob 1_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="0.46703"/>
+			<inertia ixx="0.00059" ixy="0" ixz="0" iyy="0.00049" iyz="0" izz="0.00088"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 .038" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.028 0.096 0.036"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 .038" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.028 0.096 0.036"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="0 0 .013" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".05" length="0.016"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 .013" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".05" length="0.016"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="knob 1_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="0.46703"/>
+			<inertia ixx="0.00059" ixy="0" ixz="0" iyy="0.00049" iyz="0" izz="0.00088"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0.048 .037" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".014" length="0.036"/>
+            </geometry>
+            <material name="oven_knob">
+                <color rgba="1 0 0 1"/>
+            </material>
+        </visual>
+    </link>
+    <link name="knob 2_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+    <link name="knob 2_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="0.46703"/>
+			<inertia ixx="0.00059" ixy="0" ixz="0" iyy="0.00049" iyz="0" izz="0.00088"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 .038" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.028 0.096 0.036"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 .038" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.028 0.096 0.036"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="0 0 .013" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".05" length="0.016"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 .013" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".05" length="0.016"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="knob 2_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="0.46703"/>
+			<inertia ixx="0.00059" ixy="0" ixz="0" iyy="0.00049" iyz="0" izz="0.00088"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0.048 .037" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".014" length="0.036"/>
+            </geometry>
+            <material name="oven_knob">
+                <color rgba="1 0 0 1"/>
+            </material>
+        </visual>
+    </link>
+    <link name="knob 3_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+    <link name="knob 3_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="0.46703"/>
+			<inertia ixx="0.00059" ixy="0" ixz="0" iyy="0.00049" iyz="0" izz="0.00088"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 .038" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.028 0.096 0.036"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 .038" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.028 0.096 0.036"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="0 0 .013" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".05" length="0.016"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 .013" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".05" length="0.016"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="knob 3_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="0.46703"/>
+			<inertia ixx="0.00059" ixy="0" ixz="0" iyy="0.00049" iyz="0" izz="0.00088"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0.048 .037" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".014" length="0.036"/>
+            </geometry>
+            <material name="oven_knob">
+                <color rgba="1 0 0 1"/>
+            </material>
+        </visual>
+    </link>
+    <link name="knob 4_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+    <link name="knob 4_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="0.46703"/>
+			<inertia ixx="0.00059" ixy="0" ixz="0" iyy="0.00049" iyz="0" izz="0.00088"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 .038" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.028 0.096 0.036"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 .038" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.028 0.096 0.036"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="0 0 .013" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".05" length="0.016"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 .013" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".05" length="0.016"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="knob 4_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="0.46703"/>
+			<inertia ixx="0.00059" ixy="0" ixz="0" iyy="0.00049" iyz="0" izz="0.00088"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0.048 .037" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius=".014" length="0.036"/>
+            </geometry>
+            <material name="oven_knob">
+                <color rgba="1 0 0 1"/>
+            </material>
+        </visual>
+    </link>
+
+    <!-- burners -->
+    <link name="Burner 1_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+    <link name="Burner 1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value=".01"/>
+			<inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.1" length="0.02"/>
+            </geometry>
+            <material name="oven_burner">
+                <color rgba="2 0 0 1"/>
+            </material>
+        </visual>
+    </link>
+    <link name="Burner 2_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+    <link name="Burner 2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value=".01"/>
+			<inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.1" length="0.02"/>
+            </geometry>
+            <material name="oven_burner">
+                <color rgba="2 0 0 1"/>
+            </material>
+        </visual>
+    </link>
+    <link name="Burner 3_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+    <link name="Burner 3">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value=".01"/>
+			<inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.1" length="0.02"/>
+            </geometry>
+            <material name="oven_burner">
+                <color rgba="2 0 0 1"/>
+            </material>
+        </visual>
+    </link>
+    <link name="Burner 4_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+    <link name="Burner 4">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value=".01"/>
+			<inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.1" length="0.02"/>
+            </geometry>
+            <material name="oven_burner">
+                <color rgba="2 0 0 1"/>
+            </material>
+        </visual>
+    </link>
+
+    <!-- hood -->
+    <link name="hoodroot">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="161.92511"/>
+			<inertia ixx="9.01027" ixy="0" ixz="0" iyy="17.15821" iyz="0" izz="23.44716"/>
+		</inertial>
+        <visual>
+            <origin xyz="-0.1 -0.2896 -2.329" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/hood.stl"/>
+            </geometry>
+            <material name="oven_black">
+                <color rgba=".15 .15 .15 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0.073 -0.046" rpy="0 0 0"/>
+            <geometry>
+                <box size="1.004 0.672 0.24"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- light switch -->
+	<link name="lightswitchbaseroot">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 -0.0123 0" rpy="-1.57 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/lightswitchbase.stl"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+	</link>
+    <link name="lightswitchroot_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+	</link>
+	<link name="lightswitchroot">
+        <inertial>
+			<origin xyz="-0.0046 0.35 0.0131" rpy="0 0 0"/>
+            <mass value=".1"/>
+			<inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+		</inertial>
+        <visual>
+            <origin xyz="0.0252 -0.06 0" rpy="-1.57 -.4 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.07"/>
+            </geometry>
+            <material name="T_oven_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.0263 -0.065 0" rpy="-1.57 -.4 0"/>
+            <geometry>
+                <capsule radius="0.021" length="0.06"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- hood light -->
+    <link name="lightblock_hinge_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+	</link>
+	<link name="lightblock_hinge">
+        <inertial>
+            <origin xyz="-0.0046 0.35 0.0131" rpy="0 0 0"/>
+            <mass value=".01"/>
+            <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+        </inertial>
+		<visual>
+            <origin xyz="-0.008 0.4 -0.01" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.8 0.6 0.03"/>
+            </geometry>
+            <material name="oven_block">
+                <color rgba=".1 .1 .1 1"/>
+            </material>
+        </visual>
+    </link>
+
+    <!-- oven joints -->
+    <joint name="oven_ovenroot_1" type="fixed">
+        <origin xyz="0.115 -0.2921 0.9834" rpy="0 0 0"/>
+        <parent link="oven"/>
+		<child link="ovenroot_1"/>
+	</joint>
+	<joint name="oven_ovenroot_2" type="fixed">
+        <origin xyz="0.115 -0.2921 0.9834" rpy="0 0 0"/>
+        <parent link="oven"/>
+		<child link="ovenroot_2"/>
+	</joint>
+
+    <!-- knob joints -->
+	<joint name="knob_Joint_1" type="revolute">
+		<origin xyz="-0.148 0.22 1.243" rpy="1.57 0 0"/>
+        <parent link="ovenroot_1"/>
+		<child link="knob 1_link"/>
+		<axis xyz="0 0 1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-1.57" upper="0" effort="0" velocity="0"/>
+	</joint>
+	<joint name="knob 1_link_knob 1_1" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="knob 1_link"/>
+		<child link="knob 1_1"/>
+    </joint>
+	<joint name="knob 1_link_knob 1_2" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="knob 1_link"/>
+		<child link="knob 1_2"/>
+    </joint>
+	<joint name="knob_Joint_2" type="revolute">
+		<origin xyz="-0.271 0.22 1.243" rpy="1.57 0 0"/>
+        <parent link="ovenroot_1"/>
+		<child link="knob 2_link"/>
+		<axis xyz="0 0 1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-1.57" upper="0" effort="0" velocity="0"/>
+	</joint>
+	<joint name="knob 2_link_knob 2_1" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="knob 2_link"/>
+		<child link="knob 2_1"/>
+    </joint>
+	<joint name="knob 2_link_knob 2_2" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="knob 2_link"/>
+		<child link="knob 2_2"/>
+    </joint>
+	<joint name="knob_Joint_3" type="revolute">
+		<origin xyz="-0.148 0.22 1.357" rpy="1.57 0 0"/>
+        <parent link="ovenroot_1"/>
+		<child link="knob 3_link"/>
+		<axis xyz="0 0 1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-1.57" upper="0" effort="0" velocity="0"/>
+	</joint>
+	<joint name="knob 3_link_knob 3_1" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="knob 3_link"/>
+		<child link="knob 3_1"/>
+    </joint>
+	<joint name="knob 3_link_knob 3_2" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="knob 3_link"/>
+		<child link="knob 3_2"/>
+    </joint>
+	<joint name="knob_Joint_4" type="revolute">
+		<origin xyz="-0.271 0.22 1.357" rpy="1.57 0 0"/>
+        <parent link="ovenroot_1"/>
+		<child link="knob 4_link"/>
+		<axis xyz="0 0 1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-1.57" upper="0" effort="0" velocity="0"/>
+	</joint>
+	<joint name="knob 4_link_knob 4_1" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="knob 4_link"/>
+		<child link="knob 4_1"/>
+    </joint>
+	<joint name="knob 4_link_knob 4_2" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="knob 4_link"/>
+		<child link="knob 4_2"/>
+    </joint>
+
+    <!-- burner joints -->
+	<joint name="bottom_right_burner" type="prismatic">
+		<origin xyz="0.206 -0.119 0.61" rpy="0 0 0"/>
+        <parent link="ovenroot_1"/>
+		<child link="Burner 1_link"/>
+		<axis xyz="0 0 -1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-.009" upper="0" effort="0" velocity="0"/>
+	</joint>
+	<joint name="Burner 1_link_Burner 1" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="Burner 1_link"/>
+		<child link="Burner 1"/>
+	</joint>
+	<joint name="bottom_left_burner" type="prismatic">
+        <origin xyz="-0.24 -0.119 0.61" rpy="0 0 0"/>
+        <parent link="ovenroot_1"/>
+        <child link="Burner 2_link"/>
+		<axis xyz="0 0 -1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-.009" upper="0" effort="0" velocity="0"/>
+	</joint>
+	<joint name="Burner 2_link_Burner 2" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="Burner 2_link"/>
+		<child link="Burner 2"/>
+	</joint>
+	<joint name="top_right_burner" type="prismatic">
+        <origin xyz="0.204 0.322 0.61" rpy="0 0 0"/>
+		<parent link="ovenroot_1"/>
+		<child link="Burner 3_link"/>
+		<axis xyz="0 0 -1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-.009" upper="0" effort="0" velocity="0"/>
+	</joint>
+	<joint name="Burner 3_link_Burner 3" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="Burner 3_link"/>
+		<child link="Burner 3"/>
+	</joint>
+	<joint name="top_left_burner" type="prismatic">
+        <origin xyz="-0.237 0.322 0.61" rpy="0 0 0"/>
+		<parent link="ovenroot_1"/>
+		<child link="Burner 4_link"/>
+		<axis xyz="0 0 -1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-.009" upper="0" effort="0" velocity="0"/>
+	</joint>
+	<joint name="Burner 4_link_Burner 4" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="Burner 4_link"/>
+		<child link="Burner 4"/>
+    </joint>
+
+    <!-- light switch joints -->
+	<joint name="oven_hoodroot" type="fixed">
+		<origin xyz="0.1 0.188 2.33" rpy="0 0 0"/>
+        <parent link="oven"/>
+		<child link="hoodroot"/>
+	</joint>
+	<joint name="hoodroot_lightswitchbaseroot" type="fixed">
+		<origin xyz="-0.4 -0.2473 -0.05" rpy="0 0 0"/>
+		<parent link="hoodroot"/>
+		<child link="lightswitchbaseroot"/>
+    </joint>
+	<joint name="light_switch" type="revolute">
+		<origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="lightswitchbaseroot"/>
+		<child link="lightswitchroot_link"/>
+		<axis xyz="0 0 1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-.7" upper="0" effort="0" velocity="0"/>
+	</joint>
+    <joint name="lightswitchroot_link_lightswitchroot" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="lightswitchroot_link"/>
+		<child link="lightswitchroot"/>
+    </joint>
+
+    <!-- hood light joints -->
+  	<joint name="light_joint" type="prismatic">
+		<origin xyz="-0.0044 -0.3 -0.1361" rpy="0 0 0"/>
+        <parent link="hoodroot"/>
+		<child link="lightblock_hinge_link"/>
+		<axis xyz="0 0 -1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<limit lower="-.05" upper="0" effort="0" velocity="0"/>
+	</joint>
+	<joint name="lightblock_hinge_link_lightblock_hinge" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="lightblock_hinge_link"/>
+		<child link="lightblock_hinge"/>
+	</joint>
+</robot>

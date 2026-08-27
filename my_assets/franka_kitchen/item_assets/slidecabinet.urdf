@@ -1,0 +1,204 @@
+<?xml version="1.0" ?>
+<robot name="slidecabinet_urdf">
+    <link name="slidecabinet">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+
+    <!-- cabinet -->
+    <link name="slide">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="289.26721"/>
+			<inertia ixx="12.53491" ixy="0" ixz="0" iyy="23.29575" iyz="0" izz="28.11687"/>
+		</inertial>
+        <visual>
+            <origin xyz="-0.225 0 -0.18" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.446 0.6 0.04"/>
+            </geometry>
+            <material name="M_slide_blue">
+                <color rgba=".46 .5 .6 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.225 0 -0.18" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.446 0.6 0.04"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="0.224 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.452 0.6 0.4"/>
+            </geometry>
+            <material name="M_slide_blue">
+                <color rgba=".46 .5 .6 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.224 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.452 0.6 0.4"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-0.225 0 0.18" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.446 0.6 0.04"/>
+            </geometry>
+            <material name="M_slide_blue">
+                <color rgba=".46 .5 .6 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.225 0 0.18" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.446 0.6 0.04"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-0.426 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.044 0.6 0.32"/>
+            </geometry>
+            <material name="M_slide_blue">
+                <color rgba=".46 .5 .6 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.426 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.044 0.6 0.32"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-0.2 0.276 0.0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.42 0.048 0.32"/>
+            </geometry>
+            <material name="M_slide_blue">
+                <color rgba=".46 .5 .6 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.2 0.276 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.4 0.048 0.32"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- link for door joint -->
+    <link name="slidecabinet_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+
+    <!-- slide door -->
+    <link name="slidelink_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="22.50792"/>
+			<inertia ixx="0.33035" ixy="0" ixz="0" iyy="0.66511" iyz="0" izz="0.42488"/>
+		</inertial>
+        <visual>
+            <origin xyz="-0.183 -0.06 -0.114" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.019" length="0.106"/>
+            </geometry>
+            <material name="T_slide_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.183 -0.06 -0.114" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.019" length="0.106"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-0.183 -0.06 0.114" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.019" length="0.106"/>
+            </geometry>
+            <material name="T_slide_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.183 -0.06 0.114" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder radius="0.019" length="0.106"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-0.183 -0.123 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.022" length="0.318"/>
+            </geometry>
+            <material name="T_slide_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.183 -0.123 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.022" length="0.318"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="slidelink_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="22.50792"/>
+			<inertia ixx="0.33035" ixy="0" ixz="0" iyy="0.66511" iyz="0" izz="0.42488"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 -.02 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.45 0.06 0.39"/>
+            </geometry>
+            <material name="M_slide_blue">
+                <color rgba=".46 .5 .6 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 -.02 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.45 0.06 0.39"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- slidecabinet joints -->
+    <joint name="slidecabinet_slide" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="slidecabinet"/>
+        <child link="slide"/>
+    </joint>
+    <joint name="slide_cabinet" type="prismatic">
+        <origin xyz="-0.225 -0.32 0" rpy="0 0 0"/>
+        <parent link="slide"/>
+        <child link="slidecabinet_link"/>
+		<axis xyz="1 0 0"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+        <limit lower="0" upper=".44" effort="0" velocity="0"/>
+    </joint>
+    <joint name="slidecabinet_link_slidelink_1" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="slidecabinet_link"/>
+        <child link="slidelink_1"/>
+    </joint>
+    <joint name="slidecabinet_link_slidelink_2" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="slidecabinet_link"/>
+        <child link="slidelink_2"/>
+    </joint>
+</robot>

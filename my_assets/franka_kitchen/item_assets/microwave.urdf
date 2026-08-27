@@ -1,0 +1,225 @@
+<?xml version="1.0" ?>
+<robot name="microwave_urdf">
+    <link name="microwave">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+
+    <!-- microwave -->
+    <link name="microroot_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="65.41956"/>
+			<inertia ixx="2.64995" ixy="0" ixz="0" iyy="4.37479" iyz="0" izz="4.75932"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/micro.stl"/>
+            </geometry>
+            <material name="micro_black">
+                <color rgba=".2 .2 .2 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.316 0.023 0.187" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.058 0.398 0.374"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin xyz="0.236 0.023 0.187" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.218 0.398 0.374"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin xyz="-0.081 0.191 0.187" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.414 0.06 0.374"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin xyz="-0.08 -0.007 0.355" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.414 0.338 0.038"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin xyz="-0.08 -0.008 0.024" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.414 0.336 0.048"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="microroot_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="65.41956"/>
+			<inertia ixx="2.64995" ixy="0" ixz="0" iyy="4.37479" iyz="0" izz="4.75932"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/microbutton.stl"/>
+            </geometry>
+            <material name="T_micro_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/microfeet.stl"/>
+            </geometry>
+            <material name="T_micro_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.26 -0.197 0.187" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.17 0.048 0.374"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <!-- link for door joint -->
+    <link name="microwave_link">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0"/>
+            <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+        </inertial>
+    </link>
+
+    <!-- microwave door -->
+    <link name="microdoorroot_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="10.35579"/>
+			<inertia ixx="0.19522" ixy="0" ixz="0" iyy="0.48147" iyz="0" izz="0.33278"/>
+		</inertial>
+        <visual>
+            <origin xyz="0.475 -0.108 0" rpy="0 0 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.26"/>
+            </geometry>
+            <material name="T_micro_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.475 -0.108 0" rpy="0 0 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.26"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="0.475 -0.075 .13" rpy="1.57 0 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.06"/>
+            </geometry>
+            <material name="T_micro_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.475 -0.075 .13" rpy="1.57 0 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.06"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="0.475 -0.075 -.13" rpy="1.57 0 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.06"/>
+            </geometry>
+            <material name="T_micro_metal">
+                <texture filename="../textures/metal1.png"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.475 -0.075 -.13" rpy="1.57 0 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.06"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="microdoorroot_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="10.35579"/>
+			<inertia ixx="0.19522" ixy="0" ixz="0" iyy="0.48147" iyz="0" izz="0.33278"/>
+		</inertial>
+        <visual>
+            <origin xyz="0.345 0.176 -0.192" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/microdoor.stl"/>
+            </geometry>
+            <material name="micro_black">
+                <color rgba=".2 .2 .2 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.259 -0.026 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.518 0.048 0.37"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="microdoorroot_3">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="10.35579"/>
+			<inertia ixx="0.19522" ixy="0" ixz="0" iyy="0.48147" iyz="0" izz="0.33278"/>
+		</inertial>
+        <visual>
+            <origin xyz="0.345 0.176 -0.192" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/microwindow.stl"/>
+            </geometry>
+            <material name="micro_window">
+                <color rgba=".4 .4 .4 .25"/>
+            </material>
+        </visual>
+    </link>
+
+    <!-- microwave joints -->
+    <joint name="microwave_microroot_1" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="microwave"/>
+        <child link="microroot_1"/>
+    </joint>
+    <joint name="microwave_microroot_2" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="microwave"/>
+        <child link="microroot_2"/>
+    </joint>
+    <joint name="microwave" type="revolute">
+        <origin xyz="-0.345 -0.176 0.192" rpy="0 0 0"/>
+        <parent link="microroot_1"/>
+        <child link="microwave_link"/>
+		<axis xyz="0 0 1"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+        <limit lower="-2.094" upper="0" effort="0" velocity="0"/>
+    </joint>
+	<joint name="microwave_link_microdoorroot_1" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="microwave_link"/>
+		<child link="microdoorroot_1"/>
+	</joint>
+	<joint name="microwave_link_microdoorroot_2" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="microwave_link"/>
+		<child link="microdoorroot_2"/>
+	</joint>
+	<joint name="microwave_link_microdoorroot_3" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="microwave_link"/>
+		<child link="microdoorroot_3"/>
+	</joint>
+</robot>

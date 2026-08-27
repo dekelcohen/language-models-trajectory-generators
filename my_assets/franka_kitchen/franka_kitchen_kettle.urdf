@@ -1,0 +1,102 @@
+<?xml version="0.0" ?>
+<robot name="franka_kitchen">
+	<link name="kettle">
+		<inertial>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.00000 0.00000 0.00000"/>
+			<mass value="0.00000"/>
+			<inertia ixx="0.00000" ixy="0" ixz="0" iyy="0.00000" iyz="0" izz="0.00000"/>
+		</inertial>
+	</link>
+	<link name="kettleroot">
+		<inertial>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.00000 0.00000 0.00000"/>
+			<mass value="10.19761"/>
+			<inertia ixx="0.25414" ixy="0" ixz="0" iyy="0.28423" iyz="0" izz="0.21677"/>
+		</inertial>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.00000 0.00000 0.00000"/>
+			<geometry>
+				<mesh filename="unknown_file" scale="1.00000 1.00000 1.00000"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.00000 0.00000 0.25900"/>
+			<geometry>
+				<capsule length="0.20000" radius="0.03200"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.00000 0.00000 0.13000"/>
+			<geometry>
+				<sphere radius="0.01100"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.00000 0.00000 0.25900"/>
+			<geometry>
+				<capsule length="0.23000" radius="0.02000"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.09200 0.00000 0.18600"/>
+			<geometry>
+				<capsule length="0.14000" radius="0.02000"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="-0.09200 0.00000 0.18500"/>
+			<geometry>
+				<capsule length="0.14000" radius="0.02000"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="-0.09200 0.00000 0.22000"/>
+			<geometry>
+				<capsule length="0.03000" radius="0.02200"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.09200 0.00000 0.22000"/>
+			<geometry>
+				<capsule length="0.03000" radius="0.02200"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.00000 0.00000 0.25900"/>
+			<geometry>
+				<capsule length="0.20000" radius="0.03200"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.09200 0.00000 0.18000"/>
+			<geometry>
+				<capsule length="0.12000" radius="0.02300"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="-0.09200 0.00000 0.18000"/>
+			<geometry>
+				<capsule length="0.12000" radius="0.02300"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="-0.12600 0.00000 0.07000"/>
+			<geometry>
+				<cylinder length="0.10000" radius="0.03100"/>
+			</geometry>
+		</collision>
+		<collision>
+			<origin rpy="0.00000 -0.00000 0.00000" xyz="0.00000 0.00000 0.05800"/>
+			<geometry>
+				<box size="0.24400 0.24400 0.11600"/>
+			</geometry>
+		</collision>
+	</link>
+	<joint name="jointfix_29_0" type="fixed">
+		<parent link="kettle"/>
+		<child link="kettleroot"/>
+		<dynamics damping="1.0" friction="0.0001"/>
+		<origin rpy="0.00000 -0.00000 0.00000" xyz="0.00000 0.00000 0.00000"/>
+		<axis xyz="0.00000 0.00000 0.00000"/>
+	</joint>
+</robot>

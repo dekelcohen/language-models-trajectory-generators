@@ -1,0 +1,128 @@
+<?xml version="1.0" ?>
+<robot name="kettle_urdf">
+
+    <!-- kettle -->
+    <link name="kettleroot_1">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="10.19761"/>
+			<inertia ixx="0.25414" ixy="0" ixz="0" iyy="0.28423" iyz="0" izz="0.21677"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="../meshes/kettle.stl"/>
+            </geometry>
+            <material name="kettle_white">
+                <color rgba=".9 .9 .9 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0.058" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.244 0.244 0.116"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin xyz="-0.126 0 0.07" rpy="0 2.25 0"/>
+            <geometry>
+                <cylinder radius="0.031" length="0.1"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="0 0 0.259" rpy="0 1.57 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.23"/>
+            </geometry>
+            <material name="kettle_white">
+                <color rgba=".9 .9 .9 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0.259" rpy="0 1.57 0"/>
+            <geometry>
+                <capsule radius="0.032" length="0.2"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="0.092 0 0.186" rpy="0 0 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.14"/>
+            </geometry>
+            <material name="kettle_white">
+                <color rgba=".9 .9 .9 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0.092 0 0.18" rpy="0 0 0"/>
+            <geometry>
+                <capsule radius="0.023" length="0.12"/>
+            </geometry>
+        </collision>
+        <visual>
+            <origin xyz="-0.092 0 0.185" rpy="0 0 0"/>
+            <geometry>
+                <capsule radius="0.02" length="0.14"/>
+            </geometry>
+            <material name="kettle_white">
+                <color rgba=".9 .9 .9 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="-0.092 0 0.18" rpy="0 0 0"/>
+            <geometry>
+                <capsule radius="0.023" length="0.12"/>
+            </geometry>
+        </collision>
+    </link>
+    <link name="kettleroot_2">
+		<inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+			<mass value="10.19761"/>
+			<inertia ixx="0.25414" ixy="0" ixz="0" iyy="0.28423" iyz="0" izz="0.21677"/>
+		</inertial>
+        <visual>
+            <origin xyz="0 0 0.259" rpy="0 1.57 0"/>
+            <geometry>
+                <capsule radius="0.032" length="0.2"/>
+            </geometry>
+            <material name="T_kettle_wood">
+                <texture filename="../textures/wood1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="0 0 0.13" rpy="0 1.57 0"/>
+            <geometry>
+                <sphere radius="0.011"/>
+            </geometry>
+            <material name="T_kettle_wood">
+                <texture filename="../textures/wood1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="-0.092 0 0.22" rpy="0 0 0"/>
+            <geometry>
+                <capsule radius="0.022" length="0.03"/>
+            </geometry>
+            <material name="T_kettle_wood">
+                <texture filename="../textures/wood1.png"/>
+            </material>
+        </visual>
+        <visual>
+            <origin xyz="0.092 0 0.22" rpy="0 0 0"/>
+            <geometry>
+                <capsule radius="0.022" length="0.03"/>
+            </geometry>
+            <material name="T_kettle_wood">
+                <texture filename="../textures/wood1.png"/>
+            </material>
+        </visual>
+    </link>
+
+    <!-- kettle joints -->
+	<joint name="kettleroot_1_kettleroot_2" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+		<parent link="kettleroot_1"/>
+		<child link="kettleroot_2"/>
+	</joint>
+</robot>
