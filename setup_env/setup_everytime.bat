@@ -64,4 +64,6 @@ if /i "%gitchoice%"=="y" (
 )
 
 echo.
+echo copilot --add-dir "%ROBOTICS_HOME%\VLM_Robotics\robotic_perception"
+echo --add-dir "%ROBOTICS_HOME%\Simulators_Envs\franka-kitchen-pybullet"
 echo Environment ready.
