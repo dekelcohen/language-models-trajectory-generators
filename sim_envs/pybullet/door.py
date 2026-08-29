@@ -199,10 +199,14 @@ class SimEnvDoor(SimEnvBase):
                     _dhl, _ = self.sim.get_link_pose(self.door_id, int(self.door_handle_latch))
                     state["door_handle_pos"] = list(map(float, _dhl))
                 if self.latch_index is not None and self.latch_index >= 0:
-                    _lat, _ = self.sim.get_link_pose(self.door_id, int(self.latch_index))
+                    # A joint index is only a valid link index on PyBullet; ask the
+                    # adapter which link this joint actually drives.
+                    _lat, _ = self.sim.get_link_pose(
+                        self.door_id, self.sim.get_joint_child_link(self.door_id, self.latch_index))
                     state["latch_pos"] = list(map(float, _lat))
                 if self.door_hinge_index is not None and self.door_hinge_index >= 0:
-                    _hinge, _ = self.sim.get_link_pose(self.door_id, int(self.door_hinge_index))
+                    _hinge, _ = self.sim.get_link_pose(
+                        self.door_id, self.sim.get_joint_child_link(self.door_id, self.door_hinge_index))
                     state["hinge_pos"] = list(map(float, _hinge))
 
         except Exception as e:

@@ -89,7 +89,8 @@ class PyBulletAdapter(SimAdapter):
         p.stepSimulation()
 
     # ------------------------------------------------------------------ bodies
-    def load_urdf(self, path, position=None, orientation_q=None, fixed_base=False, scaling=1.0):
+    def load_urdf(self, path, position=None, orientation_q=None, fixed_base=False,
+                  scaling=1.0, links_to_keep=None):
         kwargs = {}
         if fixed_base:
             kwargs["useFixedBase"] = True
@@ -206,6 +207,10 @@ class PyBulletAdapter(SimAdapter):
     def get_link_pose(self, body, link):
         state = p.getLinkState(body, int(link), computeForwardKinematics=True)
         return state[0], state[1]
+
+    def get_joint_child_link(self, body, joint):
+        """In PyBullet joint ``i`` drives link ``i`` by construction."""
+        return int(joint)
 
     def set_joint_position(self, body, joint, target, force=None, position_gain=None):
         kwargs = {}

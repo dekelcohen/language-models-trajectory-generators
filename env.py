@@ -362,13 +362,17 @@ class _TracingConnection:
         return getattr(self._connection, item)
 
 
-def run_simulation_environment(args, env_connection, logger):
+def run_simulation_environment(args, env_connection, logger, sim=None):
     """The single, sim-agnostic app layer.
 
     Every IPC command is handled here for **all** simulators; only the
     :class:`~sim_adapter.base.SimAdapter` and the sim-env profile differ. An app-level
     change to ``EXECUTE_TRAJECTORY`` or ``CAPTURE_IMAGES`` is therefore made in exactly
     one place.
+
+    ``sim`` lets a bootstrap (``sim_envs/genesis/genesis_env.py``) hand in an adapter it
+    has already configured - Genesis has to reserve its render resolutions before the
+    scene is built, which is impossible if the adapter is created here.
     """
 
     # Environment set-up
@@ -381,7 +385,7 @@ def run_simulation_environment(args, env_connection, logger):
     env_connection = _TracingConnection(env_connection)
     trace_utils.set_context(sim=sim_name, task=getattr(args, "task", None), robot=getattr(args, "robot", None))
 
-    sim = get_adapter(sim_name)
+    sim = get_adapter(sim_name) if sim is None else sim
     sim.connect(gui=False)  # headless offscreen rendering
     sim.set_asset_search_path()
     sim.set_gravity(0, 0, -9.81)

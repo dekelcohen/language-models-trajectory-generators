@@ -8,6 +8,7 @@ from config import OK, PROGRESS, FAIL, ENDC
 from PIL import Image
 from shapely.geometry import MultiPoint, Polygon, polygon
 from sklearn.cluster import DBSCAN
+from sim_adapter import camera_math
 
 logger = None
 args = None
@@ -204,6 +205,37 @@ def save_mask_image(mask, path):
     arr = (arr > 0).astype(np.uint8) * 255
     Image.fromarray(arr).save(path)
 
+def _depth_sample_to_ndc_z(depth_sample, named_cam_info=None, camera=None):
+    """One depth sample -> OpenGL clip-space z, honouring the simulator's encoding.
+
+    ``cam_info[camera]["depth_encoding"]`` is set by the sim adapter:
+    ``"opengl"`` (PyBullet, default) or ``"linear_metric"`` (Genesis). Defaulting to
+    ``"opengl"`` keeps every existing PyBullet payload - including the recorded
+    goldens - bit-identical.
+    """
+    info = {}
+    if isinstance(named_cam_info, dict):
+        entry = named_cam_info.get(camera)
+        if isinstance(entry, dict):
+            info = entry
+        # ``depth_encoding`` is a property of the *simulator*, so env.py puts it once at
+        # the top level rather than repeating it per camera; per-camera wins if present.
+        if "depth_encoding" not in info and "depth_encoding" in named_cam_info:
+            info = dict(info, depth_encoding=named_cam_info["depth_encoding"])
+
+    encoding = info.get("depth_encoding", camera_math.DEPTH_OPENGL)
+    if encoding == camera_math.DEPTH_OPENGL:
+        return 2.0 * depth_sample - 1.0
+
+    near = float(info.get("znear", config.near_plane))
+    far = float(info.get("zfar", config.far_plane))
+    z_ndc = float(camera_math.metric_to_ndc_z(depth_sample, near, far))
+    if os.environ.get("DEBUG_PINHOLE", "0") == "1":
+        logger.info(PROGRESS + f"[depth] encoding={encoding} metric={float(depth_sample):.6f} "
+                    f"near={near} far={far} -> z_ndc={z_ndc:.6f}" + ENDC)
+    return z_ndc
+
+
 def get_intrinsics_extrinsics(image_height, camera, camera_position, camera_orientation_q, cam_info=None):
     """
     Returns (K, Rt, view_matrix).
@@ -307,9 +339,13 @@ def get_world_point_world_frame(camera_position, camera_orientation_q, camera, i
         # Note: Image origin is Top-Left, OpenGL NDC origin is Bottom-Left.
         ndc_y = 1.0 - (2.0 * point[1] / image_height)
         
-        # Map Depth Buffer [0.0, 1.0] -> NDC Z [-1.0, 1.0]
-        # Assumes point[2] is the non-linear depth buffer value.
-        z_ndc = 2.0 * point[2] - 1.0
+        # Map Depth Buffer -> NDC Z [-1.0, 1.0]
+        # PyBullet ("opengl") hands back the non-linear z-buffer in [0, 1], which maps
+        # directly. Genesis ("linear_metric") hands back metres along the optical axis,
+        # which has to be re-projected through the frustum first - otherwise the point
+        # lands at a plausible-looking but wrong depth. Doing the conversion here keeps
+        # the single inverse view-projection code path below shared by both sims.
+        z_ndc = _depth_sample_to_ndc_z(point[2], named_cam_info=cam_info, camera=camera)
         
         # 2. Create the Clip Space Vector [x, y, z, w]
         clip_pos = np.array([ndc_x, ndc_y, z_ndc, 1.0])

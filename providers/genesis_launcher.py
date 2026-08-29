@@ -193,7 +193,29 @@ def genesis_child_env(env=None, repo_root=None):
     child["PYTHONPATH"] = os.pathsep.join(parts)
     # Unbuffered so the child's crash tracebacks reach us before the pipe closes.
     child["PYTHONUNBUFFERED"] = "1"
+    # ``pybullet_data`` is not installed in the Genesis env, but a few assets
+    # (plane.urdf, robotiq_2f_85) still live there. Hand the child the path we
+    # resolved on the parent side so it can load them as plain files.
+    if ASSET_ROOT_ENV_VAR not in child:
+        asset_root = _pybullet_data_path()
+        if asset_root:
+            child[ASSET_ROOT_ENV_VAR] = asset_root
     return child
+
+
+ASSET_ROOT_ENV_VAR = "LMTG_ASSET_ROOT"
+
+
+def _pybullet_data_path():
+    """``pybullet_data.getDataPath()`` or ``None`` if PyBullet isn't importable."""
+    try:
+        import pybullet_data
+    except Exception:
+        return None
+    try:
+        return pybullet_data.getDataPath()
+    except Exception:
+        return None
 
 
 def describe_genesis_python(env=None):

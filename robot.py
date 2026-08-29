@@ -22,9 +22,9 @@ class Robot:
             self.base_start_position = config.base_start_position_sawyer
             self.base_start_orientation_q = self.sim.quat_from_euler(config.base_start_orientation_e_sawyer)
             self.joint_start_positions = config.joint_start_positions_sawyer
-            self.id = self.sim.load_urdf(self.profile.urdf, self.base_start_position, self.base_start_orientation_q, fixed_base=True)
+            self.id = self.sim.load_urdf(self.profile.urdf, self.base_start_position, self.base_start_orientation_q, fixed_base=True, links_to_keep=self.profile.links_to_keep)
             self.robot = "sawyer"
-            self.ee_index = self.profile.ee_index
+            self.ee_index = self._resolve_link(self.profile.ee_link_name, self.profile.ee_index)
             self.gripper_id = self.sim.load_urdf("robotiq_2f_85/robotiq_2f_85.urdf", config.ee_start_position, self.sim.quat_from_euler(config.ee_start_orientation_e))
             self.gripper_motor = config.robotiq_motor_joint
             self.sim.create_fixed_constraint(self.id, self.ee_index, self.gripper_id, 0, parent_frame_position=[0, 0, 0], child_frame_position=[0, 0, -0.07], child_frame_orientation_q=self.sim.quat_from_euler([0, 0, 0]))
@@ -32,10 +32,12 @@ class Robot:
             self.base_start_position = config.base_start_position_franka
             self.base_start_orientation_q = self.sim.quat_from_euler(config.base_start_orientation_e_franka)
             self.joint_start_positions = config.joint_start_positions_franka
-            self.id = self.sim.load_urdf(self.profile.urdf, self.base_start_position, self.base_start_orientation_q, fixed_base=True)
+            self.id = self.sim.load_urdf(self.profile.urdf, self.base_start_position, self.base_start_orientation_q, fixed_base=True, links_to_keep=self.profile.links_to_keep)
             self.gripper_id = self.id
             self.robot = "franka"
-            self.ee_index = self.profile.ee_index
+            self.ee_index = self._resolve_link(self.profile.ee_link_name, self.profile.ee_index)
+        self.gripper_joint_indices = self._resolve_gripper_joints()
+        self.gripper_state_joint = self.gripper_joint_indices[0]
         self.ee_start_position = config.ee_start_position
         self.ee_start_orientation_e = config.ee_start_orientation_e
         self.ee_current_position = config.ee_start_position
@@ -51,6 +53,48 @@ class Robot:
             i += 1
             self.joint_indices.append(joint.index)
 
+        # Genesis position control is inert without explicit PD gains; PyBullet no-ops.
+        self.sim.configure_motor_gains(
+            self.id, self.joint_indices,
+            kp=self.profile.genesis_kp or None,
+            kv=self.profile.genesis_kv or None,
+            force_range=self.profile.genesis_force_range or None,
+        )
+        self.logger.info(PROGRESS + f"[Robot] {self.robot}: body={self.id} ee_index={self.ee_index} "
+                         f"({self.profile.ee_link_name}) joints={self.joint_indices} "
+                         f"gripper={self.gripper_joint_indices}" + ENDC)
+
+    def _resolve_link(self, name, fallback_index):
+        """Prefer the link *name*; fall back to the PyBullet index the goldens used.
+
+        PyBullet and Genesis do not agree on link indices, so names are the only portable
+        handle. The fallback keeps sawyer (whose name is unverified) working exactly as
+        before.
+        """
+        try:
+            resolved = self.sim.get_link_index_by_name(self.id, name)
+        except Exception:
+            resolved = None
+        if resolved is None:
+            self.logger.info(PROGRESS + f"[Robot] link '{name}' not found; using index "
+                             f"{fallback_index}" + ENDC)
+            return fallback_index
+        return resolved
+
+    def _resolve_gripper_joints(self):
+        """Same story as ``_resolve_link``, for the two finger joints."""
+        names = list(self.profile.gripper_joint_names or ())
+        fallbacks = list(self.profile.gripper_joint_indices)
+        resolved = []
+        for i, fallback in enumerate(fallbacks):
+            index = None
+            if i < len(names):
+                try:
+                    index = self.sim.get_joint_index_by_name(self.gripper_id, names[i])
+                except Exception:
+                    index = None
+            resolved.append(fallback if index is None else index)
+        return tuple(resolved)
 
     def get_joint_effort(self, joint_index, body_id=None):
         """
@@ -114,7 +158,7 @@ class Robot:
         if self.robot == "sawyer":
             gripper_pos = self.sim.get_joint_state(self.gripper_id, self.gripper_motor).position
         else: # franka
-            gripper_pos = self.sim.get_joint_state(self.id, self.profile.gripper_state_joint).position
+            gripper_pos = self.sim.get_joint_state(self.id, self.gripper_state_joint).position
 
         # Check if we moved significantly
         moved_significantly = False
@@ -156,7 +200,7 @@ class Robot:
                 ee_target_position = list(ee_target_position)
                 ee_target_position[2] -= config.gripper_depth_offset_sawyer
         elif self.robot == "franka":
-            gripper1_index, gripper2_index = self.profile.gripper_joint_indices
+            gripper1_index, gripper2_index = self.gripper_joint_indices
             gripper_target_position = config.gripper_goal_position_open_franka if gripper_open else config.gripper_goal_position_closed_franka
             if is_trajectory:
                 ee_target_position = list(ee_target_position)

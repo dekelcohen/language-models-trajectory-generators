@@ -21,7 +21,9 @@ class RobotProfile:
 
     urdf: str
     #: Link that the IK solver drives and that the wrist camera rides on. Resolved by
-    #: *name* on simulators that have no PyBullet-style link indices.
+    #: *name* first, because simulator link indices do not agree: Genesis has no
+    #: PyBullet-style index and drops fixed-joint links unless asked to keep them.
+    #: ``ee_index`` is the PyBullet fallback and the value the goldens were recorded with.
     ee_link_name: str
     ee_index: int
 
@@ -42,20 +44,31 @@ class RobotProfile:
     #: ``None`` means "all of them" (sawyer); franka uses ``-2`` to exclude the fingers.
     arm_joint_count: Optional[int] = None
 
+    #: Name-based equivalent of ``gripper_joint_indices``, in the same order. Used on
+    #: simulators that have no PyBullet joint indices.
+    gripper_joint_names: Sequence[str] = ()
+
     # Genesis-only PD control. Seeded from
     # genesis-world/examples/tutorials/IK_motion_planning_grasp.py
     genesis_kp: List[float] = field(default_factory=list)
     genesis_kv: List[float] = field(default_factory=list)
     genesis_force_range: List[float] = field(default_factory=list)
 
+    #: Links that must survive fixed-joint merging (Genesis merges by default).
+    links_to_keep: Sequence[str] = ()
+
 
 def franka_profile():
     return RobotProfile(
         name="franka",
         urdf="franka_robot/panda.urdf",
-        ee_link_name="panda_hand",
+        # PyBullet link 11. NOT panda_hand: the URDF puts a further fixed joint
+        # (panda_grasptarget_hand) between the hand and the actual grasp point, and
+        # config.ee_index_franka has always pointed at the latter.
+        ee_link_name="panda_grasptarget",
         ee_index=config.ee_index_franka,
         gripper_joint_indices=(9, 10),
+        gripper_joint_names=("panda_finger_joint1", "panda_finger_joint2"),
         gripper_state_joint=9,
         gripper_open_position=config.gripper_goal_position_open_franka,
         gripper_closed_position=config.gripper_goal_position_closed_franka,
@@ -66,6 +79,7 @@ def franka_profile():
         genesis_kp=[4500, 4500, 3500, 3500, 2000, 2000, 2000, 100, 100],
         genesis_kv=[450, 450, 350, 350, 200, 200, 200, 10, 10],
         genesis_force_range=[87, 87, 87, 87, 12, 12, 12, 100, 100],
+        links_to_keep=("panda_link8", "panda_hand", "panda_grasptarget"),
     )
 
 

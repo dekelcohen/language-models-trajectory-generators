@@ -146,8 +146,14 @@ class SimAdapter(ABC):
     # ------------------------------------------------------------------ bodies
     @abstractmethod
     def load_urdf(self, path: str, position=None, orientation_q=None,
-                  fixed_base: bool = False, scaling: float = 1.0) -> Any:
-        """Load a URDF and return an opaque body handle. ``orientation_q`` is xyzw."""
+                  fixed_base: bool = False, scaling: float = 1.0,
+                  links_to_keep=None) -> Any:
+        """Load a URDF and return an opaque body handle. ``orientation_q`` is xyzw.
+
+        ``links_to_keep`` names links that must survive the simulator's fixed-joint
+        merging. PyBullet never merges and ignores it; Genesis merges by default, which
+        would delete exactly the links the app looks up by name.
+        """
 
     @abstractmethod
     def remove_body(self, body: Any) -> None:
@@ -225,6 +231,18 @@ class SimAdapter(ABC):
                 return info.index
         return None
 
+    def get_joint_child_link(self, body: Any, joint: Any) -> Any:
+        """Link handle driven by ``joint``.
+
+        In PyBullet joint ``i`` always drives link ``i``, so callers historically used
+        a joint index directly as a link index. That identity does **not** hold on
+        Genesis (fixed joints are dropped from the joint table while their links
+        remain), so any caller that needs "where is the link this joint moves" must go
+        through here instead of reusing the index.
+        """
+        info = self.get_joint_info(body, joint)
+        return self.get_link_index_by_name(body, info.child_link_name)
+
     def list_joint_names(self, body: Any) -> Dict[str, Any]:
         return {i.name: i.index for i in
                 (self.get_joint_info(body, j) for j in range(self.num_joints(body)))}
@@ -260,6 +278,16 @@ class SimAdapter(ABC):
     def set_joint_velocity(self, body: Any, joint: Any, target_velocity: float,
                            force: Optional[float] = None) -> None:
         ...
+
+    def configure_motor_gains(self, body: Any, joints: Sequence[Any],
+                              kp=None, kv=None, force_range=None) -> None:
+        """Install position-control gains. No-op where the simulator has implicit ones.
+
+        PyBullet's ``POSITION_CONTROL`` has built-in gains; Genesis has none, and an arm
+        with no ``kp``/``kv`` simply does not track its target. Values come from
+        :class:`robot_profiles.RobotProfile` so this stays data, not code.
+        """
+        return None
 
     @abstractmethod
     def inverse_kinematics(self, body: Any, link: Any, position,
@@ -304,6 +332,16 @@ class SimAdapter(ABC):
     @abstractmethod
     def render_camera(self, width: int, height: int, view_matrix, projection_matrix) -> CameraFrame:
         ...
+
+    def reserve_camera(self, width: int, height: int, fov: Optional[float] = None,
+                       near: Optional[float] = None, far: Optional[float] = None) -> None:
+        """Declare a render resolution before :meth:`build`. No-op where not needed.
+
+        Genesis' ``scene.add_camera`` is forbidden once the scene is built, so every
+        resolution the app will render at must be known in advance. PyBullet can create a
+        camera per call and ignores this.
+        """
+        return None
 
     # ------------------------------------------------------------------ viewer & debug draw
     def reset_viewer_camera(self, distance: float, yaw: float, pitch: float, target) -> None:
