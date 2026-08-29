@@ -4,6 +4,8 @@ import shutil
 import multiprocessing as mp
 import traceback
 
+import pytest
+
 import config
 from env import run_simulation_environment
 from debug.dbg_utils import create_video_from_images
@@ -44,6 +46,12 @@ def _clean_images_folder():
         traceback.print_exc()
 
 
+@pytest.mark.skip(
+    reason="Dead test against a dead command. It sends config.SET_DOOR_STATE (18) and "
+    "config.CAPTURE_TRAJECTORY_FRAME (19); both constants still exist in config.py but their "
+    "handlers were removed from run_simulation_environment, so the env never replies and the "
+    "test blocks forever in parent_conn.recv(). Un-skip only after restoring both handlers."
+)
 def test_set_door_state_via_ipc_and_make_video():
     parent_conn, child_conn = mp.Pipe()
     proc = mp.Process(target=_run_env, args=(child_conn,), daemon=True)

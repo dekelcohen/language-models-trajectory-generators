@@ -10,6 +10,7 @@ import config
 import math
 from robot import Robot
 from common_utils import Trajectory
+from debug import trace_utils
 from providers.env_sim_util import _rotmat_to_quat_xyzw
 from sim_envs.registry import get_simenv
 from config import OK, PROGRESS, FAIL, ENDC
@@ -394,6 +395,33 @@ def step_env_and_record_loop(env, robot):
     # Force one final frame after the 100-step settling period
     robot.step_env_and_record(env, force_record=True)    
                 
+class _TracingConnection:
+    """Delegates to the real connection while recording every message.
+
+    Wrapping the connection instead of editing each handler keeps the IPC contract
+    captured in one place, which is what the before/after refactor diff compares.
+    Inert unless ``LMTG_TRACE`` is set.
+    """
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def send(self, payload):
+        trace_utils.trace_value("ipc.send", payload)
+        return self._connection.send(payload)
+
+    def recv(self, *a, **kw):
+        payload = self._connection.recv(*a, **kw)
+        trace_utils.trace_value("ipc.recv", payload)
+        return payload
+
+    def poll(self, *a, **kw):
+        return self._connection.poll(*a, **kw)
+
+    def __getattr__(self, item):
+        return getattr(self._connection, item)
+
+
 def run_simulation_environment(args, env_connection, logger):
 
     # Environment set-up
@@ -401,6 +429,9 @@ def run_simulation_environment(args, env_connection, logger):
     logger = init_loguru_logger("env_pybullet.log")
                     
     logger.info(PROGRESS + "Setting up environment..." + ENDC)
+
+    env_connection = _TracingConnection(env_connection)
+    trace_utils.set_context(sim="pybullet", task=getattr(args, "task", None), robot=getattr(args, "robot", None))
 
     physics_client = p.connect(p.DIRECT) # Dekel: Changed for headless offscreen (no GUI) - was p.GUI
     p.setAdditionalSearchPath(pybullet_data.getDataPath())

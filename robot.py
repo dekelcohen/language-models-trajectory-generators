@@ -4,6 +4,7 @@ import os
 import math
 import config
 from config import OK, PROGRESS, FAIL, ENDC
+from debug import trace_utils
 from helpers.image_utils import draw_text_overlay_image
 from sim_envs.pybullet.pb_utils import spherical_camera_pose
 from PIL import Image
@@ -79,6 +80,7 @@ class Robot:
             
         return effort
     
+    @trace_utils.traced("Robot.step_env_and_record", args=False, result=False)
     def step_env_and_record(self, env, force_record=False):
         """
         steps (adv) the env and captures image - only if robot moved + 1 frame per settele (inertia). anyway no more that 5 fps.
@@ -141,6 +143,7 @@ class Robot:
             
             self.trajectory_step += 1    
 		
+    @trace_utils.traced("Robot.move")
     def move(self, env, ee_target_position, ee_target_orientation_e, gripper_open, is_trajectory, desc=None):
 
         if desc is not None:
@@ -256,6 +259,7 @@ class Robot:
         self.step_env_and_record(env, force_record=True)
 
 
+    @trace_utils.traced("Robot.get_camera_image")
     def get_camera_image(self, camera, env, save_camera_image, rgb_image_path, depth_image_path):
         """
         
