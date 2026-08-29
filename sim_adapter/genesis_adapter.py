@@ -57,6 +57,16 @@ _GS_INITIALISED = False
 #: pybullet_data being importable in the Genesis interpreter.
 _PLANE_URDFS = ("plane.urdf", "plane_implicit.urdf", "plane100.urdf")
 
+#: Exposure, tuned so a Genesis capture has roughly the same brightness as the PyBullet
+#: one for the same scene and camera. Override per run with LMTG_GENESIS_AMBIENT.
+VIS_AMBIENT_LIGHT = tuple(
+    float(v) for v in os.environ.get("LMTG_GENESIS_AMBIENT", "0.30,0.30,0.30").split(","))
+VIS_BACKGROUND_COLOR = (0.85, 0.88, 0.92)
+VIS_LIGHT_INTENSITY = float(os.environ.get("LMTG_GENESIS_LIGHT_INTENSITY", "4.0"))
+#: Ground colour, chosen to sit near PyBullet's light-blue checker plate.
+PLANE_COLOR = tuple(
+    float(v) for v in os.environ.get("LMTG_GENESIS_PLANE_COLOR", "0.62,0.66,0.74").split(","))
+
 
 def _log(message):
     """Single funnel for adapter diagnostics.
@@ -187,6 +197,17 @@ class GenesisAdapter(SimAdapter):
         kwargs = {
             "sim_options": gs.options.SimOptions(dt=self._dt, gravity=self._gravity),
             "show_viewer": self._gui,
+            # Genesis defaults to a dark, near-black studio (ambient 0.1, background
+            # 0.04/0.08/0.12). PyBullet's TinyRenderer is much brighter, and the whole
+            # downstream pipeline is a VLM looking at these frames - underexposed
+            # captures measurably degrade segmentation. Match PyBullet's exposure.
+            "vis_options": gs.options.VisOptions(
+                ambient_light=VIS_AMBIENT_LIGHT,
+                background_color=VIS_BACKGROUND_COLOR,
+                shadow=True,
+                lights=[{"type": "directional", "dir": (-1.0, -1.0, -1.0),
+                         "color": (1.0, 1.0, 1.0), "intensity": VIS_LIGHT_INTENSITY}],
+            ),
         }
         if self._gui:
             eye, _ = spherical_camera_pose(
@@ -240,6 +261,25 @@ class GenesisAdapter(SimAdapter):
             path = os.environ.get("LMTG_ASSET_ROOT")
         self._asset_root = path
         _log(f"asset search path = {path}")
+
+    def _plane_surface(self):
+        """Ground surface that looks like PyBullet's, not Genesis' dark default.
+
+        Everything downstream of a capture is a vision model, so the floor is not
+        cosmetic: Genesis' near-black default checkerboard drags the exposure of the
+        whole frame down. Reuse PyBullet's own ``checker_blue.png`` when it is reachable
+        through ``LMTG_ASSET_ROOT``, and fall back to a flat light colour when it is not.
+        """
+        import genesis as gs
+
+        if self._asset_root:
+            texture_path = os.path.join(self._asset_root, "checker_blue.png")
+            if os.path.exists(texture_path):
+                _log(f"plane textured from '{texture_path}'")
+                return gs.surfaces.Default(
+                    diffuse_texture=gs.textures.ImageTexture(image_path=texture_path))
+        _log(f"plane using flat colour {PLANE_COLOR} (checker_blue.png not found)")
+        return gs.surfaces.Default(color=PLANE_COLOR)
 
     def step(self):
         self._ensure_scene().step()
@@ -311,7 +351,8 @@ class GenesisAdapter(SimAdapter):
             # PyBullet's plane.urdf is a large textured plate; Genesis' Plane morph is the
             # semantic equivalent and needs no pybullet_data on this interpreter.
             _log(f"'{path}' mapped to gs.morphs.Plane()")
-            return self._register(scene.add_entity(gs.morphs.Plane()), path)
+            return self._register(
+                scene.add_entity(gs.morphs.Plane(), surface=self._plane_surface()), path)
 
         kwargs = {
             "file": self._resolve_asset(path),
