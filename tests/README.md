@@ -125,6 +125,41 @@ Two further facts, also asserted:
   must recompute `inv(camera.transform)` on every capture and never read `extrinsics`. The
   test is a canary — it fails if Genesis ever fixes this.
 
+## Cross-simulator parity — `test_genesis_vs_pybullet.py`
+
+Answers "same dims/meaning?" numerically instead of by inspection. Run under `vlm_genesis`
+against the `pybullet_{door,grasp}.json` goldens in `tests/golden/cross_sim/`, produced by
+`tests/tools/dump_sim_state.py` (see its module docstring for the exact regen commands —
+one invocation per interpreter, since PyBullet and Genesis can't share a process).
+
+| Kind | Tolerance | Why |
+|---|---|---|
+| Camera matrices (view/projection) | `atol=1e-5` | Pure math; float32 round-trip through Genesis' renderer. |
+| Static scene positions (door frame/handle/hinge, pole) | `atol=1e-3` | Both sims place these from the same URDF; a real divergence here is a bug. |
+| Settled arm (EE pos/joints, 180 steps) | `atol=2e-2` / `5e-2` | Two different solvers/integrators/contact models; physical agreement, not bit-exactness, is the honest bar. |
+
+Index tables (link/joint numbering) are deliberately **not** compared — PyBullet and
+Genesis genuinely disagree on numbering, which is exactly why the app layer resolves
+everything by name (`JointInfo`, `get_link_index_by_name`, ...).
+
+## IPC contract — `test_ipc_contract.py`
+
+The *shape* counterpart to the numeric tests above: every live IPC command
+(`EXECUTE_TRAJECTORY`, `CAPTURE_IMAGES`, `OPEN_GRIPPER`, `CLOSE_GRIPPER`, `GET_STATE`,
+`GET_ROBOT_STATE`, `RESET_EEF`, `VISUALIZE_GRASP_POSE`, `VISUALIZE_BOUNDING_BOX`, ...) is
+sent over the **real transport** both sims use in production, and the reply's keys/types/
+shapes are asserted — never exact floats, since `run_simulation_environment` free-runs
+`env.update()` and no float is reproducible across runs (that's what
+`test_pybullet_regression.py` and `test_genesis_vs_pybullet.py` are for).
+
+* `TestPyBulletIpcContract` — subprocess of the current interpreter, `multiprocessing.Pipe`.
+* `TestGenesisIpcContract` — child in the `vlm_genesis` interpreter, JSON-lines TCP
+  (`providers/json_ipc.py` + `providers/genesis_launcher.py`); skipped if that interpreter
+  can't be resolved, so the suite stays green on a PyBullet-only machine.
+
+Both subclasses share one `IpcContractMixin`, so a new command gets its contract checked on
+both sims by adding one test method in one place.
+
 ## Baseline (recorded before the sim-adapter refactor)
 
 `vlm_traj`, repo root, one file per invocation.

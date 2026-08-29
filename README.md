@@ -41,6 +41,7 @@ This repository also contains the [full prompts](https://github.com/kwonathan/la
   - [Setting Your OpenAI API Key](#setting-your-openai-api-key)
   - [Starting the Simulator](#starting-the-simulator)
   - [Simulation Environments (`sim_envs/`)](#simulation-environments-sim_envs)
+  - [Simulators (PyBullet / Genesis / adding your own)](#simulators-pybullet--genesis--adding-your-own)
   - [Adding Other Robots](#adding-other-robots)
   - [Adding Other Objects](#adding-other-objects)
   - [Adding Other LLMs](#adding-other-llms)
@@ -166,7 +167,7 @@ The available arguments and their options are as follows:
 - `--language_model` or `-lm`: select the language model from `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-4` or `gpt-3.5-turbo`; default is `gpt-4o`. `gpt-4o` performs better than `gpt-4o-mini` but is slower and more expensive, and `gpt-4-turbo`, `gpt-4` and `gpt-3.5-turbo` are older versions of the GPT language model family. More model variants and details can be found [here](https://platform.openai.com/docs/models).
 - `--robot` or `-r`: select the robot from `sawyer`, or `franka`; default is `sawyer`, which was used for the real-world experiments.
 - `--mode` or `-m`: select the mode to run from `default`, or `debug`; default is `default`. The `debug` mode will start the PyBullet simulator with various debug windows which may be useful for visualisation.
-- `--task`: select the scene/task. For the MetaWorld backend (`-s metaworld`) this is the MetaWorld env id. For PyBullet it selects a **sim-env profile** (see below): `grasp`, `door` (aliases `sawyer_door_v3`, `franka_door`), or a namespaced Franka Kitchen task `franka_kitchen:<microwave|kettle|slide_cabinet|hinge_cabinet|light_switch|top_burner|bottom_burner>`. Franka Kitchen tasks force `-r franka`. An unknown id fails with the list of valid ones.
+- `--task`: select the scene/task. For the (legacy, unmaintained) MetaWorld backend (`-s metaworld`) this is the MetaWorld env id. For PyBullet/Genesis (`-s pybullet`/`-s genesis` — see [Simulators](#simulators-pybullet--genesis--adding-your-own)) it selects a **sim-env profile** (see below): `grasp`, `door` (aliases `sawyer_door_v3`, `franka_door`), or a namespaced Franka Kitchen task `franka_kitchen:<microwave|kettle|slide_cabinet|hinge_cabinet|light_switch|top_burner|bottom_burner>`. Franka Kitchen tasks force `-r franka`. An unknown id fails with the list of valid ones. `grasp` and `door` run identically on both PyBullet and Genesis.
 - `--list-tasks`: print every selectable PyBullet sim-env task id (grouped by suite) and exit. The list is read from the registry, so it is always current:
 ```
 python main.py --list-tasks
@@ -221,6 +222,67 @@ Here, enter a command such as `pick the fruit in the middle`, or `place the appl
 Thereafter, no further human input is required.
 
 After task execution, if the task was completed successfully, you will be able to enter another command. Note that this may result in exceeding the context length limit, as the new command is appended to the previous outputs of the LLM.
+
+### Simulators (PyBullet / Genesis / adding your own)
+
+`main.py --sim {pybullet,genesis}` selects the physics engine (default `pybullet`). Both
+back onto the **same** app logic (`env.py` / `robot.py` / `sim_envs/*`) through
+`sim_adapter.SimAdapter` — a single abstract interface for load/step/render/debug-draw
+primitives. Adding a scene or robot never means touching a simulator's API directly; you
+call `self.sim.<primitive>()` and the adapter for the active `--sim` does the rest.
+
+```
+sim_adapter/
+  base.py            SimAdapter ABC - the one interface env.py/robot.py talk to
+  pybullet_adapter.py PyBulletAdapter - thin wrapper over `pybullet`
+  genesis_adapter.py  GenesisAdapter - thin wrapper over `genesis`
+  camera_math.py      shared projection/view-matrix math (no simulator import)
+  transforms.py       quaternion/euler convention conversions (xyzw<->wxyz, rad<->deg)
+sim_envs/
+  genesis/genesis_env.py   Genesis child-process bootstrap (own conda env; see below)
+```
+
+**PyBullet** runs in-process. **Genesis** needs its own conda env (`vlm_genesis` by
+default — its dependencies collide with this repo's pinned `requirements.txt`), so it runs
+as a child process talked to over a JSON-lines TCP transport
+(`providers/json_ipc.py` + `providers/genesis_launcher.py`), the same pattern used for the
+legacy MetaWorld server. Configure it the way `METAWORLD_PYTHON` is configured, via
+environment variables (see `tests/README.md` for the full table):
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `GENESIS_PYTHON` | *(unset)* | Absolute path to the interpreter; wins over everything |
+| `GENESIS_CONDA_ENV` | `vlm_genesis` | Conda env name to auto-discover |
+| `GENESIS_HOST` / `GENESIS_PORT` | `127.0.0.1` / `8770` | Where the child serves IPC |
+
+Any scene can be inspected interactively in either simulator, without the LLM stack:
+```bash
+python env.py --task door --sim pybullet              # PyBullet GUI (in-process)
+<vlm_genesis>/python.exe sim_envs/genesis/genesis_env.py --task door   # Genesis GUI (own env)
+<vlm_genesis>/python.exe sim_envs/genesis/genesis_env.py --task door --direct  # headless
+```
+
+**Adding a third simulator (e.g. MuJoCo)** means implementing `SimAdapter` — nothing in
+`env.py`, `robot.py` or `sim_envs/*` should need to change. In practice:
+* Implement every `SimAdapter` abstract method (`sim_adapter/base.py`); reuse
+  `camera_math.py`/`transforms.py` wherever the convention differs from PyBullet's
+  (radians/xyzw/plain floats), the same way `GenesisAdapter` does for wxyz/degrees/tensors.
+  MuJoCo's own quaternion convention is wxyz (like Genesis), so `transforms.py` needs no
+  changes, just a call site.
+* Register it in `sim_adapter/factory.py` and `sim_adapter.SUPPORTED_SIMS`.
+* Decide in-process vs. child-process. If MuJoCo's Python bindings can share this repo's
+  `requirements.txt`, it can run in-process like PyBullet (simpler); if it needs
+  conflicting pins, mirror the Genesis child-process pattern
+  (`providers/genesis_launcher.py` + `sim_envs/genesis/genesis_env.py` are templates —
+  swap the launched script and the `import genesis` guard).
+* Add `tests/test_mujoco_vs_pybullet.py` on the `dump_sim_state.py` pattern (same goldens,
+  same tolerance split) and a `TestMujocoIpcContract` in `test_ipc_contract.py`
+  (`IpcContractMixin` is already shared, sim-agnostic).
+* Confirm depth semantics up front (`SimAdapter.depth_encoding`): MuJoCo's offscreen
+  renderer returns linear depth like Genesis (`DEPTH_LINEAR_METRIC`), not PyBullet's
+  non-linear `[0,1]` z-buffer (`DEPTH_OPENGL`) — get this wrong and 3D unprojection is
+  silently corrupted rather than crashing (see `tests/test_genesis_camera_semantics.py`
+  for how this was pinned for Genesis).
 
 ### Adding Other Robots
 

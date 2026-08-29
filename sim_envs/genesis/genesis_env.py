@@ -12,11 +12,17 @@ takes effect on both simulators.
 
 Two modes:
 
-* server (default) - accept the parent's connection, then run the shared app loop.
-* ``--gui`` with no ``--port`` - open the interactive Genesis viewer and idle, the
-  Genesis twin of ``env.run_sim_demo``. Useful for eyeballing a scene by hand::
+* server - pass ``--port``; accepts the parent's connection, then runs the shared app
+  loop.
+* standalone (default, no ``--port``) - open the interactive Genesis viewer and idle,
+  the Genesis twin of ``env.run_sim_demo``. Mirrors ``env.py``'s own CLI convention
+  (GUI unless told otherwise), so plain::
 
-      python sim_envs/genesis/genesis_env.py --task door --gui
+      python sim_envs/genesis/genesis_env.py --task door
+
+  opens a viewer. Pass ``--direct`` for a headless smoke test instead::
+
+      python sim_envs/genesis/genesis_env.py --task door --direct
 """
 
 import argparse
@@ -45,7 +51,12 @@ def build_arg_parser():
     parser.add_argument("--robot", default="franka", help="Robot model (franka only for now).")
     parser.add_argument("--mode", default="default", help="Env mode, forwarded to env.Environment.")
     parser.add_argument("--gui", action="store_true",
-                        help="Open the interactive Genesis viewer instead of rendering headless.")
+                        help="No-op kept for backward compatibility: standalone mode "
+                             "(no --port) already opens the viewer by default. Use "
+                             "--direct to opt out.")
+    parser.add_argument("--direct", action="store_true",
+                        help="Standalone mode only: run headless instead of opening the "
+                             "interactive Genesis viewer (mirrors env.py's --direct).")
     parser.add_argument("--backend", default=None,
                         help="Genesis backend override: cpu | gpu | vulkan | metal.")
     return parser
@@ -96,11 +107,19 @@ def run_server(args):
 
 
 def run_gui_demo(args):
-    """Standalone interactive viewer - the Genesis twin of ``env.run_sim_demo``."""
+    """Standalone interactive viewer - the Genesis twin of ``env.run_sim_demo``.
+
+    Mirrors ``env.py``'s own CLI: GUI by default, headless only with ``--direct``.
+    Bug fix: this used to forward the (default-``False``) ``--gui`` flag straight
+    through, so plain ``python sim_envs/genesis/genesis_env.py`` silently ran
+    headless and exited instead of opening a viewer.
+    """
     import env as envmod
 
-    print(f"[GenesisEnv] GUI demo: task={args.task}", flush=True)
-    envmod.run_sim_demo(task_p=args.task, gui=args.gui, sim_name="genesis")
+    gui = not args.direct
+    tag = "GUI" if gui else "headless"
+    print(f"[GenesisEnv] {tag} demo: task={args.task}", flush=True)
+    envmod.run_sim_demo(task_p=args.task, gui=gui, sim_name="genesis")
 
 
 def main(argv=None):

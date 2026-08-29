@@ -224,9 +224,14 @@ class GenesisAdapter(SimAdapter):
         return self.scene
 
     def disconnect(self):
+        global _GS_INITIALISED
         try:
             import genesis as gs
             gs.destroy()
+            # gs.init() is process-global and gs.destroy() undoes it, so the latch has to
+            # come back down or a second connect() in the same process builds a Scene
+            # against a torn-down runtime ("Genesis hasn't been initialized").
+            _GS_INITIALISED = False
         except Exception as exc:
             _log(f"disconnect: gs.destroy() failed ({exc})")
         self.scene = None

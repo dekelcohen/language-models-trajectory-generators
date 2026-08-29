@@ -36,10 +36,19 @@ def _jsonable(value):
 
 
 def snapshot(sim_name, task, settle_steps):
+    import importlib
     import config
-    # The grasp object is randomised at import time; pin it so the two sims agree.
-    config.target_grasp_obj_start_position = [-0.2, 0.4, 0.1]
-    config.target_grasp_obj_start_orientation_e = [0, 0, 0]
+
+    # Sim-env profiles reconfigure camera and robot poses by writing straight into the
+    # config module, and those writes outlive the scene. Taking two snapshots in one
+    # process would otherwise stage the second task with the first task's camera - a
+    # divergence that looks exactly like a simulator bug. Reload for a clean slate.
+    importlib.reload(config)
+
+    # config.RANDOM_TARGET_GRASP_OBJ_POSE randomises the grasp object at *import* time,
+    # so two interpreters would otherwise stage different scenes and never agree.
+    config.object_start_position = [-0.2, 0.4, 0.1]
+    config.object_start_orientation_e = [0.0, 0.0, 0.0]
 
     import env as envmod
     from robot import Robot
