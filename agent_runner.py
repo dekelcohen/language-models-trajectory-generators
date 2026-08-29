@@ -196,7 +196,25 @@ def _setup_metaworld_ws(args, logger):
     return conn, _p
 
 
-def _safe_terminate(proc, logger, name="Metaworld WS server"):
+def _setup_genesis_subproc(args, logger):
+    """Launch the Genesis child process and return ``(connection, process)``.
+
+    Genesis runs under its own interpreter (``vlm_genesis`` by default, overridable with
+    ``GENESIS_PYTHON`` / ``GENESIS_CONDA_ENV``) because its dependency set collides with
+    this repo's pinned ``requirements.txt``. All of that resolution lives in
+    ``providers.genesis_launcher`` so there is a single place to change it.
+    """
+    from providers.genesis_launcher import launch_genesis_child
+
+    proc, host, port, _python_exe = launch_genesis_child(args, logger)
+
+    from providers.json_ipc import JsonIpcConnection
+    conn = JsonIpcConnection(host, port, timeout=getattr(args, "timeout", None))
+    conn.wait_until_ready(process=proc, timeout=120)
+    return conn, proc
+
+
+def _safe_terminate(proc, logger, name="simulator child process"):
     try:
         if proc is None:
             return
@@ -420,8 +438,16 @@ def init_agent(args, logger):
         env_process.start()
         ee_pos_for_prompt, _msg, coords_section, sim_state = read_env_handshake(main_connection, logger, ee_pos_for_prompt)
         process_cli_viz_point_arg(args, main_connection, logger)
-    else:
+    elif args.sim == "genesis":
+        main_connection, server_proc = _setup_genesis_subproc(args, logger)
+        ee_pos_for_prompt, _msg, coords_section, sim_state = read_env_handshake(main_connection, logger, ee_pos_for_prompt)
+        process_cli_viz_point_arg(args, main_connection, logger)
+    elif args.sim == "metaworld":
         main_connection, server_proc = _setup_metaworld_ws(args, logger)
+    else:
+        raise ValueError(
+            f"Unknown --sim {args.sim!r}. Supported: 'pybullet', 'genesis', 'metaworld'."
+        )
 
     if coords_section is None:
         coords_section = config.three_d_coordinates_prompt_section
@@ -461,7 +487,7 @@ def teardown_agent(ctx):
             ctx.main_connection.close()
     except Exception:
         pass
-    _safe_terminate(ctx.server_proc, logger)
+    _safe_terminate(ctx.server_proc, logger, name=f"{getattr(ctx.args, 'sim', 'simulator')} child process")
     try:
         if ctx.env_process is not None and ctx.env_process.is_alive():
             ctx.env_process.terminate()

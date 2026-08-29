@@ -37,7 +37,7 @@ def build_arg_parser():
     parser.add_argument("--llm-cache", dest="llm_cache_enabled", action=argparse.BooleanOptionalAction, default=True, help="cache LLM responses on disk (default: True, use --no-llm-cache to disable)")
     parser.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")
     parser.add_argument("-m", "--mode", choices=["default", "debug"], default="default", help="select mode to run")
-    parser.add_argument("-s", "--sim", choices=["pybullet", "metaworld"], default="pybullet", help="select simulator backend")
+    parser.add_argument("-s", "--sim", choices=["pybullet", "genesis", "metaworld"], default="pybullet", help="select simulator backend (genesis runs in its own conda env; see GENESIS_PYTHON / GENESIS_CONDA_ENV)")
     parser.add_argument("--transport", choices=["auto", "pipe", "ws"], default="auto", help="connection transport override; auto: pipe for pybullet, ws for metaworld")
     parser.add_argument("--task", type=str, default="sawyer_door_v3",
                         help="task/environment name. Metaworld (-s metaworld): the Metaworld env id. "

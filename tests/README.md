@@ -5,7 +5,40 @@
 | Suite | Conda env | Notes |
 |---|---|---|
 | PyBullet suites (everything below today) | `vlm_traj` | `C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_traj\python.exe` |
-| Genesis suites (`test_genesis_*.py`, planned) | `vlm_genesis` | Genesis needs `Pillow>11`, `mujoco`, `numba`, ... which collide with `vlm_traj`; it therefore lives in its own env and runs as a child process. |
+| Genesis suites (`test_genesis_*.py`, planned) | `vlm_genesis` | Genesis needs `Pillow>11`, `numpy>=2`, `mujoco`, `numba`, ... which collide with this repo's pinned `requirements.txt` (`Pillow==10.1.0`, `numpy==1.26.2`); it therefore lives in its own env and runs as a child process. |
+
+`tests/test_genesis_launcher.py` runs under `vlm_traj` and does **not** require Genesis.
+
+### Selecting the Genesis interpreter
+
+`providers/genesis_launcher.py` is the single place that decides which interpreter runs the
+Genesis child, mirroring how `METAWORLD_PYTHON` works — but stricter (see below).
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `GENESIS_PYTHON` | *(unset)* | Absolute path to the interpreter. Wins over everything. |
+| `GENESIS_CONDA_ENV` | `vlm_genesis` | Name of the conda env to auto-discover. |
+| `GENESIS_HOST` | `127.0.0.1` | Host the child serves IPC on. |
+| `GENESIS_PORT` | `8770` | Port the child serves IPC on. |
+
+Resolution order: `GENESIS_PYTHON` → conda env named `GENESIS_CONDA_ENV` → the current
+interpreter, but *only* if it can actually `import genesis`. Otherwise it raises
+`GenesisInterpreterNotFound` with the list of directories searched and the exact commands
+to fix it.
+
+Unlike `METAWORLD_PYTHON` — which falls back to `sys.executable` — an explicitly configured
+but missing `GENESIS_PYTHON` is a hard error. Falling back would launch Genesis under the
+main app's env, where `import genesis` fails inside the child with a traceback that hides
+the real cause.
+
+Check what it resolves to:
+
+```powershell
+& ...\vlm_traj\python.exe -m providers.genesis_launcher
+```
+
+`--sim genesis` is now an explicit branch in `agent_runner.init_agent`; previously any
+unrecognised `--sim` value silently fell through to the obsolete Metaworld path.
 
 Always run from the repository root — the sim-envs load URDFs via relative paths.
 
@@ -78,6 +111,7 @@ $env:LMTG_TRACE = "D:\tmp\run.jsonl"
 | `test_env_direct.py` | 1 passed | 1 s |
 | `test_2d_pixel_coords_to_3d_world_coords.py` | 1 passed, 8 subtests passed | 11 s |
 | `test_pybullet_regression.py` | 1 passed, 2 subtests passed | 10 s |
+| `test_genesis_launcher.py` | 26 passed | 1 s |
 | `test_franka_kitchen_ipc.py` | 6 passed | 19 s |
 | `test_franka_kitchen_head_camera.py` | 21 passed | 13 s |
 | `test_adroit_door_ipc.py` | **skipped** (hung before; see below) | — |
