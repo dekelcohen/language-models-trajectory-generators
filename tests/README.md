@@ -100,6 +100,31 @@ $env:LMTG_TRACE = "D:\tmp\run.jsonl"
 & ...\vlm_traj\python.exe main.py --task door ...
 ```
 
+## Genesis camera semantics — measured, not assumed
+
+`tests/test_genesis_camera_semantics.py` (runs under `vlm_genesis`, skips elsewhere) pins
+the four facts the Genesis camera adapter rests on. Each would otherwise fail as *subtly
+wrong 3D coordinates* rather than as a crash. Measured against Genesis **1.3.3**:
+
+| Question | Answer | Consequence |
+|---|---|---|
+| `camera.projection_matrix` vs `p.computeProjectionMatrixFOV` | **Identical, transposed** (diff `0.0`) | Same dims (4x4) and same meaning. `flatten(order='F')` gives PyBullet's exact 16-vector, so `utils.get_intrinsics_extrinsics` needs no Genesis branch. |
+| `inv(camera.transform)` vs `p.computeViewMatrix` | **Identical, transposed** (diff `6.9e-08`) | Same. The residual is float32 precision — cross-sim matrix tolerance must be `~1e-5`, not `1e-9`. |
+| Depth encoding | **Linear metric `z_eye`** (metres along the optical axis) | *Not* euclidean range, *not* OpenGL non-linear `[0,1]`. Verified by rendering a plane perpendicular to the optical axis: all 65 536 pixels read one value (`unique_count == 1`), 1.9999847 for a 2.0 m camera height. Euclidean range would have spread the corners by ~0.56 m. `utils.get_world_point_world_frame` assumes the OpenGL form, hence the `depth_encoding="linear_metric"` branch. |
+| Background / no-hit pixels | **`~far`** (99.9786 for `far=100`), never `0`, `NaN` or `inf` | No-hit pixels are detectable by thresholding near `far`; unprojecting them would emit bogus world points. |
+
+Two further facts, also asserted:
+
+* **Debug markers *do* render into offscreen captures** when the camera is created with
+  `debug=True` (`vis/rasterizer.py`: `skip_markers = not camera.debug`). 3 460 of 65 536
+  pixels changed after one `draw_debug_sphere`, and `clear_debug_object` restored the frame
+  exactly. This is why the PyBullet massless-MultiBody marker hack is **not** needed on
+  Genesis.
+* **`camera.extrinsics` is a `@cached_property` that goes stale**: after a `set_pose` that
+  moved `camera.transform` by 1.707, `camera.extrinsics` changed by **0.0**. The adapter
+  must recompute `inv(camera.transform)` on every capture and never read `extrinsics`. The
+  test is a canary — it fails if Genesis ever fixes this.
+
 ## Baseline (recorded before the sim-adapter refactor)
 
 `vlm_traj`, repo root, one file per invocation.
@@ -112,6 +137,7 @@ $env:LMTG_TRACE = "D:\tmp\run.jsonl"
 | `test_2d_pixel_coords_to_3d_world_coords.py` | 1 passed, 8 subtests passed | 11 s |
 | `test_pybullet_regression.py` | 1 passed, 2 subtests passed | 10 s |
 | `test_genesis_launcher.py` | 26 passed | 1 s |
+| `test_genesis_camera_semantics.py` | 7 passed *(under `vlm_genesis`)* / 7 skipped *(under `vlm_traj`)* | 10 s |
 | `test_franka_kitchen_ipc.py` | 6 passed | 19 s |
 | `test_franka_kitchen_head_camera.py` | 21 passed | 13 s |
 | `test_adroit_door_ipc.py` | **skipped** (hung before; see below) | — |
