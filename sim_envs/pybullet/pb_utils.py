@@ -1,42 +1,16 @@
-"""Small PyBullet lookup helpers shared by sim-env profiles."""
+"""Small PyBullet lookup helpers shared by sim-env profiles.
 
-import math
+Note: ``spherical_camera_pose`` moved to :mod:`sim_adapter.camera_math` (it is pure math
+and both simulators need it); it is re-exported here so existing imports keep working.
+The name lookups below remain for ``franka_kitchen``, which still talks to PyBullet
+directly. New code should use ``SimAdapter.get_joint_index_by_name`` / ``list_joint_names``.
+"""
+
 import traceback
 
 import pybullet as p
 
-
-def spherical_camera_pose(target, distance, yaw_deg, pitch_deg):
-    """Return (camera_position, camera_orientation_euler) for PyBullet's
-    yaw/pitch spherical camera convention.
-
-    This must match ``p.computeViewMatrixFromYawPitchRoll(target, distance,
-    yaw, pitch, 0, upAxisIndex=2)`` and ``p.resetDebugVisualizerCamera``:
-
-        forward = (-cos(pitch) * sin(yaw), cos(pitch) * cos(yaw), sin(pitch))
-        camera  = target - distance * forward
-
-    i.e. yaw=0 places the camera on -y looking towards +y, and yaw increases
-    clockwise when seen from above. Note this is rotated 90 degrees from the
-    naive ``(cos(pitch)cos(yaw), cos(pitch)sin(yaw), sin(pitch))`` spherical
-    formula, which silently reports a camera position that does not match the
-    view matrix actually used for rendering.
-    """
-    yaw = math.radians(float(yaw_deg))
-    pitch = math.radians(float(pitch_deg))
-    tx, ty, tz = list(map(float, target))
-    fx = -math.cos(pitch) * math.sin(yaw)
-    fy = math.cos(pitch) * math.cos(yaw)
-    fz = math.sin(pitch)
-    position = [
-        float(tx - distance * fx),
-        float(ty - distance * fy),
-        float(tz - distance * fz),
-    ]
-    # Euler orientation of the camera's optical (+z) axis, matching the
-    # convention used by the non-spherical head-camera branch in robot.py.
-    orientation_e = [0.0, float(pitch), float(math.atan2(fy, fx))]
-    return position, orientation_e
+from sim_adapter.camera_math import spherical_camera_pose  # noqa: F401  (re-export)
 
 
 def get_joint_index_by_name(body_id, joint_name):

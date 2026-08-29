@@ -49,10 +49,12 @@ class KitchenCameraProbe:
             task = f"franka_kitchen:{task_id}"
 
         self.logger = init_loguru_logger("kitchen_camera_tuning.log")
-        self.env = envmod.Environment(_Args)
+        from sim_adapter import get_adapter
+        self.sim = get_adapter("pybullet")
+        self.env = envmod.Environment(_Args, self.sim)
         self.env.simenv.configure_robot_pose()
         self.env.load()
-        self.robot = Robot(_Args, self.logger)
+        self.robot = Robot(_Args, self.logger, self.sim)
         self.robot.move(self.env, config.ee_start_position,
                         config.ee_start_orientation_e,
                         gripper_open=True, is_trajectory=False)

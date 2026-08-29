@@ -44,8 +44,11 @@ def list_task_ids():
     return ids
 
 
-def get_simenv(task_name):
+def get_simenv(task_name, sim=None):
     """Return a sim-env profile instance for ``task_name``.
+
+    ``sim`` is the :class:`~sim_adapter.base.SimAdapter` the profile issues its
+    primitives through; profiles never import a simulator themselves.
 
     Raises ValueError for an unknown suite or an unknown task within a known
     suite - silently falling back to the grasp scene would hide typos.
@@ -68,9 +71,13 @@ def get_simenv(task_name):
                 f"Unknown task '{task}' for suite '{suite}'. "
                 f"Valid tasks: {sorted(task_ids)}"
             )
-        return simenv_cls(task)
+        # Suite profiles take the task id; the adapter is injected afterwards so a
+        # suite that still talks to pybullet directly needs no signature change.
+        instance = simenv_cls(task)
+        instance.sim = sim
+        return instance
 
     lowered = name.lower()
     if any(k in lowered for k in _LEGACY_DOOR_KEYWORDS):
-        return SimEnvDoor()
-    return SimEnvGrasp()
+        return SimEnvDoor(sim)
+    return SimEnvGrasp(sim)

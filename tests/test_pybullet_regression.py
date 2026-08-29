@@ -77,13 +77,15 @@ def _boot(task_name):
     import env as env_module
     from robot import Robot
     from debug.dbg_utils import init_loguru_logger
+    from sim_adapter import get_adapter
 
     if p.isConnected():
         p.disconnect()
-    p.connect(p.DIRECT)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath())
-    p.setGravity(0, 0, -9.81)
-    p.loadURDF("plane.urdf")
+    sim = get_adapter("pybullet")
+    sim.connect(gui=False)
+    sim.set_asset_search_path()
+    sim.set_gravity(0, 0, -9.81)
+    sim.load_urdf("plane.urdf")
 
     args = _Args()
     args.task = task_name
@@ -95,10 +97,11 @@ def _boot(task_name):
     config.object_start_position = list(PINNED_OBJECT_START_POSITION)
     config.object_start_orientation_e = list(PINNED_OBJECT_START_ORIENTATION_E)
 
-    environment = env_module.Environment(args)
+    environment = env_module.Environment(args, sim)
     environment.simenv.configure_robot_pose()
     environment.load()
-    robot = Robot(args, init_loguru_logger("pybullet_regression.log"))
+    robot = Robot(args, init_loguru_logger("pybullet_regression.log"), sim)
+    sim.build()
     for _ in range(SETTLE_STEPS):
         environment.update()
     return environment, robot

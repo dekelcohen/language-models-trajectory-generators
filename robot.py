@@ -1,4 +1,3 @@
-import pybullet as p
 import numpy as np
 import os
 import math
@@ -6,33 +5,37 @@ import config
 from config import OK, PROGRESS, FAIL, ENDC
 from debug import trace_utils
 from helpers.image_utils import draw_text_overlay_image
-from sim_envs.pybullet.pb_utils import spherical_camera_pose
+from robot_profiles import get_robot_profile
+from sim_adapter import camera_math
+from sim_adapter.camera_math import spherical_camera_pose
 from PIL import Image
 from config import fov, aspect, near_plane, far_plane
 
 class Robot:
 
-    def __init__(self, args, logger):
+    def __init__(self, args, logger, sim):
         self.logger = logger
+        self.sim = sim
         self.desc = ""
+        self.profile = get_robot_profile(args.robot)
         if args.robot == "sawyer":
             self.base_start_position = config.base_start_position_sawyer
-            self.base_start_orientation_q = p.getQuaternionFromEuler(config.base_start_orientation_e_sawyer)
+            self.base_start_orientation_q = self.sim.quat_from_euler(config.base_start_orientation_e_sawyer)
             self.joint_start_positions = config.joint_start_positions_sawyer
-            self.id = p.loadURDF("sawyer_robot/sawyer_description/urdf/sawyer.urdf", self.base_start_position, self.base_start_orientation_q, useFixedBase=True)
+            self.id = self.sim.load_urdf(self.profile.urdf, self.base_start_position, self.base_start_orientation_q, fixed_base=True)
             self.robot = "sawyer"
-            self.ee_index = config.ee_index_sawyer
-            self.gripper_id = p.loadURDF("robotiq_2f_85/robotiq_2f_85.urdf", config.ee_start_position, p.getQuaternionFromEuler(config.ee_start_orientation_e))
+            self.ee_index = self.profile.ee_index
+            self.gripper_id = self.sim.load_urdf("robotiq_2f_85/robotiq_2f_85.urdf", config.ee_start_position, self.sim.quat_from_euler(config.ee_start_orientation_e))
             self.gripper_motor = config.robotiq_motor_joint
-            p.createConstraint(self.id, self.ee_index, self.gripper_id, 0, jointType=p.JOINT_FIXED, jointAxis=[0, 0, 0], parentFramePosition=[0, 0, 0], childFramePosition=[0, 0, -0.07], childFrameOrientation=p.getQuaternionFromEuler([0, 0, 0]))
+            self.sim.create_fixed_constraint(self.id, self.ee_index, self.gripper_id, 0, parent_frame_position=[0, 0, 0], child_frame_position=[0, 0, -0.07], child_frame_orientation_q=self.sim.quat_from_euler([0, 0, 0]))
         elif args.robot == "franka":
             self.base_start_position = config.base_start_position_franka
-            self.base_start_orientation_q = p.getQuaternionFromEuler(config.base_start_orientation_e_franka)
+            self.base_start_orientation_q = self.sim.quat_from_euler(config.base_start_orientation_e_franka)
             self.joint_start_positions = config.joint_start_positions_franka
-            self.id = p.loadURDF("franka_robot/panda.urdf", self.base_start_position, self.base_start_orientation_q, useFixedBase=True)
+            self.id = self.sim.load_urdf(self.profile.urdf, self.base_start_position, self.base_start_orientation_q, fixed_base=True)
             self.gripper_id = self.id
             self.robot = "franka"
-            self.ee_index = config.ee_index_franka
+            self.ee_index = self.profile.ee_index
         self.ee_start_position = config.ee_start_position
         self.ee_start_orientation_e = config.ee_start_orientation_e
         self.ee_current_position = config.ee_start_position
@@ -43,12 +46,10 @@ class Robot:
 
         i = 0
         self.joint_indices = []
-        for j in range(p.getNumJoints(self.id)):
-            joint_type = p.getJointInfo(self.id, j)[2]
-            if joint_type == p.JOINT_PRISMATIC or joint_type == p.JOINT_REVOLUTE:
-                p.resetJointState(self.id, j, self.joint_start_positions[i])
-                i += 1
-                self.joint_indices.append(j)
+        for joint in self.sim.get_movable_joints(self.id):
+            self.sim.reset_joint_state(self.id, joint.index, self.joint_start_positions[i])
+            i += 1
+            self.joint_indices.append(joint.index)
 
 
     def get_joint_effort(self, joint_index, body_id=None):
@@ -60,12 +61,10 @@ class Robot:
         # Default to the main robot gripper id (could be the same as body id - franka) - if no gripper_id is provided
         if body_id is None:
             body_id = self.id
-            
-        # getJointState returns: (position, velocity, reactionForces, appliedJointMotorTorque)
-        # Index 3 is the torque the motor is applying to hold its target
-        state = p.getJointState(body_id, joint_index)
-        motor_torque = state[3]
-        
+
+        # The torque the motor is applying to hold its target.
+        motor_torque = self.sim.get_joint_state(body_id, joint_index).applied_torque
+
         return abs(motor_torque)
     
     def get_gripper_effort(self, gripper1_index, gripper2_index):
@@ -108,14 +107,14 @@ class Robot:
             return
 
         # Get current state
-        eef_pos, eef_ori_q = p.getLinkState(self.id, self.ee_index, computeForwardKinematics=True)[:2]
-        eef_ori_e = p.getEulerFromQuaternion(eef_ori_q)
-        
+        eef_pos, eef_ori_q = self.sim.get_link_pose(self.id, self.ee_index)
+        eef_ori_e = self.sim.euler_from_quat(eef_ori_q)
+
         # Get gripper state
         if self.robot == "sawyer":
-            gripper_pos = p.getJointState(self.gripper_id, self.gripper_motor)[0]
+            gripper_pos = self.sim.get_joint_state(self.gripper_id, self.gripper_motor).position
         else: # franka
-            gripper_pos = p.getJointState(self.id, 9)[0]
+            gripper_pos = self.sim.get_joint_state(self.id, self.profile.gripper_state_joint).position
 
         # Check if we moved significantly
         moved_significantly = False
@@ -157,29 +156,28 @@ class Robot:
                 ee_target_position = list(ee_target_position)
                 ee_target_position[2] -= config.gripper_depth_offset_sawyer
         elif self.robot == "franka":
-            gripper1_index = 9
-            gripper2_index = 10
+            gripper1_index, gripper2_index = self.profile.gripper_joint_indices
             gripper_target_position = config.gripper_goal_position_open_franka if gripper_open else config.gripper_goal_position_closed_franka
             if is_trajectory:
                 ee_target_position = list(ee_target_position)
                 ee_target_position[2] -= config.gripper_depth_offset_franka
 
-        min_joint_positions = [p.getJointInfo(self.id, i)[8] for i in range(p.getNumJoints(self.id)) if p.getJointInfo(self.id, i)[2] == p.JOINT_PRISMATIC or p.getJointInfo(self.id, i)[2] == p.JOINT_REVOLUTE]
-        max_joint_positions = [p.getJointInfo(self.id, i)[9] for i in range(p.getNumJoints(self.id)) if p.getJointInfo(self.id, i)[2] == p.JOINT_PRISMATIC or p.getJointInfo(self.id, i)[2] == p.JOINT_REVOLUTE]
+        movable_joints = self.sim.get_movable_joints(self.id)
+        min_joint_positions = [j.lower_limit for j in movable_joints]
+        max_joint_positions = [j.upper_limit for j in movable_joints]
         joint_ranges = [abs(max_joint_position - min_joint_position) for min_joint_position, max_joint_position in zip(min_joint_positions, max_joint_positions)]
         rest_poses = list((np.array(max_joint_positions) + np.array(min_joint_positions)) / 2)
 
-        ee_target_orientation_q = p.getQuaternionFromEuler(ee_target_orientation_e)
+        ee_target_orientation_q = self.sim.quat_from_euler(ee_target_orientation_e)
 
-        ee_current_position = p.getLinkState(self.id, self.ee_index, computeForwardKinematics=True)[0]
-        ee_current_orientation_q = p.getLinkState(self.id, self.ee_index, computeForwardKinematics=True)[1]
-        ee_current_orientation_e = p.getEulerFromQuaternion(ee_current_orientation_q)
+        ee_current_position, ee_current_orientation_q = self.sim.get_link_pose(self.id, self.ee_index)
+        ee_current_orientation_e = self.sim.euler_from_quat(ee_current_orientation_q)
         if self.robot == "sawyer":
-            gripper1_current_position = p.getJointState(self.gripper_id, gripper1_index)[0]
-            gripper2_current_position = p.getJointState(self.gripper_id, gripper2_index)[0]
+            gripper1_current_position = self.sim.get_joint_state(self.gripper_id, gripper1_index).position
+            gripper2_current_position = self.sim.get_joint_state(self.gripper_id, gripper2_index).position
         elif self.robot == "franka":
-            gripper1_current_position = p.getJointState(self.id, gripper1_index)[0]
-            gripper2_current_position = p.getJointState(self.id, gripper2_index)[0]
+            gripper1_current_position = self.sim.get_joint_state(self.id, gripper1_index).position
+            gripper2_current_position = self.sim.get_joint_state(self.id, gripper2_index).position
 
         time_step = 0
 
@@ -192,19 +190,20 @@ class Robot:
                     gripper1_current_position <= gripper_target_position + config.gripper_margin_error and gripper1_current_position >= gripper_target_position - config.gripper_margin_error and
                     gripper2_current_position <= gripper_target_position + config.gripper_margin_error and gripper2_current_position >= gripper_target_position - config.gripper_margin_error)):
 
-            target_joint_positions = p.calculateInverseKinematics(self.id, self.ee_index, ee_target_position, targetOrientation=ee_target_orientation_q, lowerLimits=min_joint_positions, upperLimits=max_joint_positions, jointRanges=joint_ranges, restPoses=rest_poses, maxNumIterations=500)
+            target_joint_positions = self.sim.inverse_kinematics(self.id, self.ee_index, ee_target_position, orientation_q=ee_target_orientation_q, lower_limits=min_joint_positions, upper_limits=max_joint_positions, joint_ranges=joint_ranges, rest_poses=rest_poses, max_iterations=500)
 
             if self.robot == "sawyer":
-                p.setJointMotorControlArray(self.id, self.joint_indices, p.POSITION_CONTROL, targetPositions=target_joint_positions, forces=[config.arm_movement_force_sawyer] * 8)
-                current_joints = [p.getJointState(self.gripper_id, i)[0] for i in range(p.getNumJoints(self.gripper_id))]
+                self.sim.set_joint_positions(self.id, self.joint_indices, target_joint_positions, forces=[config.arm_movement_force_sawyer] * len(self.joint_indices))
+                current_joints = [self.sim.get_joint_state(self.gripper_id, i).position for i in range(self.sim.num_joints(self.gripper_id))]
                 joint_idx = [6, 3, 8, 5, 10]
                 target_joints = [current_joints[1], -current_joints[1], -current_joints[1], current_joints[1], current_joints[1]]
-                p.setJointMotorControlArray(self.gripper_id, joint_idx, p.POSITION_CONTROL, target_joints, positionGains=np.ones(5))
-                p.setJointMotorControl2(self.gripper_id, self.gripper_motor, p.POSITION_CONTROL, targetPosition=gripper_target_position, force=config.gripper_movement_force_sawyer)
+                self.sim.set_joint_positions(self.gripper_id, joint_idx, target_joints, position_gains=np.ones(5))
+                self.sim.set_joint_position(self.gripper_id, self.gripper_motor, gripper_target_position, force=config.gripper_movement_force_sawyer)
             elif self.robot == "franka":
-                p.setJointMotorControlArray(self.id, self.joint_indices[:-2], p.POSITION_CONTROL, targetPositions=target_joint_positions[:-2], forces=[config.arm_movement_force_franka] * 7)
-                p.setJointMotorControl2(self.id, gripper1_index, p.POSITION_CONTROL, targetPosition=gripper_target_position, force=config.gripper_movement_force_franka)
-                p.setJointMotorControl2(self.id, gripper2_index, p.POSITION_CONTROL, targetPosition=gripper_target_position, force=config.gripper_movement_force_franka)
+                arm_n = self.profile.arm_joint_count
+                self.sim.set_joint_positions(self.id, self.joint_indices[:arm_n], target_joint_positions[:arm_n], forces=[config.arm_movement_force_franka] * arm_n)
+                self.sim.set_joint_position(self.id, gripper1_index, gripper_target_position, force=config.gripper_movement_force_franka)
+                self.sim.set_joint_position(self.id, gripper2_index, gripper_target_position, force=config.gripper_movement_force_franka)
 
             # steps env and capture cameras images 
             self.step_env_and_record(env, force_record=False)
@@ -219,15 +218,14 @@ class Robot:
             if is_trajectory:
                 self.trajectory_step += 1
 
-            ee_current_position = p.getLinkState(self.id, self.ee_index, computeForwardKinematics=True)[0]
-            ee_current_orientation_q = p.getLinkState(self.id, self.ee_index, computeForwardKinematics=True)[1]
-            ee_current_orientation_e = p.getEulerFromQuaternion(ee_current_orientation_q)
+            ee_current_position, ee_current_orientation_q = self.sim.get_link_pose(self.id, self.ee_index)
+            ee_current_orientation_e = self.sim.euler_from_quat(ee_current_orientation_q)
             if self.robot == "sawyer":
-                gripper1_new_position = p.getJointState(self.gripper_id, gripper1_index)[0]
-                gripper2_new_position = p.getJointState(self.gripper_id, gripper2_index)[0]
+                gripper1_new_position = self.sim.get_joint_state(self.gripper_id, gripper1_index).position
+                gripper2_new_position = self.sim.get_joint_state(self.gripper_id, gripper2_index).position
             elif self.robot == "franka":
-                gripper1_new_position = p.getJointState(self.id, gripper1_index)[0]
-                gripper2_new_position = p.getJointState(self.id, gripper2_index)[0]
+                gripper1_new_position = self.sim.get_joint_state(self.id, gripper1_index).position
+                gripper2_new_position = self.sim.get_joint_state(self.id, gripper2_index).position
 
             self.ee_current_position = ee_current_position
             self.ee_current_orientation_e = ee_current_orientation_e
@@ -265,15 +263,15 @@ class Robot:
         
         """
         if camera == "wrist":
-            camera_position = list(p.getLinkState(self.id, self.ee_index, computeForwardKinematics=True)[0])
+            _wrist_pos, camera_orientation_q = self.sim.get_link_pose(self.id, self.ee_index)
+            camera_position = list(_wrist_pos)
             if self.robot == "sawyer":
                 camera_position[2] -= config.wrist_camera_offset_sawyer
-            camera_orientation_q = p.getLinkState(self.id, self.ee_index, computeForwardKinematics=True)[1]
         elif camera == "head":
             camera_position = config.head_camera_position
-            camera_orientation_q = p.getQuaternionFromEuler(config.head_camera_orientation_e)
+            camera_orientation_q = self.sim.quat_from_euler(config.head_camera_orientation_e)
 
-        projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
+        projection_matrix = self.sim.compute_projection_matrix(fov, aspect, near_plane, far_plane)
         # print(PROGRESS + f"get_camera_image projection_matrix.type: {type(projection_matrix)} projection_matrix {projection_matrix}"+ ENDC)
         # Special handling: head camera per-task behavior
         if camera == "head" and config.head_camera_use_debug_view:
@@ -288,7 +286,7 @@ class Robot:
                 pitch_deg=config.camera_pitch,
             )
         else:
-            rotation_matrix = np.array(p.getMatrixFromQuaternion(camera_orientation_q)).reshape(3, 3)
+            rotation_matrix = np.array(self.sim.matrix_from_quat(camera_orientation_q)).reshape(3, 3)
             
             if camera == "wrist":
                 init_camera_vector = np.array([0, 0, 1])
@@ -343,41 +341,21 @@ class Robot:
                 target_position = camera_position + camera_vector
                 
             # Compute the view matrix directly
-            view_matrix = p.computeViewMatrix(cameraEyePosition=camera_position, 
-                                              cameraTargetPosition=target_position, 
-                                              cameraUpVector=up_vector)
+            view_matrix = self.sim.compute_view_matrix(eye=camera_position,
+                                                       target=target_position,
+                                                       up=up_vector)
 
 
-        image = p.getCameraImage(
+        frame = self.sim.render_camera(
             config.image_width,
             config.image_height,
-            viewMatrix=view_matrix,
-            projectionMatrix=projection_matrix,
-            renderer=p.ER_BULLET_HARDWARE_OPENGL,
+            view_matrix,
+            projection_matrix,
         )
 
-        img_w, img_h = image[0], image[1]
-        rgb_buffer = image[2]
-        depth_buffer = image[3]
-
-        # Ensure numpy arrays with correct shape
-          # Q: How come is was working in main branch (azure linux) ? reviewed metaworld branch new changes and none explains it. A: Not sure 
-          #- PyBulletâ€™s getCameraImage returns a tuple where the color buffer is a flat sequence (or a buffer with alpha) rather than a ready-to-use NumPy array.
-          #- robot.get_camera_image passed that tuple element directly into PIL: Image.fromarray(rgb_buffer). Since it wasnâ€™t a NumPy array (nor an array-like with a valid array_interface), PIL raised AttributeError: 'tuple' object has no attribute 'array_interface'.
-                  
-        try:
-            rgb_array = np.array(rgb_buffer, dtype=np.uint8).reshape(img_h, img_w, 4)
-        except Exception:
-            # Fallback if already shaped but not ndarray
-            rgb_array = np.asarray(rgb_buffer, dtype=np.uint8)
-            if rgb_array.ndim == 1:
-                rgb_array = rgb_array.reshape(img_h, img_w, 4)
-
-        # Explanation: PyBullet may return a flattened tuple/list (W*H*4 RGBA) or an already-shaped array.
-        # The conversion below reshapes to (H, W, 4) and drops alpha so PIL consistently gets (H, W, 3) uint8.
-        rgb_array = rgb_array[:, :, :3]
-
-        depth_array = np.array(depth_buffer, dtype=np.float32).reshape(img_h, img_w)
+        img_w, img_h = frame.width, frame.height
+        rgb_array = frame.rgb
+        depth_array = frame.depth
 
         LEGACY_NORMALIZE_DEPTH = False # TODO:False when moving to test like projection matrix     
         
@@ -391,9 +369,10 @@ class Robot:
             if depth_image_path:           
                 n = config.near_plane
                 f = config.far_plane
-                # Convert OpenGL depth to linear depth in [0,1]
-                z = depth_array
-                linear_depth = (2.0 * n * f) / (f + n - (2.0 * z - 1.0) * (f - n))
+                # Convert the simulator's raw depth to metric depth, then to [0,1] for the
+                # 8-bit preview. Genesis already reports metres, PyBullet a GL z-buffer;
+                # camera_math hides that difference.
+                linear_depth = camera_math.depth_to_metric(depth_array, self.sim.depth_encoding, n, f)
                 linear_depth = np.clip(linear_depth, 0.0, 1.0)
                 depth_u8 = (linear_depth * 255.0).astype(np.uint8)
                 depth_image = Image.fromarray(depth_u8, mode="L")
@@ -409,25 +388,23 @@ class Robot:
         is unavailable (e.g., in DIRECT mode).
         """
         try:
-            dbg = p.getDebugVisualizerCamera()
-            # Validate tuple structure
-            if not isinstance(dbg, (list, tuple)) or len(dbg) != 12:
+            dbg = self.sim.get_viewer_camera()
+            # Validate structure
+            if not dbg or not dbg.get("available"):
                 raise RuntimeError("debug camera unavailable")
 
-            view_matrix = dbg[2]
-            projection_matrix = dbg[3]
-            yaw_deg = float(dbg[8])
-            pitch_deg = float(dbg[9])
-            dist = float(dbg[10])
-            target = dbg[11] if isinstance(dbg[11], (list, tuple)) else [0.0, 0.0, 0.0]
+            view_matrix = dbg["view_matrix"]
+            projection_matrix = dbg["projection_matrix"]
+            yaw_deg = float(dbg["yaw"])
+            pitch_deg = float(dbg["pitch"])
+            dist = float(dbg["distance"])
+            target = dbg["target"] if isinstance(dbg["target"], (list, tuple)) else [0.0, 0.0, 0.0]
             tx, ty, tz = list(map(float, target))
 
-            # Treat zero/degenerate values as invalid in DIRECT mode
+            # Treat zero/degenerate values as invalid in headless mode
             if dist <= 1e-6 or (abs(yaw_deg) <= 1e-6 and abs(pitch_deg) <= 1e-6 and abs(tx) <= 1e-6 and abs(ty) <= 1e-6 and abs(tz) <= 1e-6):
                 raise RuntimeError("debug camera invalid (degenerate)")
 
-            yaw = np.deg2rad(yaw_deg)
-            pitch = np.deg2rad(pitch_deg)
             camera_pos, _ = spherical_camera_pose([tx, ty, tz], dist, yaw_deg, pitch_deg)
             return view_matrix, projection_matrix, camera_pos
         except Exception:
@@ -438,7 +415,7 @@ class Robot:
                 yaw_deg=config.camera_yaw,
                 pitch_deg=config.camera_pitch,
             )
-            projection_matrix = p.computeProjectionMatrixFOV(fov, aspect, near_plane, far_plane)
+            projection_matrix = self.sim.compute_projection_matrix(fov, aspect, near_plane, far_plane)
             return view_matrix, projection_matrix, camera_pos
 
     def _view_and_pos_from_spherical(self, target, distance, yaw_deg, pitch_deg):
@@ -446,8 +423,7 @@ class Robot:
         parameters (target, distance, yaw, pitch) with Z-up. Keeps logic
         small and reusable for head-camera debug mirroring fallback.
         """
-        # Use positional args; some PyBullet builds require 'upAxisIndex' p ositional
-        view_matrix = p.computeViewMatrixFromYawPitchRoll(
+        view_matrix = self.sim.compute_view_matrix_from_yaw_pitch_roll(
             target,
             distance,
             yaw_deg,
@@ -455,9 +431,6 @@ class Robot:
             0.0,
             2,
         )
-        yaw = np.deg2rad(float(yaw_deg))
-        pitch = np.deg2rad(float(pitch_deg))
-        tx, ty, tz = list(map(float, target))
         camera_position, _ = spherical_camera_pose(target, distance, yaw_deg, pitch_deg)
         return view_matrix, camera_position
 

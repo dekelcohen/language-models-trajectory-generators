@@ -3,11 +3,10 @@
 import traceback
 
 import numpy as np
-import pybullet as p
 
 import config
+from sim_adapter.camera_math import spherical_camera_pose
 from sim_envs.pybullet.base import SimEnvBase
-from sim_envs.pybullet.pb_utils import get_joint_index_by_name, get_link_index_by_name, spherical_camera_pose
 
 
 class SimEnvDoor(SimEnvBase):
@@ -17,7 +16,8 @@ class SimEnvDoor(SimEnvBase):
     URDF loading and controller force setup occur here.
     """
 
-    def __init__(self):
+    def __init__(self, sim=None):
+        super().__init__(sim)
         # Debug visualizer camera (GUI) used in run_gui_demo
         config.camera_distance = 1.0
         config.camera_yaw = 190.0
@@ -45,7 +45,7 @@ class SimEnvDoor(SimEnvBase):
         # Decide camera behavior by connection type
         # In GUI: mirror the debug visualizer; in DIRECT: use spherical view
         try:
-            _is_gui = p.isConnected() and p.getConnectionInfo()[1] == p.GUI
+            _is_gui = self.sim.is_gui()
         except Exception:
             _is_gui = False
         config.head_camera_use_debug_view = bool(_is_gui)
@@ -66,44 +66,42 @@ class SimEnvDoor(SimEnvBase):
         # Load Adroit door and set strong hold forces
         try:
             door_start_position = [-0.11, 0.04, 0.25]
-            door_start_orientation_q = p.getQuaternionFromEuler([0.0, 0.0, 4.0])
-            self.door_id = p.loadURDF(
+            door_start_orientation_q = self.sim.quat_from_euler([0.0, 0.0, 4.0])
+            self.door_id = self.sim.load_urdf(
                 "my_assets/adroit_door/adroit_door.urdf",
                 door_start_position,
                 door_start_orientation_q,
-                useFixedBase=True,
+                fixed_base=True,
             )
             # Cosmetics:
-            # 2. Load the image texture into PyBullet
-            wood_texture_id = p.loadTexture("my_assets/adroit_door/wood.png")
+            # 2. Load the image texture into the simulator
+            wood_texture_id = self.sim.load_texture("my_assets/adroit_door/wood.png")
 
             # 3. Apply the texture to the Frame (Base Link: index -1)
-            p.changeVisualShape(self.door_id, 0, textureUniqueId=wood_texture_id)
+            self.sim.set_visual(self.door_id, 0, texture=wood_texture_id)
 
             # 4. Apply the texture to the Door Panel (Link: index 0)
-            p.changeVisualShape(self.door_id, 1, textureUniqueId=wood_texture_id)
+            self.sim.set_visual(self.door_id, 1, texture=wood_texture_id)
 
             # Resolve indices based on the newly loaded door
-            self.door_hinge_index = get_joint_index_by_name(self.door_id, "door_hinge")
-            self.latch_index = get_joint_index_by_name(self.door_id, "latch_joint")
+            self.door_hinge_index = self.sim.get_joint_index_by_name(self.door_id, "door_hinge")
+            self.latch_index = self.sim.get_joint_index_by_name(self.door_id, "latch_joint")
             # Door handle is the child link named 'latch' in URDF; look it up by link name
-            self.door_handle_latch = get_link_index_by_name(self.door_id, "latch")
+            self.door_handle_latch = self.sim.get_link_index_by_name(self.door_id, "latch")
 
             if self.door_hinge_index is not None:
-                # p.setJointMotorControl2(self.door_id, self.door_hinge_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
                 # Instead of rigidly holding it at 0.0 with 200 force, give it a resting friction
-                p.setJointMotorControl2(
+                self.sim.set_joint_velocity(
                     self.door_id,
                     self.door_hinge_index,
-                    controlMode=p.VELOCITY_CONTROL,
-                    targetVelocity=0.0,
-                    force=2.0  # Just enough force to keep it from swinging on its own, but weak enough for the robot to pull
+                    target_velocity=0.0,
+                    force=2.0,  # Just enough force to keep it from swinging on its own, but weak enough for the robot to pull
                 )
                 # Increase friction on the handle (latch link)
-                p.changeDynamics(self.door_id, self.door_handle_latch, lateralFriction=2.0, spinningFriction=1.0)
+                self.sim.change_dynamics(self.door_id, self.door_handle_latch, lateralFriction=2.0, spinningFriction=1.0)
 
             if self.latch_index is not None:
-                p.setJointMotorControl2(self.door_id, self.latch_index, p.POSITION_CONTROL, targetPosition=0.0, force=200)
+                self.sim.set_joint_position(self.door_id, self.latch_index, target=0.0, force=200)
 
             HIDE_DOOR_WITH_OBJECT = True
             if HIDE_DOOR_WITH_OBJECT:
@@ -127,22 +125,22 @@ class SimEnvDoor(SimEnvBase):
         pole_height = 1.0
         pole_radius = 0.15
         pole_position = [-0.15, 0.30, pole_height / 2.0]
-        pole_collision = p.createCollisionShape(
-            p.GEOM_CYLINDER, radius=pole_radius, height=pole_height
+        pole_collision = self.sim.create_collision_shape(
+            "cylinder", radius=pole_radius, length=pole_height
         )
-        pole_visual = p.createVisualShape(
-            p.GEOM_CYLINDER,
+        pole_visual = self.sim.create_visual_shape(
+            "cylinder",
             radius=pole_radius,
             length=pole_height,
-            rgbaColor=[0.5, 0.5, 0.55, 1.0],
+            rgba=[0.5, 0.5, 0.55, 1.0],
         )
-        self.pole_id = p.createMultiBody(
-            baseMass=1.0,
-            baseCollisionShapeIndex=pole_collision,
-            baseVisualShapeIndex=pole_visual,
-            basePosition=pole_position,
+        self.pole_id = self.sim.create_body(
+            mass=1.0,
+            collision_shape=pole_collision,
+            visual_shape=pole_visual,
+            position=pole_position,
         )
-        p.changeDynamics(self.pole_id, -1, lateralFriction=1.0, spinningFriction=0.5)
+        self.sim.change_dynamics(self.pole_id, -1, lateralFriction=1.0, spinningFriction=0.5)
         return self.pole_id
 
     def _load_board(self):
@@ -160,24 +158,24 @@ class SimEnvDoor(SimEnvBase):
 
         # Tilt the board toward the door (pitch about y-axis) so it leans instead
         # of standing upright (a thin tall board is unstable and would topple).
-        board_orientation_q = p.getQuaternionFromEuler([0.1422, 0.0000, 0.1975])
+        board_orientation_q = self.sim.quat_from_euler([0.1422, 0.0000, 0.1975])
         # Place the base near the door so the tilted top rests against the panel.
         board_position = [-0.2429, 0.2063, 0.4992]
 
-        board_collision = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents)
-        board_visual = p.createVisualShape(
-            p.GEOM_BOX,
-            halfExtents=half_extents,
-            rgbaColor=[0.5, 0.5, 0.55, 1.0],
+        board_collision = self.sim.create_collision_shape("box", half_extents=half_extents)
+        board_visual = self.sim.create_visual_shape(
+            "box",
+            half_extents=half_extents,
+            rgba=[0.5, 0.5, 0.55, 1.0],
         )
-        self.board_id = p.createMultiBody(
-            baseMass=1.0,
-            baseCollisionShapeIndex=board_collision,
-            baseVisualShapeIndex=board_visual,
-            basePosition=board_position,
-            baseOrientation=board_orientation_q,
+        self.board_id = self.sim.create_body(
+            mass=1.0,
+            collision_shape=board_collision,
+            visual_shape=board_visual,
+            position=board_position,
+            orientation_q=board_orientation_q,
         )
-        p.changeDynamics(self.board_id, -1, lateralFriction=1.0, spinningFriction=0.5)
+        self.sim.change_dynamics(self.board_id, -1, lateralFriction=1.0, spinningFriction=0.5)
         return self.board_id
 
     def get_state(self):
@@ -198,22 +196,22 @@ class SimEnvDoor(SimEnvBase):
         try:
             if self.door_id is not None:
                 if self.door_handle_latch is not None and self.door_handle_latch >= 0:
-                    _dhl = p.getLinkState(self.door_id, int(self.door_handle_latch), computeForwardKinematics=True)
-                    state["door_handle_pos"] = list(map(float, _dhl[0]))
+                    _dhl, _ = self.sim.get_link_pose(self.door_id, int(self.door_handle_latch))
+                    state["door_handle_pos"] = list(map(float, _dhl))
                 if self.latch_index is not None and self.latch_index >= 0:
-                    _lat = p.getLinkState(self.door_id, int(self.latch_index), computeForwardKinematics=True)
-                    state["latch_pos"] = list(map(float, _lat[0]))
+                    _lat, _ = self.sim.get_link_pose(self.door_id, int(self.latch_index))
+                    state["latch_pos"] = list(map(float, _lat))
                 if self.door_hinge_index is not None and self.door_hinge_index >= 0:
-                    _hinge = p.getLinkState(self.door_id, int(self.door_hinge_index), computeForwardKinematics=True)
-                    state["hinge_pos"] = list(map(float, _hinge[0]))
+                    _hinge, _ = self.sim.get_link_pose(self.door_id, int(self.door_hinge_index))
+                    state["hinge_pos"] = list(map(float, _hinge))
 
         except Exception as e:
             print("[Env] Warning: SimEnvDoor.get_state failed to read positions:", e)
             traceback.print_exc()
         try:
             if self.pole_id is not None:
-                pos, _ori = p.getBasePositionAndOrientation(self.pole_id)
-                aabb_min, aabb_max = p.getAABB(self.pole_id, -1)
+                pos, _ori = self.sim.get_base_pose(self.pole_id)
+                aabb_min, aabb_max = self.sim.get_aabb(self.pole_id, -1)
                 state["pole_pos"] = list(map(float, pos))
                 state["pole_dims"] = [
                     float(aabb_max[0] - aabb_min[0]),

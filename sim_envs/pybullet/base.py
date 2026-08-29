@@ -24,9 +24,13 @@ class SimEnvBase:
     7. ``get_state()`` / ``check_success()`` - ground-truth reporting.
     """
 
-    def __init__(self):
+    #: The :class:`~sim_adapter.base.SimAdapter` this profile issues primitives through.
+    #: Injected by ``sim_envs.registry.get_simenv`` so a profile never imports a simulator.
+    sim = None
+
+    def __init__(self, sim=None):
         # Base class does not change defaults
-        pass
+        self.sim = sim
 
     def apply(self, env):
         # Default: leave config values as-is
