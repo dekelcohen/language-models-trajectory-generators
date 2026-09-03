@@ -10,7 +10,8 @@ import models
 import segmentation_adapter
 from segmentation_adapter import get_segmentation_output
 import utils
-from common_utils import Trajectory
+from common_utils import Trajectory, pose_euler
+from sim_adapter import transforms
 from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC, WARNING
@@ -443,20 +444,39 @@ class API:
 
 
     def generate_linear_trajectory(self, desc, start_pose, end_pose, num_points=20):
-        """Return a linear [x, y, z, theta] trajectory and log the call.
+        """Return a linear end-effector trajectory and log the call.
+
+        Accepts either pose length (see ``common_utils`` for the format contract):
+        length-4 ``[x, y, z, rotation]`` (top-down) or length-6
+        ``[x, y, z, roll, pitch, yaw]``. Mixing the two is allowed - a length-4 endpoint is
+        promoted to the length-6 orientation it already stands for - so a top-down hover can
+        be chained into a side approach.
+
+        Position is interpolated linearly. Orientation is interpolated component-wise on the
+        rotation value in the pure top-down case (unchanged legacy behaviour, bit for bit),
+        and by quaternion slerp as soon as any endpoint is length-6: lerping Euler triples
+        that differ on more than one axis swings the gripper through orientations neither
+        endpoint asked for.
+
         Logs: desc, start/end poses, and 2D head-camera projection of end pose.
         """
         if not isinstance(start_pose, (list, tuple)) or not isinstance(end_pose, (list, tuple)):
-            raise ValueError("start_pose and end_pose must be list/tuple of length 4")
-        if len(start_pose) != 4 or len(end_pose) != 4:
-            raise ValueError("start_pose and end_pose must be length 4 [x,y,z,theta]")
+            raise ValueError("start_pose and end_pose must be list/tuple of length 4 or 6")
+        if len(start_pose) not in (4, 6) or len(end_pose) not in (4, 6):
+            raise ValueError(
+                "start_pose and end_pose must be length 4 [x,y,z,rotation] or length 6 "
+                "[x,y,z,roll,pitch,yaw]; got %d and %d" % (len(start_pose), len(end_pose))
+            )
         if int(num_points) < 2:
             raise ValueError("num_points must be >= 2")
         try:
-            sx, sy, sz, s_theta = [float(v) for v in start_pose]
-            ex, ey, ez, e_theta = [float(v) for v in end_pose]
+            start_pose = [float(v) for v in start_pose]
+            end_pose = [float(v) for v in end_pose]
         except Exception as e:
             raise ValueError("Invalid pose values: %s" % e)
+
+        sx, sy, sz = start_pose[:3]
+        ex, ey, ez = end_pose[:3]
 
         # Project end pose (x,y,z) to 2D pixels if camera info is available
         end_px = None
@@ -473,17 +493,35 @@ class API:
         except Exception:
             end_px = None
 
-        self.logger.info(PROGRESS + "generate_linear_trajectory desc='" + str(desc) + "' start=" + str([sx, sy, sz, s_theta]) + " end=" + str([ex, ey, ez, e_theta]) + " end_px=" + str(end_px) + ENDC)
+        self.logger.info(PROGRESS + "generate_linear_trajectory desc='" + str(desc) + "' start=" + str(start_pose) + " end=" + str(end_pose) + " end_px=" + str(end_px) + ENDC)
 
-        traj = []
         n = int(num_points)
+        traj = []
+
+        if len(start_pose) == 4 and len(end_pose) == 4:
+            s_theta, e_theta = start_pose[3], end_pose[3]
+            for i in range(n):
+                t = i / (n - 1)
+                traj.append([
+                    sx + (ex - sx) * t,
+                    sy + (ey - sy) * t,
+                    sz + (ez - sz) * t,
+                    s_theta + (e_theta - s_theta) * t,
+                ])
+            return Trajectory(traj, desc)
+
+        s_quat = transforms.quat_from_euler(pose_euler(start_pose))
+        e_quat = transforms.quat_from_euler(pose_euler(end_pose))
         for i in range(n):
             t = i / (n - 1)
+            euler = transforms.euler_from_matrix(
+                transforms.matrix_from_quat(transforms.slerp(s_quat, e_quat, t))
+            )
             traj.append([
                 sx + (ex - sx) * t,
                 sy + (ey - sy) * t,
                 sz + (ez - sz) * t,
-                s_theta + (e_theta - s_theta) * t,
+                euler[0], euler[1], euler[2],
             ])
         return Trajectory(traj, desc)
     def open_gripper(self):

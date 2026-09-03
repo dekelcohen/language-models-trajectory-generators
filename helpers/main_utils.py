@@ -5,6 +5,7 @@ import re
 import sys
 import tempfile
 import numpy as np
+import common_utils
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
 
 def get_exec_locals(api, logger):
@@ -19,6 +20,8 @@ def get_exec_locals(api, logger):
         "close_gripper": api.close_gripper,
         "task_completed": api.task_completed,
         "generate_linear_trajectory": api.generate_linear_trajectory,
+        "grasp_pose": common_utils.grasp_pose,
+        "side_grasp_pose": common_utils.side_grasp_pose,
         "api": api,
         "math": math,
         "np": np,

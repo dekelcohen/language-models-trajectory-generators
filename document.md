@@ -107,6 +107,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `--no-plan` | off | Skip planner; run command as a single `execute_task`. |
 | `--reset-eef` | off | Re-home the **arm only** (`RESET_EEF`) at the start of every subtask, before capturing the EE start pose. Does **not** reset object/world state and does **not** reset `trajectory_step` (prior subtask frames preserved). Default off = real-world behavior: the arm starts wherever the previous subtask left it. |
 | `--prepend-prompt PATH` | None | Text prepended to the first `MAIN_PROMPT` only. |
+| `-c, --command` | None | Run a command non-interactively and exit; repeatable (`-c "open the fridge" -c "close it"`). Skips the interactive prompt, which is what makes scripted/repeatable runs possible (see *Testing the pose formats*, §7). |
 
 <details><summary>Diagnostics / visualization / override args</summary>
 
@@ -459,15 +460,149 @@ precomputed GraspGen candidates from `outputs/graspgen/grasp_poses_{object}.npz`
 
 ## 7. Trajectory creation, execution, review & correction
 
+### End-effector pose formats (`common_utils.py`)
+
+Pose **length is the discriminator** — there is no mode flag anywhere in the pipeline:
+
+| Length | Format | Orientation |
+|---|---|---|
+| 4 | `[x, y, z, rotation]` | top-down: `config.ee_start_orientation_e + [0,0,rotation]`. The historical format, and the default for essentially every task. |
+| 6 | `[x, y, z, roll, pitch, yaw]` | absolute Euler (repo-wide PyBullet convention). Produced only by `side_grasp_pose`. |
+
+The len-4 path is deliberately byte-identical to what it always was, so the side approach
+cannot perturb existing top-down tasks. Both lengths are accepted by
+`generate_linear_trajectory`, `execute_trajectory`, the `ADD_TRAJECTORY_POINTS` preview
+(which only reads `point[:3]`) and the JSON IPC codec (points are plain nested lists).
+
+Two pure builders are injected into the LLM's interpreter alongside the API functions
+(`helpers/main_utils.get_exec_locals`), so generated code never writes Euler angles by hand
+— it makes a **named binary choice** instead of reasoning about six free numbers:
+
+- `grasp_pose(x, y, z, rotation=0.0)` → len-4 top-down.
+- `side_grasp_pose(x, y, z, rotation, approach_yaw)` → len-6 horizontal approach, for
+  targets with no graspable top face (**vertical bar handles**). `approach_yaw` is the
+  azimuth the gripper points *toward* the target (a door's inward face normal);
+  `rotation` is roll about that axis, `0` = fingers close horizontally across a vertical bar.
+
+**Prompt gating.** `main_prompt.py` gains exactly one sentence ("top-down is the default;
+side approach only via the helper a loaded SKILL documents"). All real guidance — the hard
+top-down-first rule, the 3 triggers that justify switching, and a worked example — lives in
+`prompts/skills/open-close-door-cabinet-drawer/SKILL.md` §2b, so a plain tabletop task never
+sees the extra degrees of freedom. The LLM classifies "vertical bar" itself from the
+`Height` vs `Width`/`Length` that `detect_object` already prints; **no perception code
+changed**.
+
+<details>
+<summary>Orientation maths (<code>sim_adapter/transforms.py</code>)</summary>
+
+Both builders are one parametrisation:
+
+```
+R(tilt, azimuth, roll) = Rz(azimuth) @ Ry(pi - tilt) @ Rz(roll)
+approach axis (EE +Z)  = [sin(tilt)cos(azimuth), sin(tilt)sin(azimuth), -cos(tilt)]
+closing axis  (EE +Y)  = [-sin(azimuth), cos(azimuth), 0]        # at tilt=pi/2, roll=0
+```
+
+- `tilt=0` → approach `[0,0,-1]`, straight down. With `azimuth = -pi/2 + rotation` and
+  `roll = 0` this reproduces `ee_start_orientation_e + [0,0,rotation]` **exactly** (verified
+  against the legacy expression over a full sweep of `rotation`), which is why the top-down
+  builder pins `roll = 0` — at `tilt = 0` the parametrisation is gimbal-degenerate.
+- `tilt=pi/2` → horizontal approach at `azimuth`; `roll=0` closes the fingers horizontally.
+
+New helpers: `matrix_from_euler`, `euler_from_matrix`, `matrix_from_approach`,
+`ee_euler_from_approach`, `slerp`, `quat_angle_between`.
+
+`euler_from_matrix` exists because `euler_from_quat` reproduces Bullet, which derives pitch
+with `asin` and therefore can only ever return pitch ∈ [-pi/2, pi/2] — while the top-down
+home pose has pitch = `pi`. `euler_from_matrix` keeps the same branch cut (so the two agree
+wherever `euler_from_quat` is valid) and guarantees
+`quat_from_euler(euler_from_matrix(m)) == m`.
+
+**Interpolation.** `generate_linear_trajectory` keeps the exact legacy component-wise lerp
+when *both* endpoints are len-4. As soon as either endpoint is len-6 it interpolates
+position linearly and orientation by quaternion **slerp**, and promotes a len-4 endpoint to
+the orientation it already stands for — so a top-down hover can be chained straight into a
+side approach. Euler lerp is wrong here: triples differing on more than one axis swing the
+gripper through orientations neither endpoint asked for.
+</details>
+
+<details>
+<summary><code>Robot.move</code> orientation convergence — a dead check, fixed behind a flag</summary>
+
+`Robot.move`'s loop tested roll/pitch/yaw component-wise against `config.margin_error`.
+That test **can never succeed**: `euler_from_quat` clamps pitch to [-pi/2, pi/2] and the
+top-down target's pitch is `pi`. The loop has therefore always exited via its iteration caps
+only (1 step for trajectory points, 100 for standalone moves) — side poses behave the same,
+so nothing was broken by this.
+
+`Robot._orientation_reached` now isolates the test and can instead measure the true angle
+between current and target quaternions (`transforms.quat_angle_between`), which does
+converge. It is **off by default** (`config.use_quat_orientation_convergence = False`,
+`quat_orientation_margin_error = 0.01`): enabling it lets standalone moves exit early,
+changing sim step counts → recorded frames → every golden fixture. Flip it only together
+with a regression re-baseline.
+</details>
+
+<details>
+<summary>Gripper depth offset — the other top-down assumption</summary>
+
+`Robot.move` sinks the target a little past the surface so the fingers actually enclose the
+object (`config.gripper_depth_offset_franka = 0.06`, trajectory points only). It used to do
+this as `ee_target_position[2] -= offset` — hard-coded world **−Z**, which is only the
+approach direction for a top-down pose. On a side approach that pushed the target *below*
+the handle instead of *into* it.
+
+`Robot._apply_gripper_depth_offset` now shifts along the pose's real approach axis
+(`transforms.approach_axis_from_euler`). A pose whose axis is exactly `[0,0,-1]` (within
+1e-6) takes a verbatim copy of the old line, so no existing trajectory moves by even one
+ulp.
+</details>
+
+### Testing the pose formats
+
+Cost rises with tier; the free ones run in CI-style seconds.
+
+| Tier | What | Command | LLM calls |
+|---|---|---|---|
+| 0 | maths, builders, dispatch, IPC codec | `pytest tests/test_side_approach.py` | none |
+| 1 | headless PyBullet IK reach + a printed reachability atlas | same file (`SimReach`) | none |
+| 2 | full env subprocess opens `franka_kitchen:slide_cabinet` | `$env:LMTG_RUN_SLOW_SIM_TESTS=1; pytest tests/test_side_approach_e2e.py -s` | none |
+| 3 | a real agent run, replayed | `python main.py --replay-log <log>` / `--llm-cache` | none on replay |
+| 4 | **does the LLM choose correctly?** | `python tests/tools/prompt_decision_probe.py` | one short call per scenario |
+
+The two no-regression guards are `TopDownEquivalence.test_matches_legacy_expression` and
+`LinearTrajectory.test_len4_path_is_byte_identical_to_legacy_interpolation`.
+
+**Tier 2** scripts the trajectory itself (no LLM) and asks the kitchen sim-env's own
+`check_success()` oracle for the verdict. Note that trajectory points are consumed *one
+simulation step each*, so a waypoint must be repeated (~15x) for the position controller to
+converge — scripted trajectories that skip this simply do not move the arm. Its control test
+records a genuine finding: a top-down gripper **also** opens this sliding cabinet, because a
+low-resistance panel can be shoved sideways without a real pinch. Tier 2 therefore proves the
+side path *works*, not that it is *required*; necessity is geometric and lives in tier 1.
+
+**Tier 4** is the tier that targets the actual risk of this feature — not broken code but a
+confused model. It feeds fabricated `detect_object` printouts (vertical bar, horizontal
+D-handle, lever, knob, can, bottle) plus the door skill to the model, asks for the first code
+block, and reports a confusion matrix of `side_grasp_pose` used vs expected. A **false
+positive** (side approach on a can) is the regression this feature could introduce; a false
+negative means the SKILL.md triggers are not landing. It is a script rather than a pytest
+because it spends tokens; `--dry-run` prints a built prompt for free, and results go through
+the normal on-disk LLM cache.
+
+`main.py -c/--command` (repeatable) runs commands non-interactively, which is what makes
+tiers 3–4 scriptable.
+
 ### Creation & execution (`api.py` ↔ `env.py`)
 - `generate_linear_trajectory(desc, start_pose, end_pose, num_points=20)` → `Trajectory`
-  (linear interp of `[x,y,z,theta]`); validates lengths, logs the 2D projection of the end
-  pose; **no** side effects.
+  (linear interp of position; see *pose formats* above for orientation); validates lengths,
+  logs the 2D projection of the end pose; **no** side effects.
 - `execute_trajectory(trajectory)`:
   - optional `--vis-traj` preview (downsampled to ≤5 points) via `ADD_TRAJECTORY_POINTS`;
   - `EXECUTE_TRAJECTORY` → env moves the EE through each point (`robot.move`), records
     frames, returns `[msg, trajectory_step]`; `api.trajectory_step` updated (continuous
-    across subtasks); `task.trajectory_length += len(points)`.
+    across subtasks); `task.trajectory_length += len(points)`. The handler dispatches on
+    pose length and raises on anything other than 4 or 6.
 - `open_gripper()` / `close_gripper()` → `OPEN_GRIPPER` / `CLOSE_GRIPPER`.
 
 ### Reviewer & correction (`task_completed` → `run_vlm_review`)
@@ -1011,6 +1146,23 @@ body surviving the feedback path.
 ---
 
 ## Changelog
+
+- **Side (horizontal) gripper approach for vertical handles** (§7): poses may now be len-6
+  `[x,y,z,roll,pitch,yaw]` as well as the historical len-4 `[x,y,z,rotation]` — **length is
+  the only discriminator**, and the len-4 path is byte-identical to before, so no existing
+  task can drift. The LLM never writes Euler angles: it makes a named binary choice between
+  the injected `grasp_pose` / `side_grasp_pose` builders, and the rule for *when* to switch
+  is confined to the door/cabinet `SKILL.md` (§2b) so plain tabletop tasks never see the
+  extra DOF. Both sims are covered by one branch in `env.py` (Genesis reuses
+  `run_simulation_environment`). Fixed on the way: `Robot.move` applied its gripper depth
+  offset along world −Z, a top-down-only assumption that pushed side-approach targets below
+  the handle; and the orientation-convergence check was found to be **dead code** (it
+  compares a pitch of `pi` against an `asin` result clamped to ±pi/2) — now isolated in
+  `_orientation_reached` behind `config.use_quat_orientation_convergence`, default off
+  because enabling it would shift every golden fixture. Tests: `tests/test_side_approach.py`
+  (25, free), opt-in `tests/test_side_approach_e2e.py` (drives the real env subprocess and
+  opens `franka_kitchen:slide_cabinet`), and `tests/tools/prompt_decision_probe.py`, which
+  scores the risk that actually matters — whether the model picks the right approach.
 
 - **Lazily-loaded agent skills** (§12): `SKILL.md` tree under `prompts/skills/` with a mandatory
   `scope` key (planner vs subtask catalogs, enforced by a lenient frontmatter grep before any

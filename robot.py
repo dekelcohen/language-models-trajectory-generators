@@ -7,6 +7,7 @@ from debug import trace_utils
 from helpers.image_utils import draw_text_overlay_image
 from robot_profiles import get_robot_profile
 from sim_adapter import camera_math
+from sim_adapter import transforms
 from sim_adapter.camera_math import spherical_camera_pose
 from PIL import Image
 from config import fov, aspect, near_plane, far_plane
@@ -186,9 +187,52 @@ class Robot:
             
             self.trajectory_step += 1    
 		
+    def _orientation_reached(self, current_orientation_e, target_orientation_e,
+                             current_orientation_q=None, target_orientation_q=None):
+        """Has the end-effector reached the target orientation?
+
+        Default (`config.use_quat_orientation_convergence = False`) is the historical
+        component-wise Euler test, kept verbatim so move timing - and therefore every
+        recorded frame - is unchanged. See the note in config.py: that test can never
+        actually succeed for a top-down target, so the loop relies on its iteration caps.
+
+        With the flag on, the true angle between the two orientations is used instead,
+        which is representation-independent and does converge.
+        """
+        if config.use_quat_orientation_convergence:
+            if current_orientation_q is None:
+                current_orientation_q = self.sim.quat_from_euler(current_orientation_e)
+            if target_orientation_q is None:
+                target_orientation_q = self.sim.quat_from_euler(target_orientation_e)
+            return transforms.quat_angle_between(current_orientation_q, target_orientation_q) <= config.quat_orientation_margin_error
+
+        return (current_orientation_e[0] <= target_orientation_e[0] + config.margin_error and current_orientation_e[0] >= target_orientation_e[0] - config.margin_error and
+                current_orientation_e[1] <= target_orientation_e[1] + config.margin_error and current_orientation_e[1] >= target_orientation_e[1] - config.margin_error and
+                current_orientation_e[2] <= target_orientation_e[2] + config.margin_error and current_orientation_e[2] >= target_orientation_e[2] - config.margin_error)
+
+    def _apply_gripper_depth_offset(self, ee_target_position, ee_target_orientation_e, offset):
+        """Shift a grasp point back along the gripper's own approach axis.
+
+        Trajectory points name where the *fingers* should end up; IK is solved for the
+        end-effector link, which sits `offset` behind them. Historically this was written
+        as `position[2] -= offset`, which silently assumes the gripper points straight
+        down - true for every top-down pose but wrong for a side approach, where it would
+        push the target below the handle instead of away from it.
+
+        The general form is `position + offset * approach_axis` (the end-effector's +Z
+        column). For a top-down pose the approach axis is [0, 0, -1] and this reduces to
+        the historical expression, which is used verbatim in that case so no existing
+        trajectory can drift by even a floating-point ulp.
+        """
+        position = list(ee_target_position)
+        approach_axis = transforms.approach_axis_from_euler(ee_target_orientation_e)
+        if max(abs(approach_axis[0]), abs(approach_axis[1]), abs(approach_axis[2] + 1.0)) < 1e-6:
+            position[2] -= offset
+            return position
+        return [position[i] + offset * approach_axis[i] for i in range(3)]
+
     @trace_utils.traced("Robot.move")
     def move(self, env, ee_target_position, ee_target_orientation_e, gripper_open, is_trajectory, desc=None):
-
         if desc is not None:
             self.desc = desc
 
@@ -197,14 +241,12 @@ class Robot:
             gripper2_index = self.gripper_motor
             gripper_target_position = config.gripper_goal_position_open_sawyer if gripper_open else config.gripper_goal_position_closed_sawyer
             if is_trajectory:
-                ee_target_position = list(ee_target_position)
-                ee_target_position[2] -= config.gripper_depth_offset_sawyer
+                ee_target_position = self._apply_gripper_depth_offset(ee_target_position, ee_target_orientation_e, config.gripper_depth_offset_sawyer)
         elif self.robot == "franka":
             gripper1_index, gripper2_index = self.gripper_joint_indices
             gripper_target_position = config.gripper_goal_position_open_franka if gripper_open else config.gripper_goal_position_closed_franka
             if is_trajectory:
-                ee_target_position = list(ee_target_position)
-                ee_target_position[2] -= config.gripper_depth_offset_franka
+                ee_target_position = self._apply_gripper_depth_offset(ee_target_position, ee_target_orientation_e, config.gripper_depth_offset_franka)
 
         movable_joints = self.sim.get_movable_joints(self.id)
         min_joint_positions = [j.lower_limit for j in movable_joints]
@@ -228,9 +270,7 @@ class Robot:
         while (not (ee_current_position[0] <= ee_target_position[0] + config.margin_error and ee_current_position[0] >= ee_target_position[0] - config.margin_error and
                     ee_current_position[1] <= ee_target_position[1] + config.margin_error and ee_current_position[1] >= ee_target_position[1] - config.margin_error and
                     ee_current_position[2] <= ee_target_position[2] + config.margin_error and ee_current_position[2] >= ee_target_position[2] - config.margin_error and
-                    ee_current_orientation_e[0] <= ee_target_orientation_e[0] + config.margin_error and ee_current_orientation_e[0] >= ee_target_orientation_e[0] - config.margin_error and
-                    ee_current_orientation_e[1] <= ee_target_orientation_e[1] + config.margin_error and ee_current_orientation_e[1] >= ee_target_orientation_e[1] - config.margin_error and
-                    ee_current_orientation_e[2] <= ee_target_orientation_e[2] + config.margin_error and ee_current_orientation_e[2] >= ee_target_orientation_e[2] - config.margin_error and
+                    self._orientation_reached(ee_current_orientation_e, ee_target_orientation_e, ee_current_orientation_q, ee_target_orientation_q) and
                     gripper1_current_position <= gripper_target_position + config.gripper_margin_error and gripper1_current_position >= gripper_target_position - config.gripper_margin_error and
                     gripper2_current_position <= gripper_target_position + config.gripper_margin_error and gripper2_current_position >= gripper_target_position - config.gripper_margin_error)):
 
@@ -278,9 +318,7 @@ class Robot:
             if ((ee_current_position[0] <= ee_target_position[0] + config.margin_error and ee_current_position[0] >= ee_target_position[0] - config.margin_error and
                 ee_current_position[1] <= ee_target_position[1] + config.margin_error and ee_current_position[1] >= ee_target_position[1] - config.margin_error and
                 ee_current_position[2] <= ee_target_position[2] + config.margin_error and ee_current_position[2] >= ee_target_position[2] - config.margin_error and
-                ee_current_orientation_e[0] <= ee_target_orientation_e[0] + config.margin_error and ee_current_orientation_e[0] >= ee_target_orientation_e[0] - config.margin_error and
-                ee_current_orientation_e[1] <= ee_target_orientation_e[1] + config.margin_error and ee_current_orientation_e[1] >= ee_target_orientation_e[1] - config.margin_error and
-                ee_current_orientation_e[2] <= ee_target_orientation_e[2] + config.margin_error and ee_current_orientation_e[2] >= ee_target_orientation_e[2] - config.margin_error) and
+                self._orientation_reached(ee_current_orientation_e, ee_target_orientation_e, ee_current_orientation_q, ee_target_orientation_q)) and
                 (not gripper_open) and
                 math.isclose(gripper1_new_position, gripper1_current_position, rel_tol=config.rel_tol, abs_tol=config.abs_tol) and
                 math.isclose(gripper2_new_position, gripper2_current_position, rel_tol=config.rel_tol, abs_tol=config.abs_tol)):

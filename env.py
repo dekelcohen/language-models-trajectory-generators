@@ -245,6 +245,24 @@ def handle_add_trajectory_points(sim, trajectory, color_spec, permanent, marker_
 # Sim-env profiles (grasp / door / franka_kitchen / ...) live in the
 # sim_envs package. Resolve a --task name via sim_envs.registry.get_simenv.
 
+def trajectory_point_orientation(ee_start_orientation_e, point):
+    """Orientation a trajectory point asks for, as ``robot.move`` consumes it.
+
+    Pose length is the format discriminator (see ``common_utils``):
+      * len 4 -> ``[x, y, z, rotation]``, top-down. The historical expression, kept
+        literally so no existing top-down task can drift.
+      * len 6 -> ``[x, y, z, roll, pitch, yaw]``, absolute orientation, produced by
+        ``side_grasp_pose()`` for targets with no graspable top face.
+    """
+    if len(point) == 6:
+        return np.array(point[3:6], dtype=float)
+    if len(point) == 4:
+        return np.array(ee_start_orientation_e) + np.array([0, 0, point[3]])
+    raise ValueError(
+        f"Trajectory point must have length 4 or 6, got {len(point)}: {point}"
+    )
+
+
 class Environment:
 
     def __init__(self, args, sim):
@@ -546,7 +564,11 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                     desc = None
 
                 for i, point in enumerate(trajectory):
-                    robot.move(env, point[:3], np.array(robot.ee_start_orientation_e) + np.array([0, 0, point[3]]), gripper_open=robot.gripper_open, is_trajectory=True, desc=desc if i == 0 else None)
+                    try:
+                        ee_target_orientation_e = trajectory_point_orientation(robot.ee_start_orientation_e, point)
+                    except ValueError as e:
+                        raise ValueError(f"Trajectory point {i}: {e}") from e
+                    robot.move(env, point[:3], ee_target_orientation_e, gripper_open=robot.gripper_open, is_trajectory=True, desc=desc if i == 0 else None)
 
                 step_env_and_record_loop(env, robot)                
                 

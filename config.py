@@ -9,6 +9,22 @@ joint_margin_error = 0.01
 rel_tol = 1e-4
 abs_tol = 0.0
 
+# Robot.move's orientation convergence test.
+#
+# The legacy test compares roll/pitch/yaw component-wise against `margin_error`. That test
+# is dead code: `transforms.euler_from_quat` derives pitch with `asin`, so it can only ever
+# return pitch in [-pi/2, pi/2], while the top-down target `ee_start_orientation_e` has
+# pitch = pi. The comparison is therefore never satisfiable and the move loop only ever
+# exits via its iteration caps (1 step for trajectory points, 100 for standalone moves).
+#
+# `_orientation_reached` below can instead measure the true angle between the current and
+# target quaternions, which does converge. It is OFF by default on purpose: enabling it
+# lets standalone moves exit early, changing sim step counts, and therefore the recorded
+# frame sequences and every golden fixture derived from them. Flip it only together with a
+# regression re-baseline.
+use_quat_orientation_convergence = False
+quat_orientation_margin_error = 0.01  # radians, only used when the flag above is True
+
 # Robots
 gripper_goal_position_open_sawyer = 0.2
 gripper_goal_position_closed_sawyer = 1.0
