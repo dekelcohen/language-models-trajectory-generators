@@ -73,6 +73,7 @@ def build_arg_parser():
     parser.add_argument("--vis-grasp", action="store_true", help="visualize grasp pose candidates in the 3D sim environment (cylinder/sphere markers)")
     parser.add_argument("--vis-box", type=str, default=None, help="Visualize 3D bounding box in sim for objects whose label matches this regex (e.g. 'handle|knob'). Uses cylinder markers visible in camera captures.")
     parser.add_argument("--save-grasp-inputs", action="store_true", help="save binary segmentation mask (masks[0]) as .npy and projection/view matrices as .npy under images_folder after each detect_object call")
+    parser.add_argument("-c", "--command", action="append", default=None, metavar="TEXT", help="run this command non-interactively instead of prompting (repeatable; commands run in order, then the agent exits)")
     parser.add_argument("--replay-log", type=str, default=None, help="Path to a log file of conversation with ```python blocks to execute. LLM-less execution")
     parser.add_argument("--replay-vlm-review", action="store_true", default=False, help="When replaying a log, also execute VLM-review code blocks between attempts (default: False, skip VLM review)")
     parser.add_argument("--learn-from-trajs", type=str, default=None, help="Path to a text file of past trajectories to learn from. Generates an improved in-context example via LLM and exits.")
@@ -175,6 +176,13 @@ def main():
         # Query ground-truth state (all objects/geoms) for cross-check
         if args.sim == "metaworld" and hasattr(ctx.main_connection, "send"):
             query_sim_objects_state(ctx.main_connection, logger)
+
+        # Non-interactive: run the commands given on the command line, then exit.
+        if args.command:
+            for command in args.command:
+                logger.info(PROGRESS + f"Enter a command: {command}" + ENDC)
+                run_plan(ctx, command)
+            return
 
         # Interactive command loop: plan + execute each user command
         while True:
