@@ -255,6 +255,19 @@ environment variables (see `tests/README.md` for the full table):
 | `GENESIS_CONDA_ENV` | `vlm_genesis` | Conda env name to auto-discover |
 | `GENESIS_HOST` / `GENESIS_PORT` | `127.0.0.1` / `8770` | Where the child serves IPC |
 
+**Creating the `vlm_genesis` conda env:**
+```bash
+conda create -n vlm_genesis python=3.11 -y
+conda activate vlm_genesis
+pip install -r sim_envs/genesis/requirements.genesis.txt
+```
+`sim_envs/genesis/requirements.genesis.txt` pins Genesis's own dependencies (`genesis-world`),
+kept isolated from this repo's `requirements.txt` on purpose. Re-run the `pip install` after
+pulling changes to that file. To verify the install:
+```bash
+<vlm_genesis>/python.exe sim_envs/genesis/genesis_env.py --task door --direct
+```
+
 Any scene can be inspected interactively in either simulator, without the LLM stack:
 ```bash
 python env.py --task door --sim pybullet              # PyBullet GUI (in-process)

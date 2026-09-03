@@ -15,7 +15,7 @@ from sim_envs.pybullet.door import SimEnvDoor
 from sim_envs.pybullet.grasp import SimEnvGrasp
 
 # Keywords that select the Adroit door scene when no suite prefix is given.
-_LEGACY_DOOR_KEYWORDS = ["door", "open_door", "opendoor", "sawyer_door_v3", "franka_door"]
+_LEGACY_DOOR_KEYWORDS = ["door", "open_door", "opendoor", "sawyer_door_v3", "franka_door", "door:hidden"]
 
 
 def _franka_kitchen_suite():
@@ -34,7 +34,7 @@ _SUITES = {
 
 def list_task_ids():
     """Return every selectable task id (namespaced suites + legacy names)."""
-    ids = ["grasp", "door"]
+    ids = ["grasp", "door", "door:hidden"]
     for suite, loader in _SUITES.items():
         try:
             task_ids, _cls = loader()
@@ -54,6 +54,14 @@ def get_simenv(task_name, sim=None):
     suite - silently falling back to the grasp scene would hide typos.
     """
     name = (task_name or "").strip()
+    lowered_full = name.lower()
+
+    # Plain "door" hides the pole (no hiding object); "door:hidden" keeps the
+    # pole-hiding behavior. Both bypass the generic suite (":") routing below.
+    if lowered_full == "door":
+        return SimEnvDoor(sim, hide_door_with_object=False)
+    if lowered_full == "door:hidden":
+        return SimEnvDoor(sim, hide_door_with_object=True)
 
     if ":" in name:
         suite, _, task = name.partition(":")
@@ -79,5 +87,5 @@ def get_simenv(task_name, sim=None):
 
     lowered = name.lower()
     if any(k in lowered for k in _LEGACY_DOOR_KEYWORDS):
-        return SimEnvDoor(sim)
+        return SimEnvDoor(sim, hide_door_with_object=True)
     return SimEnvGrasp(sim)

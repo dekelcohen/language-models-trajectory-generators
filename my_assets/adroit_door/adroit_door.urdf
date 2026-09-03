@@ -35,34 +35,37 @@
     </inertial>
     
     <!-- Right Post (Hinge Side) -->
-    <!-- MJCF: pos 0.6, size 0.05 0.25 (r, h) -->
+    <!-- MJCF: pos 0.6, size 0.05 0.25 (r, h). Length/origin.z extended so the post's
+         bottom edge reaches world z=0 (floor) given door_start_position=[-0.11,0.04,0.25]
+         and the world_to_frame joint's z=0.447376 offset; top edge (world z=0.947376)
+         is kept unchanged so the hinge/handle/latch geometry above is unaffected. -->
     <visual>
-      <origin xyz="0.6 0 0" rpy="0 0 0"/>
+      <origin xyz="0.6 0 -0.223688" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.5"/>
+        <cylinder radius="0.05" length="0.947376"/>
       </geometry>
       <material name="MatWood"/>
     </visual>
     <collision>
-      <origin xyz="0.6 0 0" rpy="0 0 0"/>
+      <origin xyz="0.6 0 -0.223688" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.5"/>
+        <cylinder radius="0.05" length="0.947376"/>
       </geometry>
     </collision>
 
     <!-- Left Post -->
-    <!-- MJCF: pos -0.02 -->
+    <!-- MJCF: pos -0.02. Extended to floor, see Right Post note above. -->
     <visual>
-      <origin xyz="-0.02 0 0" rpy="0 0 0"/>
+      <origin xyz="-0.02 0 -0.223688" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.5"/>
+        <cylinder radius="0.05" length="0.947376"/>
       </geometry>
       <material name="MatWood"/>
     </visual>
     <collision>
-      <origin xyz="-0.02 0 0" rpy="0 0 0"/>
+      <origin xyz="-0.02 0 -0.223688" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.5"/>
+        <cylinder radius="0.05" length="0.947376"/>
       </geometry>
     </collision>
   </link>
@@ -93,37 +96,42 @@
     </inertial>
 
     <!-- Main Board -->
-    <!-- Offset by -0.31 to shift body center away from pivot -->
+    <!-- Offset by -0.31 to shift body center away from pivot. Extended downward (z origin
+         shifted, height grown) so the panel's bottom edge sits 0.05 m above the floor,
+         given door_start_position=[-0.11,0.04,0.25]; top edge (world z=0.947376, level
+         with the frame posts/hinge) kept unchanged so hinge/latch/handle geometry is
+         unaffected. Rotation is about the vertical hinge axis only, so this vertical
+         extension stays correct at any swing angle. -->
     <visual>
-      <origin xyz="-0.31 0 0" rpy="0 0 0"/>
+      <origin xyz="-0.31 0 -0.198688" rpy="0 0 0"/>
       <geometry>
-        <box size="0.4 0.1 0.5"/> 
+        <box size="0.4 0.1 0.897376"/> 
       </geometry>
       <material name="MatWood"/>
     </visual>
     <collision>
-      <origin xyz="-0.31 0 0" rpy="0 0 0"/>
+      <origin xyz="-0.31 0 -0.198688" rpy="0 0 0"/>
       <geometry>
-        <box size="0.4 0.1 0.5"/>
+        <box size="0.4 0.1 0.897376"/>
       </geometry>
     </collision>
 
     <!-- Inner Cylinder -->
-    <!-- MJCF 0.2. New: 0.2 - 0.31 = -0.11 -->
+    <!-- MJCF 0.2. New: 0.2 - 0.31 = -0.11. Extended to match Main Board, see note above. -->
     <visual>
-      <origin xyz="-0.11 0 0" rpy="0 0 0"/>
+      <origin xyz="-0.11 0 -0.198688" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.5"/>
+        <cylinder radius="0.05" length="0.897376"/>
       </geometry>
       <material name="MatWood"/>
     </visual>
 
     <!-- Outer Cylinder -->
-    <!-- MJCF -0.2. New: -0.2 - 0.31 = -0.51 -->
+    <!-- MJCF -0.2. New: -0.2 - 0.31 = -0.51. Extended to match Main Board, see note above. -->
     <visual>
-      <origin xyz="-0.51 0 0" rpy="0 0 0"/>
+      <origin xyz="-0.51 0 -0.198688" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.5"/>
+        <cylinder radius="0.05" length="0.897376"/>
       </geometry>
       <material name="MatWood"/>
     </visual>

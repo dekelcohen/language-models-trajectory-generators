@@ -16,8 +16,10 @@ class SimEnvDoor(SimEnvBase):
     URDF loading and controller force setup occur here.
     """
 
-    def __init__(self, sim=None):
+    def __init__(self, sim=None, hide_door_with_object=True):
         super().__init__(sim)
+        # Whether to spawn a hiding pole occluding the door (legacy "door:hidden" task).
+        self.hide_door_with_object = hide_door_with_object
         # Debug visualizer camera (GUI) used in run_gui_demo
         config.camera_distance = 1.0
         config.camera_yaw = 190.0
@@ -103,13 +105,20 @@ class SimEnvDoor(SimEnvBase):
             if self.latch_index is not None:
                 self.sim.set_joint_position(self.door_id, self.latch_index, target=0.0, force=200)
 
-            HIDE_DOOR_WITH_OBJECT = True
-            if HIDE_DOOR_WITH_OBJECT:
+            if self.hide_door_with_object:
                 self._load_pole()
                 #self._load_board()
+
         except Exception as e:
             print("[Env] Failed to load or initialize adroit_door URDF:", e)
             traceback.print_exc()
+
+    # NOTE: the adroit_door frame posts (URDF ``frame_link``) used to be only 0.5 m
+    # tall, leaving their bottom edge ~0.447 m above the ground (identical in both
+    # simulators). Rather than add a cosmetic floor support here, the posts themselves
+    # were lengthened directly in ``my_assets/adroit_door/adroit_door.urdf`` (bottom
+    # edge now at world z=0) while keeping their top edge exactly where it was, so no
+    # tuned door_start_position/handle/hinge/latch coordinate is affected.
 
     def _load_pole(self):
         """Add a vertical pole standing between the robot arm and the door.
