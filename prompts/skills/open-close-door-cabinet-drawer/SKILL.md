@@ -94,10 +94,12 @@ side_grasp_pose(x, y, z, rotation, approach_yaw) -> pose
   is what a vertical bar needs.** Use `math.pi / 2` only for a *horizontal* bar that you
   are forced to reach from the side.
 
-Never write orientation angles by hand; the returned pose is longer than the top-down one
-and `generate_linear_trajectory` / `execute_trajectory` accept either length. You may chain
-a top-down hover straight into a side pose - the orientation is interpolated for you - but
-do that **away from the door**, never while the fingers are near the panel.
+Never write orientation angles by hand. The pose this returns is **longer than 4** - that is
+deliberate, and it overrides the "each pose should be of length 4" rule in the main prompt
+for these poses only. `generate_linear_trajectory` and `execute_trajectory` accept either
+length. You may chain a top-down hover straight into a side pose - the orientation is
+interpolated for you - but do that **away from the door**, never while the fingers are near
+the panel.
 
 ### Procedure for a vertical bar handle
 

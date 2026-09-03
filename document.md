@@ -474,23 +474,32 @@ cannot perturb existing top-down tasks. Both lengths are accepted by
 `generate_linear_trajectory`, `execute_trajectory`, the `ADD_TRAJECTORY_POINTS` preview
 (which only reads `point[:3]`) and the JSON IPC codec (points are plain nested lists).
 
-Two pure builders are injected into the LLM's interpreter alongside the API functions
-(`helpers/main_utils.get_exec_locals`), so generated code never writes Euler angles by hand
-— it makes a **named binary choice** instead of reasoning about six free numbers:
+**Exactly one** builder is injected into the LLM's interpreter alongside the API functions
+(`helpers/main_utils.get_exec_locals`) — only the genuinely new capability gets a name:
 
-- `grasp_pose(x, y, z, rotation=0.0)` → len-4 top-down.
 - `side_grasp_pose(x, y, z, rotation, approach_yaw)` → len-6 horizontal approach, for
   targets with no graspable top face (**vertical bar handles**). `approach_yaw` is the
   azimuth the gripper points *toward* the target (a door's inward face normal);
   `rotation` is roll about that axis, `0` = fingers close horizontally across a vertical bar.
 
-**Prompt gating.** `main_prompt.py` gains exactly one sentence ("top-down is the default;
-side approach only via the helper a loaded SKILL documents"). All real guidance — the hard
-top-down-first rule, the 3 triggers that justify switching, and a worked example — lives in
-`prompts/skills/open-close-door-cabinet-drawer/SKILL.md` §2b, so a plain tabletop task never
-sees the extra degrees of freedom. The LLM classifies "vertical bar" itself from the
-`Height` vs `Width`/`Length` that `detect_object` already prints; **no perception code
-changed**.
+Top-down poses stay plain `[x, y, z, rotation]` lists, exactly as every prompt example
+already teaches. `common_utils.grasp_pose()` exists as the documented counterpart and is
+used by the tests, but it is **not injected**: `main_prompt.py`'s worked examples bind
+`grasp_pose` to a *list* (`grasp_pose = [pos_x, pos_y, z_grasp, grip_orientation]`, then
+`grasp_pose[2] - downward_press_distance`), so injecting a callable of that name put a
+function and a list behind one identifier in the same persistent namespace. Guarded by
+`InterpreterNamespace` in `tests/test_side_approach.py`.
+
+**Prompt gating is skill-only: `main_prompt.py` is not modified at all.** Every word of
+guidance — the hard top-down-first rule, the 3 triggers that justify switching, the
+statement that these poses are deliberately longer than 4, and a worked example — lives in
+`prompts/skills/open-close-door-cabinet-drawer/SKILL.md` §2b. A plain tabletop task
+therefore sees a **byte-identical prompt** to before the feature, which keeps its LLM-cache
+entries valid and its behaviour unchanged. (An earlier revision added one sentence to
+`main_prompt.py`; it was reverted after a grasp-and-lift task started needing retries —
+changing the shared prompt changes every task's cache key and sampled output.) The LLM
+classifies "vertical bar" itself from the `Height` vs `Width`/`Length` that `detect_object`
+already prints; **no perception code changed**.
 
 <details>
 <summary>Orientation maths (<code>sim_adapter/transforms.py</code>)</summary>
@@ -1150,9 +1159,11 @@ body surviving the feedback path.
 - **Side (horizontal) gripper approach for vertical handles** (§7): poses may now be len-6
   `[x,y,z,roll,pitch,yaw]` as well as the historical len-4 `[x,y,z,rotation]` — **length is
   the only discriminator**, and the len-4 path is byte-identical to before, so no existing
-  task can drift. The LLM never writes Euler angles: it makes a named binary choice between
-  the injected `grasp_pose` / `side_grasp_pose` builders, and the rule for *when* to switch
-  is confined to the door/cabinet `SKILL.md` (§2b) so plain tabletop tasks never see the
+  task can drift. The LLM never writes Euler angles: it either writes the plain
+  `[x, y, z, rotation]` list it always wrote, or calls the one injected `side_grasp_pose`
+  builder — and the rule for *when* to switch
+  is confined to the door/cabinet `SKILL.md` (§2b), with **`main_prompt.py` left untouched**,
+  so plain tabletop tasks see a byte-identical prompt and never see the
   extra DOF. Both sims are covered by one branch in `env.py` (Genesis reuses
   `run_simulation_environment`). Fixed on the way: `Robot.move` applied its gripper depth
   offset along world −Z, a top-down-only assumption that pushed side-approach targets below

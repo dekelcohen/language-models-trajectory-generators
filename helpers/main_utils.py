@@ -20,7 +20,9 @@ def get_exec_locals(api, logger):
         "close_gripper": api.close_gripper,
         "task_completed": api.task_completed,
         "generate_linear_trajectory": api.generate_linear_trajectory,
-        "grasp_pose": common_utils.grasp_pose,
+        # Top-down poses stay plain `[x, y, z, rotation]` lists - no helper, because the
+        # prompt's own worked examples bind the name `grasp_pose` to a list. Only the side
+        # approach gets a builder, and only a loaded SKILL tells the model it exists.
         "side_grasp_pose": common_utils.side_grasp_pose,
         "api": api,
         "math": math,
