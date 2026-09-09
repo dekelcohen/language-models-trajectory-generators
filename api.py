@@ -614,7 +614,7 @@ class API:
         models.strip_images_from_messages(messages)
         media_desc = f"{len(video_paths)} video(s)" if use_video else f"{len(frame_paths)} frames (stride=5)"
         self.logger.info(PROGRESS + f"==================== VLM review using {media_desc}, start_idx={start_idx}, scene_image={'yes' if has_scene_image else 'no'}, model={review_model}." + ENDC)
-        messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=review_image_paths, video_paths=video_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache})
+        messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=review_image_paths, video_paths=video_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache, "conversation_key": f"{self.task.conversation_key}-review"})
         # Drop the fresh review media now that the review is done, so it doesn't persist in the shared conversation
         models.strip_images_from_messages(messages)
         # Update shared conversation

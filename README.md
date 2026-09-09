@@ -126,7 +126,7 @@ The system talks to several third-party APIs. **Which keys you need depends enti
 | Environment variable | Required when | Where to get it |
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | Any model prefixed with `or-` is used, e.g. `-lm or-google/gemini-3.6-flash`, `--review-provider vlm:or-openai/gpt-5.5`, `--planner-perception-vlm or-…` | [openrouter.ai/keys](https://openrouter.ai/keys) |
-| `GEMINI_API_KEY` | Any model called directly against the Gemini API (names starting with `gemini-`), e.g. `--planner-perception-vlm gemini-3.7-flash` (the default) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `GEMINI_API_KEY` | Any model called directly against the Gemini API (names starting with `gemini-`), e.g. `--planner-perception-vlm gemini-3.8-flash` (the default) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `AWS_PROFILE`, `AWS_REGION` | Any AWS Bedrock model is used. `AWS_PROFILE` selects the local AWS credentials profile (default `default`), `AWS_REGION` the Bedrock region (default `eu-central-1`) | Your AWS account / `aws configure` |
 | `AWS_BEDROCK_GUARDRAIL_ID` | Optional, Bedrock only — applies a Bedrock Guardrail to each invocation (with optional `AWS_BEDROCK_GUARDRAIL_VERSION`, default `DRAFT`) | AWS Bedrock console |
 | `MOONDREAM_API_KEY` | `--seg-provider moondream` (the default segmentation provider) | [moondream.ai](https://moondream.ai/) console |
@@ -134,6 +134,8 @@ The system talks to several third-party APIs. **Which keys you need depends enti
 | `OPENAI_API_KEY` | Plain OpenAI models (e.g. `-lm gpt-4o`) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
 
 Using `--seg-provider langsam` runs locally and needs no key.
+
+**GitHub Copilot CLI (no API key).** Any model prefixed with `copilot-` — e.g. `-lm copilot-claude-opus-5`, `--review-provider vlm:copilot-gpt-5.4` — is served by the locally installed [`copilot` CLI](https://docs.github.com/copilot/how-tos/copilot-cli) using your existing `copilot` login, so no environment variable is needed (set `COPILOT_CLI_PATH` only if `copilot` is not on `PATH`). The suffix is passed straight to `copilot --model`, and `--reasoning-effort` maps to `--effort`; `--max-tokens` has no CLI equivalent and is ignored. Because the CLI takes a single prompt rather than a messages array, the conversation is replayed into a `copilot` session (`--session-id` / `--resume`) and images are attached as files (`--attachment`); see `providers/llms/copilot_cli.py`. Video is not supported on this path, so reviewers fall back to key frames.
 
 Keys are read from the process environment; `main.py` calls `load_dotenv()` on startup, so the simplest option is a local `.env` file in the project root:
 ```

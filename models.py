@@ -167,10 +167,11 @@ CHATGPT_DEFAULT_OPTIONS = {
     "reasoning_effort": None,
     "cache": None,          # LLMCache instance, or None to disable caching
     "cache_env_state": None,  # sim/env state dict used for level-2 smart match
+    "conversation_key": None,  # logical conversation id (see copilot_cli); e.g. "planner"
 }
 
 
-def call_llm_provider(client, model, messages, max_tokens, reasoning_effort):
+def call_llm_provider(client, model, messages, max_tokens, reasoning_effort, conversation_key=None):
     """Dispatch to the correct provider and return the assistant response string"""
     if model.startswith("azure-"):
         from providers.llms.azure_openai import call_llm
@@ -180,6 +181,13 @@ def call_llm_provider(client, model, messages, max_tokens, reasoning_effort):
         from providers.llms.openrouter import call_openrouter
         openrouter_model = model[len("or-"):]
         new_output = call_openrouter(messages, model=openrouter_model, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
+    elif model.startswith("copilot-"):
+        # GitHub Copilot CLI: it takes no messages array - the conversation is replayed
+        # into a copilot session instead (see providers/llms/copilot_cli.py).
+        from providers.llms.copilot_cli import call_copilot
+        copilot_model = model[len("copilot-"):]
+        new_output = call_copilot(messages, model=copilot_model, max_tokens=max_tokens,
+                                  reasoning_effort=reasoning_effort, conversation_key=conversation_key)
     elif model.startswith("aws-"):
         from providers.llms.aws_bedrock import call_llm as call_bedrock
         bedrock_model_id = model[len("aws-"):]
@@ -226,6 +234,7 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
     reasoning_effort = opts["reasoning_effort"]
     cache = opts["cache"]
     cache_env_state = opts["cache_env_state"]
+    conversation_key = opts["conversation_key"]
     
     logger.info(f"{role}:\n{new_prompt}")    
     
@@ -237,7 +246,8 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
     produced = {"called": False}
     def _producer():
         produced["called"] = True
-        return call_llm_provider(client, model, messages, max_tokens, reasoning_effort)
+        return call_llm_provider(client, model, messages, max_tokens, reasoning_effort,
+                                 conversation_key=conversation_key)
 
     # Cache key is built AFTER images and everything are appended to messages.
     if cache is not None:
@@ -298,12 +308,14 @@ def model_supports_video(model):
       - azure-* : NO  - Azure OpenAI chat completions accept images only.
       - aws-*   : NO  - Bedrock's Converse video blocks only exist for Amazon Nova,
                   which this repo does not use (Claude on Bedrock has no video modality).
+      - copilot-*: NO - the copilot CLI's --attachment takes images/PDFs only, whatever
+                  the underlying model (e.g. copilot-gemini-*) can do natively.
       - gemini-*, or-<google/gemini-*> : YES (matched via the model registry).
       - other OpenAI-compatible : NO (no registry entry -> DEFAULT_MODEL_INFO).
     Callers (e.g. api.run_vlm_review) fall back to key frames when this is False.
     """
     m = (model or "").lower()
-    if m.startswith("azure-") or m.startswith("aws-"):
+    if m.startswith("azure-") or m.startswith("aws-") or m.startswith("copilot-"):
         return False
     return get_model_info(m).supports_video
 

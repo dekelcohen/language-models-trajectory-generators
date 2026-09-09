@@ -195,7 +195,8 @@ def run_scene_perception(ctx, command):
         messages = models.call_llm_cached(
             ctx.main_connection, ctx.client, args.planner_perception_vlm, prompt, [], role="system",
             image_paths=image_paths,
-            options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache},
+            options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache,
+                     "conversation_key": "perception"},
         )
         text = messages[-1]["content"] if messages and isinstance(messages[-1], dict) else ""
         text = (text or "").strip()

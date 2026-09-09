@@ -15,6 +15,7 @@ Run:
 import os
 import sys
 import shutil
+import logging
 import tempfile
 import unittest
 
@@ -46,11 +47,15 @@ class LLMCacheTestBase(unittest.TestCase):
         self.tmp_dir = tempfile.mkdtemp(prefix="llm_cache_test_")
         self.cache = LLMCache(cache_dir=self.tmp_dir, float_tolerance=1e-2)
 
+        # models.logger is a module global normally installed by main.py.
+        self._orig_logger = models.logger
+        models.logger = logging.getLogger("test_llm_cache")
+
         # Count provider invocations and return a deterministic, unique response.
         self.provider_calls = 0
         self._orig_provider = models.call_llm_provider
 
-        def fake_provider(client, model, messages, max_tokens, reasoning_effort, file):
+        def fake_provider(client, model, messages, max_tokens, reasoning_effort, conversation_key=None):
             self.provider_calls += 1
             return f"RESP-{self.provider_calls}"
 
@@ -58,6 +63,7 @@ class LLMCacheTestBase(unittest.TestCase):
 
     def tearDown(self):
         models.call_llm_provider = self._orig_provider
+        models.logger = self._orig_logger
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def _opts(self, **overrides):
