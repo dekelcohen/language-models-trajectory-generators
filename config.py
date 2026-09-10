@@ -142,6 +142,52 @@ CAPTURE_TRAJECTORY_FRAME = 19
 GET_ROBOT_STATE = 20
 VISUALIZE_GRASP_POSE = 21
 VISUALIZE_BOUNDING_BOX = 22
+# Rollout tracking (see tracking/ and providers/trackers/)
+START_TRACKING = 23
+STOP_TRACKING = 24
+GET_TRACKING_REPORT = 25
+
+# --- Rollout tracking -------------------------------------------------------
+# Tracking is opt-in (--tracking). When disabled nothing in the capture path changes,
+# so the PyBullet regression goldens stay bit-identical.
+tracking_enabled_default = False
+tracker_provider_default = "template"   # template | csrt | remote
+tracking_cameras = ("head", "wrist")
+# Run the tracker every Nth recorded keyframe (1 = every keyframe).
+track_interval = 1
+# Half-size, in pixels, of the square patch a point tracker follows around each point.
+track_patch_half = 12
+# Sub-window (in patch half-sizes) the template tracker searches around the last position.
+track_search_scale = 3.0
+# A projected world point counts as visible in a camera only when the rendered depth at
+# that pixel agrees with the expected depth to within this many metres. This is what
+# stops a re-seed from latching onto the robot arm occluding the object.
+track_occlusion_tol = 0.03
+# Depth samples outside this metric range are treated as invalid (sky / near-plane).
+track_depth_min = 0.02
+track_depth_max = 5.0
+# Per-point tracker confidence below which a point is dropped.
+track_point_conf_min = 0.35
+# Camera-level confidence below which the camera is a re-seed candidate ...
+track_reseed_conf = 0.45
+# ... after this many consecutive unhealthy frames ...
+track_reseed_patience = 2
+# ... and never more often than this many tracked frames.
+track_reseed_cooldown = 5
+# Per-camera world points further apart than this (metres) are a "disagreement".
+track_disagree_m = 0.08
+# Fused world point may not jump more than this (metres) between consecutive tracked
+# frames without losing temporal-continuity health.
+track_max_jump_m = 0.15
+# Object is reported lost after this many consecutive frames with no healthy camera.
+track_lost_patience = 3
+# Built-in attached_to_gripper monitor defaults.
+track_attach_max_dist = 0.12
+track_attach_grace_frames = 3
+# Outputs
+tracking_output_dir = "./outputs/tracking"
+tracking_log_name = "track.jsonl"
+tracking_summary_name = "summary.json"
 
 # LLM response cache
 llm_cache_dir = "./cache"               # root cache folder (auto-created)
