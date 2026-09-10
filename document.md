@@ -109,6 +109,18 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `--prepend-prompt PATH` | None | Text prepended to the first `MAIN_PROMPT` only. |
 | `-c, --command` | None | Run a command non-interactively and exit; repeatable (`-c "open the fridge" -c "close it"`). Skips the interactive prompt, which is what makes scripted/repeatable runs possible (see *Testing the pose formats*, §7). |
 
+<details><summary>Rollout tracking args (§13)</summary>
+
+| Arg | Default | Purpose |
+|-----|---------|---------|
+| `--tracking / --no-tracking` | off | Enable per-frame 3D tracking of the gripper + affordance objects during trajectory execution. Off by default: the capture path is untouched when inactive, so goldens cannot drift. |
+| `--tracker-provider` | `template` | 2D point tracker: `template` (base-cv2 NCC, no extra deps) \| `csrt` (needs `opencv-contrib-python`) \| `remote` (stub). |
+| `--track-interval` | `1` | Track every Nth keyframe (`Robot.step_env_and_record`). |
+| `--track-save-depth` | off | Also dump the metric depth array behind every decision (`<log-dir>/depth/<cam>_<frame>.npy`). |
+| `--track-log-dir` | `./outputs/tracking` | Where `track.jsonl` + `summary.json` are written. |
+
+</details>
+
 <details><summary>Diagnostics / visualization / override args</summary>
 
 | Arg | Purpose |
@@ -172,6 +184,8 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `providers/llms/message_media.py` | Provider-agnostic multimodal message building: `encode_media`, `append_images`, `append_videos`, `append_to_messages` (canonical `image_url` / `video_url` parts each provider converts). |
 | `segmentation_adapter.py` | Provider-agnostic 2D segmentation dispatch. |
 | `utils.py` | Point-cloud → bounding cube, 3D↔2D projection, intrinsics/extrinsics. |
+| `tracking/` | Rollout tracking (§13): `session.py` (orchestrator), `geometry.py` (project/deproject, occlusion test, fusion), `health.py` (per-camera health + re-seed policy), `monitor.py` (monitor contract), `monitors.py` (built-in invariants), `report.py` (JSONL + summary), `types.py`. |
+| `providers/trackers/` | Pluggable 2D point trackers: `base.py` (`PointTracker` ABC), `template_tracker.py` (default), `csrt_tracker.py`, `remote_tracker.py` (stub), `factory.py`. |
 
 ---
 
@@ -345,9 +359,11 @@ retry vs. done.
   reviewer_reason, improvement_steps, accepted_without_review)`.
 
 ### Available subtask tools (`get_exec_locals`)
-`detect_object`, `get_grasp_poses`, `visualize_grasp_pose`, `execute_trajectory`,
-`open_gripper`, `close_gripper`, `task_completed`, `generate_linear_trajectory`, plus
-`api`, `math`, `np`, `logger`.
+`detect_object`, `track_objects`, `get_grasp_poses`, `visualize_grasp_pose`,
+`execute_trajectory`, `open_gripper`, `close_gripper`, `task_completed`,
+`generate_linear_trajectory`, plus the built-in tracking invariants
+(`attached_to_gripper`, `object_not_lost`, `stays_within`, `moved_at_least`, `combine`;
+§13) and `api`, `math`, `np`, `logger`.
 
 <details><summary>Why the retry drops detect_object + in-context example</summary>
 
@@ -1154,7 +1170,198 @@ body surviving the feedback path.
 
 ---
 
+## 13. Rollout tracking (gripper + affordance objects in 3D)
+
+**Problem.** During trajectory execution nothing checked that the manipulated object stays
+attached to the gripper. A dropped pickup or a lost door handle was only discovered
+post-hoc by the VLM reviewer, after the whole subtask had run.
+
+**What it does.** With `--tracking`, every keyframe of every trajectory produces per-camera
+2D tracks, a fused 3D world point per object, the gripper's FK pose, and a monitor verdict.
+A monitor that returns `abort` stops the trajectory mid-flight and fails the subtask with a
+reason, feeding the existing retry path.
+
+### Flow
+
+```
+subtask LLM:  detect_object(...)  →  track_objects(targets=[...], monitor=...)
+                                          │  IPC START_TRACKING (opcode 23)
+                                          ▼
+                          env.py  →  tracking.session.TrackingSession
+                                          ▲
+Robot.step_env_and_record ──per keyframe──┘   (head + wrist capture_camera_view)
+      │
+      ├─ providers/trackers/*      2D points per camera
+      ├─ tracking/geometry.py      deproject + weighted fuse → world point
+      ├─ tracking/health.py        health score → cross-camera re-seed decision
+      ├─ tracking/report.py        TrackFrameReport → track.jsonl + in-memory
+      └─ tracking/monitor.py       monitor(state) → ok | warn | record | abort
+                                          │
+                     abort → EXECUTE_TRAJECTORY returns early → api._handle_tracking_abort
+```
+
+Tracking runs **inside the simulator process** where the cameras, depth buffers and robot
+state already live, so there is no per-frame IPC. Only start/stop/report cross the pipe.
+
+### Key points
+
+- **Two cameras, cross-camera bootstrap.** The head camera sees the object from the start
+  (that is where `detect_object`'s world points come from); the wrist camera usually cannot.
+  Each frame the fused world point is projected into every camera, and a camera that passes
+  the depth/occlusion test gets its tracker seeded — so the wrist camera joins the track by
+  itself, partway through the reach.
+- **Continuous repair, not just first-sight.** Four re-seed triggers, in priority order:
+  `unseeded` → `jumped` → `lost` → `low_confidence` (N consecutive frames while another
+  camera is healthy) → `disagreement` (per-camera world points >`track_disagree_m` apart, and
+  only when the winner is clearly healthier, to avoid ping-pong). Each camera has a re-seed
+  cooldown.
+- **Never re-seed onto the occluder.** A re-seed is applied only when the donor's world point
+  is actually imaged by the receiving camera. Depth *closer* than expected by more than one
+  object thickness means something (the arm) is in between, and the attempt is refused and
+  logged instead.
+- **Fusion.** Weighted average of per-camera world points; weight =
+  confidence × depth validity × 1/z × point support × health. Healthy cameras are preferred,
+  and a camera that clearly disagrees with the healthiest one is left out of the average
+  (but the disagreement is still reported).
+- **Gripper.** FK (`sim.get_link_pose`) is the truth used by invariants. The cameras are used
+  only as a cross-check: the FK position is projected and the depth there deprojected, and
+  the `discrepancy` is logged — a large value means depth/extrinsics disagree with FK, which
+  invalidates every object measurement from that camera.
+- **Determinism.** Tracking is off by default and the capture path is untouched when
+  inactive, so `tests/golden/**` stay valid.
+
+### The `track_objects` tool
+
+Called by the subtask LLM in the *same* turn as `detect_object` (it reuses those world
+points, so it costs no extra turn):
+
+```python
+track_objects(
+    targets=[{"name": "mug", "world_points": [[x, y, z], ...]}],   # 3-8 stable points
+    monitor=attached_to_gripper("mug", max_dist=0.06),             # optional
+    track_gripper=True,
+)
+```
+
+`monitor(state) -> dict` is evaluated **per tracked frame**. `state` is a
+`TrackFrameReport`: `frame_idx`, `trajectory_step`, `objects[name].world_point` /
+`.points_2d[cam]` / `.visible_cams` / `.confidence`, `gripper.world_pos` (FK),
+`gripper.visual_world_pos`, and helpers `state.distance(name, "gripper")` /
+`state.is_lost(name)`.
+
+Return `None` / `{"status": "ok"}` | `{"status": "warn"}` |
+`{"status": "record", "reason": ...}` | `{"status": "abort", "reason": ...}`.
+`abort` stops the trajectory and fails the subtask; `record` flags the frame for the
+reviewer; a monitor exception is caught and downgraded to `warn` — a monitor can never
+break a rollout. `monitor=None` uses `tracking.monitors.default_monitor()`.
+
+Built-in invariants (injected into the exec namespace, usable directly or as examples):
+`attached_to_gripper`, `object_not_lost`, `stays_within`, `moved_at_least`, `combine`
+(worst status wins).
+
+<details><summary>Code-level detail</summary>
+
+**`tracking/geometry.py`** — all pixel/world maths, on **metric depth only**
+(`sim_adapter.camera_math.depth_to_metric` hides PyBullet's non-linear GL z-buffer vs
+Genesis' linear metric depth). `mat4` accepts either a flat 16-element column-major
+PyBullet matrix or a 4×4 array (a naive `reshape(4,4,order='F')` of an existing 4×4 would
+silently transpose it). Points are `(x=col, y=row)`, origin top-left, NDC y flipped;
+`z_eye = -cam_pt[2]` because GL view space looks down −z.
+`is_visible` is the strict occlusion test (`|z_rendered − z_eye| ≤ track_occlusion_tol`).
+`surface_point` is the lenient variant used for **re-seeding only**: the donor hands over a
+point on the surface facing *its* camera, which the receiving camera sees through the
+object's own body, so depth up to `track_reseed_self_occlusion_m` closer is treated as
+self-occlusion and the tracker is seeded on the *rendered* surface instead.
+This module deliberately does not reuse `utils.py`, whose process-global `utils.args` /
+`utils.logger` only exist in the agent process.
+
+**`tracking/health.py`** — `score_camera` = confidence × temporal continuity ×
+`clip(0.3/z)` × point support, and `0.0` for a camera latched as `jumped`/`rejected`.
+`decide_reseeds` returns `[(cam, reason, donor, world_point)]`; the donor is the healthiest
+*other* camera above `track_health_min`, else the previous fused estimate (`donor=None`).
+`track_health_min` is deliberately far below `track_reseed_conf`: health folds in a 1/z
+precision term, so a perfect head-camera track a metre away scores ~0.2.
+
+**`tracking/session.py`** — `on_frame` (interval gating, exception containment, abort latch)
+→ `_process_target`: update each seeded tracker → score → provisional fuse → `decide_reseeds`
+→ `_reseed` → final fuse. `_reseed` rebuilds a *point set* around the donor point using the
+`local_offsets` captured at registration, so multi-point outlier rejection survives.
+A camera whose re-seed was decided but could not be applied is marked `rejected`; a camera
+whose world point hops more than `track_max_jump_m` between frames is marked `jumped` and
+its history is *not* rewritten — otherwise a tracker sitting on an occluder would look
+perfectly continuous from the next frame on, with a rising template score.
+
+**Trackers** (`providers/trackers/`) — `PointTracker` ABC: `init(frame, points, obj_id)`,
+`update(frame) -> TrackResult(points, visible, confidence)`, `reset()`. `template` (base-cv2
+NCC per point patch) is the default because `cv2.TrackerCSRT` lives in
+`opencv-contrib-python`, which conflicts with the pinned `opencv_python==4.8.1.78`; `csrt`
+is opt-in and prints an install hint. `remote` documents the streaming JSON protocol for a
+future server (e.g. CoTracker) and raises `NotImplementedError`.
+
+**IPC** — opcodes `START_TRACKING=23`, `STOP_TRACKING=24`, `GET_TRACKING_REPORT=25`.
+Because the agent and the simulator are separate processes, a monitor cannot cross the pipe
+as a closure: `api._monitor_spec` sends it as **source text** (`inspect.getsource`) or as a
+built-in name + kwargs, and `tracking/monitor.py` compiles it on the far side.
+`EXECUTE_TRAJECTORY` checks `session.aborted` between waypoints and returns a
+`{"tracking_abort": True, ...}` payload.
+
+**Output** — `outputs/tracking/<run_id>/track.jsonl` (one `TrackFrameReport` per line),
+`summary.json` on stop, and a one-paragraph `describe()` printed back to the agent.
+
+**Config** (`config.py`, `--- Rollout tracking ---`) — `track_interval`, `track_patch_half`,
+`track_search_scale`, `track_occlusion_tol`, `track_reseed_self_occlusion_m`,
+`track_depth_min/max`, `track_point_conf_min`, `track_reseed_conf`, `track_health_min`,
+`track_reseed_patience`, `track_reseed_cooldown`, `track_disagree_m`, `track_max_jump_m`,
+`track_lost_patience`, `track_attach_max_dist`, `track_attach_grace_frames`.
+
+</details>
+
+<details><summary>Tests</summary>
+
+- `tests/test_tracking_unit.py` (39, free) — geometry/fusion maths, the re-seed policy on
+  synthetic low-confidence and disagreement cases, the monitor contract, the built-in
+  invariants, and the tracker providers on synthetic images. No simulator.
+- `tests/test_tracking_pybullet.py` (5) and `tests/test_tracking_genesis.py` (5) — **no LLM,
+  no agent, no IPC**: a real `TrackingSession` against real head/wrist renders, with the
+  object moved directly through `SimAdapter.set_base_pose` so every frame has an exact
+  ground truth. Both suites share every assertion via
+  `tests/tracking_scenario.TrackingScenarioMixin`, so they cannot drift apart; only the boot
+  differs. They assert: metric depth round-trips to the object; fused world coordinates
+  follow a scripted motion (median error < 4 cm); the wrist camera is seeded *late* and from
+  the head camera; blinding the head camera re-seeds from the wrist one, never onto the
+  occluder, and the object survives the blackout; and a detach trips `attached_to_gripper`
+  into `abort`.
+
+```powershell
+python -m pytest tests\test_tracking_unit.py tests\test_tracking_pybullet.py -q
+& $env:USERPROFILE\.conda\envs\vlm_genesis\python.exe -m unittest tests.test_tracking_genesis
+```
+
+The Genesis run is the evidence that the geometry is simulator-agnostic: it renders linear
+metric depth where PyBullet renders a non-linear GL z-buffer, and every assertion still
+holds. `tests/test_tracking_genesis.py` imports `utils` best-effort because `vlm_genesis`
+has no `shapely` and nothing on the tracking path needs it.
+
+</details>
+
+---
+
 ## Changelog
+
+- **Rollout tracking of the gripper + affordance objects** (§13): per-keyframe 2D tracks in
+  both cameras, fused into 3D world coordinates, with an LLM-authored (or built-in)
+  invariant that can abort a sub-task mid-trajectory instead of waiting for the post-hoc
+  reviewer. Runs sim-side to avoid per-frame IPC; monitors therefore cross the pipe as
+  source text or a built-in name, not as closures. Off by default, so no golden moves.
+  The two no-LLM integration suites (PyBullet + Genesis, sharing one scenario mixin) found
+  four real defects that unit tests could not: cross-camera re-seeding refused its own donor
+  point as "occluded" because that point sits on the face turned away from the receiving
+  camera (hence `geometry.surface_point`); the donor filter reused a *confidence* threshold
+  on a *health* score that folds in a 1/z term, so a perfect head-camera track was never
+  allowed to donate (hence `track_health_min`); a tracker that latched onto an occluder kept
+  a rising template score and was still fused in, tens of centimetres off (hence the
+  `jumped`/`rejected` latches and disagreement-aware fusion). `SimAdapter.set_base_pose` was
+  added so scripted scenarios can move objects directly in either simulator.
 
 - **Side (horizontal) gripper approach for vertical handles** (§7): poses may now be len-6
   `[x,y,z,roll,pitch,yaw]` as well as the historical len-4 `[x,y,z,rotation]` — **length is
