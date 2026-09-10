@@ -63,6 +63,9 @@ def score_camera(track: CamTrack, state: CamHealthState, z_eye=None):
     """Health in [0, 1]: confidence x depth validity x 1/z x temporal continuity."""
     if not track.seeded or track.world_point is None or not track.depth_valid:
         return 0.0
+    if track.status in ("jumped", "rejected"):
+        # Already known to be tracking the wrong thing; it must not be fused or donate.
+        return 0.0
     conf = float(np.clip(track.confidence, 0.0, 1.0))
     if conf <= 0.0:
         return 0.0
@@ -82,7 +85,7 @@ def decide_reseeds(obj_name, tracks: Dict[str, CamTrack], states: Dict[str, CamH
     seed comes from the fused estimate rather than one specific camera.
     """
     healthy = {c: t for c, t in tracks.items()
-               if t.seeded and t.health >= config.track_reseed_conf and t.world_point is not None}
+               if t.seeded and t.health >= config.track_health_min and t.world_point is not None}
     decisions = []
 
     for cam, track in tracks.items():
@@ -105,6 +108,8 @@ def decide_reseeds(obj_name, tracks: Dict[str, CamTrack], states: Dict[str, CamH
         reason = None
         if not track.seeded:
             reason = "unseeded"
+        elif track.status == "jumped":
+            reason = "jumped"
         elif state.lost_frames >= 1:
             reason = "lost"
         elif state.low_conf_frames >= config.track_reseed_patience:

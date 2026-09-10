@@ -163,6 +163,14 @@ class SimAdapter(ABC):
     def get_base_pose(self, body: Any) -> Tuple[List[float], List[float]]:
         """Return ``(position, orientation_xyzw)``."""
 
+    def set_base_pose(self, body: Any, position=None, orientation_q=None) -> None:
+        """Teleport a body's base to ``position``/``orientation_q`` (xyzw).
+
+        Not part of the agent's rollout path - it exists so tests and scripted scenarios
+        can move objects directly, without an LLM or the robot, in either simulator.
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot set a base pose")
+
     @abstractmethod
     def get_aabb(self, body: Any, link: int = -1) -> Tuple[List[float], List[float]]:
         """Return ``(aabb_min, aabb_max)`` in world coordinates."""

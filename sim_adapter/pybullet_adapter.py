@@ -109,6 +109,14 @@ class PyBulletAdapter(SimAdapter):
         pos, quat = p.getBasePositionAndOrientation(body)
         return list(map(float, pos)), list(map(float, quat))
 
+    def set_base_pose(self, body, position=None, orientation_q=None):
+        current_pos, current_quat = self.get_base_pose(body)
+        p.resetBasePositionAndOrientation(
+            int(body),
+            list(current_pos if position is None else position),
+            list(current_quat if orientation_q is None else orientation_q),
+        )
+
     def get_aabb(self, body, link=-1):
         aabb_min, aabb_max = p.getAABB(body, link)
         return list(map(float, aabb_min)), list(map(float, aabb_max))

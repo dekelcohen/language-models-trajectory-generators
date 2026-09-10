@@ -394,6 +394,13 @@ class GenesisAdapter(SimAdapter):
         quat_wxyz = _vector(entity.get_quat(), 4)
         return pos, transforms.wxyz_to_xyzw(quat_wxyz)
 
+    def set_base_pose(self, body, position=None, orientation_q=None):
+        entity = self._body(body).entity
+        if position is not None:
+            entity.set_pos([float(v) for v in position])
+        if orientation_q is not None:
+            entity.set_quat(transforms.xyzw_to_wxyz([float(v) for v in orientation_q]))
+
     def get_aabb(self, body, link=-1):
         entity = self._body(body).entity
         getter = getattr(entity, "get_AABB", None)

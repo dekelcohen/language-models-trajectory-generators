@@ -206,6 +206,14 @@ class TrackingSession:
                     z_eyes[cam] = z_eye
                 track.health = score_camera(track, target.health[cam], z_eyes.get(cam))
                 track.reseeded_reason = reason
+            elif state.cams[cam].seeded:
+                # The policy wanted this camera repaired but the donor point is not
+                # imaged there (it is behind the occluder). Its own estimate therefore
+                # points at whatever it latched onto - typically the occluding arm, with
+                # a confidently rising template score - so it must not be fused until it
+                # recovers. Health is zeroed so it also cannot act as a donor.
+                state.cams[cam].status = "rejected"
+                state.cams[cam].health = 0.0
 
         # 4. final fusion over the repaired tracks
         fused, disagreement, used = self._fuse(state, views, z_eyes)
@@ -218,7 +226,11 @@ class TrackingSession:
             target.last_world_point = fused
             target.lost_frames = 0
             for cam in state.cams:
-                target.health[cam].last_world_point = state.cams[cam].world_point
+                # Only a trusted track updates its own history: letting a camera that
+                # jumped onto an occluder rewrite its reference point would make the very
+                # next frame look perfectly continuous and hide the failure.
+                if state.cams[cam].status == "ok":
+                    target.health[cam].last_world_point = state.cams[cam].world_point
         else:
             target.lost_frames += 1
         return state
@@ -244,20 +256,65 @@ class TrackingSession:
         track.world_point = centroid
         if centroid is None:
             track.status = "occluded"
+        elif self._is_super_physical_jump(target, cam, centroid, just_seeded):
+            # A metre-scale hop between two frames is not the object moving, it is the
+            # tracker having latched onto something else (usually an occluder that just
+            # slid in front). Templates match that occluder confidently for many frames,
+            # so confidence alone would never catch it - the camera stays untrusted until
+            # a re-seed repairs it.
+            track.status = "jumped"
         elif track.confidence < config.track_reseed_conf:
             track.status = "low_confidence"
         else:
             track.status = "ok"
 
+    @staticmethod
+    def _is_super_physical_jump(target, cam, world_point, just_seeded):
+        last = target.health[cam].last_world_point
+        if just_seeded or last is None:
+            return False
+        return bool(np.linalg.norm(np.asarray(world_point, dtype=float)
+                                   - np.asarray(last, dtype=float)) > config.track_max_jump_m)
+
     def _fuse(self, state, views, z_eyes):
         estimates = {}
+        # A camera whose track is healthy must not be dragged around by one that is
+        # occluded or barely matching: an occluder's surface deprojects to a world point
+        # tens of centimetres off, and averaging it in corrupts an otherwise good frame.
+        healthy = {c for c, t in state.cams.items() if t.status == "ok" and t.world_point is not None}
         for cam, track in state.cams.items():
-            if track.world_point is None:
+            if track.world_point is None or (healthy and cam not in healthy):
                 continue
             weight = geometry.camera_weight(track.confidence, z_eyes.get(cam, 1.0),
                                             track.n_visible, track.depth_valid)
             estimates[cam] = (track.world_point, weight * max(track.health, 1e-3))
-        return geometry.fuse_world_points(estimates)
+
+        # Disagreement is measured over *every* surviving camera, so the report still
+        # shows it, but a clear loser is left out of the average. A camera that has
+        # latched onto an occluder keeps a high template score for many frames, so
+        # waiting for the re-seed cooldown to repair it would poison the estimate in
+        # the meantime.
+        _fused, disagreement, _used = geometry.fuse_world_points(estimates)
+        trusted = self._drop_disagreeing(state, estimates)
+        fused, _gap, used = geometry.fuse_world_points(trusted)
+        return fused, disagreement, used
+
+    @staticmethod
+    def _drop_disagreeing(state, estimates):
+        """Remove cameras that disagree with the clearly healthiest one."""
+        if len(estimates) < 2:
+            return estimates
+        best = max(estimates, key=lambda c: state.cams[c].health)
+        best_point = np.asarray(estimates[best][0], dtype=float)
+        best_health = state.cams[best].health
+        trusted = {}
+        for cam, entry in estimates.items():
+            gap = float(np.linalg.norm(np.asarray(entry[0], dtype=float) - best_point))
+            clear_winner = best_health >= 1.25 * max(state.cams[cam].health, 1e-6)
+            if cam != best and gap > config.track_disagree_m and clear_winner:
+                continue
+            trusted[cam] = entry
+        return trusted or estimates
 
     def _reseed(self, target, cam, view, world_point, reason, donor):
         """Project a donor world point into ``cam`` and re-initialise its tracker there."""
@@ -266,8 +323,8 @@ class TrackingSession:
             event.detail = "no view or donor point"
             return event
 
-        visible, pixel, detail = geometry.is_visible(view, world_point)
-        if not visible:
+        snapped, pixel, detail = geometry.surface_point(view, world_point)
+        if snapped is None:
             event.detail = f"donor point not imaged by {cam}: {detail}"
             return event
 
@@ -276,8 +333,8 @@ class TrackingSession:
         seed_world = world_point[None, :] + target.local_offsets
         pixels = []
         for wp in seed_world:
-            ok, px, _why = geometry.is_visible(view, wp)
-            if ok:
+            _snapped, px, _why = geometry.surface_point(view, wp)
+            if _snapped is not None:
                 pixels.append(px)
         if not pixels:
             pixels = [pixel]

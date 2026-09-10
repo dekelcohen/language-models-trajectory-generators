@@ -77,7 +77,7 @@ class CamTrack:
     world_point: Optional[np.ndarray] = None    # (3,) fused over this camera's points
     depth_valid: bool = False
     health: float = 0.0
-    status: str = "unseeded"                    # unseeded|ok|low_confidence|occluded|lost
+    status: str = "unseeded"                    # unseeded|ok|low_confidence|occluded|lost|jumped|rejected
     reseeded_reason: Optional[str] = None
 
     @property

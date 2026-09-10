@@ -163,6 +163,11 @@ track_search_scale = 3.0
 # that pixel agrees with the expected depth to within this many metres. This is what
 # stops a re-seed from latching onto the robot arm occluding the object.
 track_occlusion_tol = 0.03
+# Cross-camera re-seeding hands over a point on the surface facing the *donor* camera,
+# which the receiving camera sees through the object's own body. Depth closer than this
+# (roughly one object thickness) is treated as self-occlusion and the tracker is seeded on
+# the rendered surface instead; anything closer than this is a real occluder (the arm).
+track_reseed_self_occlusion_m = 0.10
 # Depth samples outside this metric range are treated as invalid (sky / near-plane).
 track_depth_min = 0.02
 track_depth_max = 5.0
@@ -170,6 +175,11 @@ track_depth_max = 5.0
 track_point_conf_min = 0.35
 # Camera-level confidence below which the camera is a re-seed candidate ...
 track_reseed_conf = 0.45
+# Minimum *health* (confidence x continuity x 1/z x point support) for a camera to be
+# trusted as a re-seed donor. Deliberately far below track_reseed_conf: health folds in a
+# 1/z precision term, so the head camera - a metre away and tracking perfectly - scores
+# around 0.2 and would otherwise never be allowed to bootstrap the wrist camera.
+track_health_min = 0.12
 # ... after this many consecutive unhealthy frames ...
 track_reseed_patience = 2
 # ... and never more often than this many tracked frames.

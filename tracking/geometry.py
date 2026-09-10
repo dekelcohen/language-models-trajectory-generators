@@ -25,6 +25,10 @@ def _mat4(value):
     raise ValueError(f"Expected a 4x4 matrix or 16 elements, got shape {arr.shape}")
 
 
+#: Public alias - callers outside this module (robot.py) normalise matrices with it too.
+mat4 = _mat4
+
+
 def view_projection(view: CameraView):
     return _mat4(view.projection_matrix) @ _mat4(view.view_matrix)
 
@@ -109,6 +113,36 @@ def is_visible(view: CameraView, world_pos, tol=None):
         # stale or floating in free space.
         return False, pixel, f"depth_mismatch(dz={z_rendered - z_eye:.3f})"
     return True, pixel, "ok"
+
+
+def surface_point(view: CameraView, world_pos, self_occlusion_tol=None):
+    """Snap a world point onto the surface this camera actually images at that pixel.
+
+    Cross-camera re-seeding hands over a point that lies on the surface facing the *donor*
+    camera; from the receiving camera that point is behind the object's own front face, so
+    the strict :func:`is_visible` test rejects it as "occluded" by roughly the object's
+    own thickness. Accepting anything closer than ``self_occlusion_tol`` and re-seeding on
+    the *rendered* surface point fixes that, while a genuine occluder - the arm, which sits
+    far in front of the object - is still rejected.
+
+    Returns ``(surface_world_point, pixel, detail)``; the point is ``None`` when the pixel
+    cannot be used.
+    """
+    tol = config.track_reseed_self_occlusion_m if self_occlusion_tol is None else self_occlusion_tol
+    pixel, z_eye = project_world_to_pixel(view, world_pos)
+    if pixel is None:
+        return None, None, "behind_camera"
+    if not in_bounds(view, pixel):
+        return None, pixel, "out_of_frame"
+    z_rendered = sample_depth(view, pixel)
+    if z_rendered is None:
+        return None, pixel, "invalid_depth"
+    if z_rendered < z_eye - tol:
+        return None, pixel, f"occluded(dz={z_eye - z_rendered:.3f})"
+    if z_rendered > z_eye + config.track_occlusion_tol:
+        # Rendered surface is *behind* the estimate: free space, not the object.
+        return None, pixel, f"depth_mismatch(dz={z_rendered - z_eye:.3f})"
+    return deproject_pixel_to_world(view, pixel, z_rendered), pixel, "ok"
 
 
 def points_to_world(view: CameraView, points_2d, valid_mask=None):
