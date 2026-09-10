@@ -14,6 +14,22 @@ To rank for top-down grasps above an object: select poses where pose[2,2] < -0.8
 
 DETECT_OBJECT_TOOL_INITIAL_PLANNING = """Then, detect the necessary objects in the environment. Stop generation after this step to wait until you obtain the printed outputs from the detect_object function calls."""
 
+TRACK_OBJECTS_TOOL = """6b. track_objects(targets: list, monitor=None, track_gripper: bool = True) -> None: Starts tracking objects in 3D world coordinates during every trajectory you execute afterwards. Each target is a dict {"name": str, "world_points": [[x, y, z], ...]}. Use the object position and dimensions printed by detect_object (and any affordance point you were given) to pick 3 to 8 points that lie ON the target object or object part and are spread over it - for example the centre plus points offset by a third of the width/length/height towards its faces. Several spread points are tracked independently in each camera and fused, so one bad point cannot move the estimate.
+Call it in the SAME code block as your detect_object calls when possible, to save a turn.
+While a trajectory runs, both cameras track the points, the 3D world position is fused across cameras, and an invariant is checked on every frame. If the invariant returns "abort", the trajectory stops immediately and the sub-task fails with the reason - so you get told that the object slipped out of the gripper instead of finishing a trajectory that grasps nothing.
+monitor: leave as None for the default invariant (once the object has been grasped it must stay within 0.12 m of the gripper, and losing sight of it is flagged for review). Otherwise pass one of the built-in invariants, which are already injected:
+  attached_to_gripper(name, max_dist=0.12, grace_frames=3)  # abort when the object leaves the gripper
+  object_not_lost(name, patience=3)                          # flag when no camera can see it
+  stays_within(name, ((xmin, ymin, zmin), (xmax, ymax, zmax)))
+  moved_at_least(name, dist, after_frames=10)                # e.g. a door that never opens
+  combine(m1, m2, ...)                                       # worst status wins
+Example:
+track_objects([{"name": "mug", "world_points": [[0.1, 0.5, 0.05], [0.13, 0.5, 0.05], [0.1, 0.53, 0.05]]}],
+              monitor=combine(attached_to_gripper("mug", max_dist=0.1), moved_at_least("mug", 0.05, after_frames=30)))
+"""
+
+NO_TRACK_OBJECTS_TOOL = ""
+
 NO_DETECT_OBJECT_TOOL = """1. You cannot call the detect_object(...) tool in this session. Instead, infer and use object positions, orientations, and dimensions from the conversation history and any previously printed outputs. Do not attempt to invoke detect_object."""
  
 NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING  = """Infer and use necessary object positions, orientations, and dimensions from the conversation history and any previously printed outputs. Do not attempt to invoke detect_object."""
@@ -68,6 +84,7 @@ You are, however, able to call any of the following Python functions, if require
      self.desc # short sentence to describe the motion and its end_pose
    This helper is provided by the environment and already logs motion details. do not call logger for trajectory/motion. 
 6. execute_trajectory(trajectory: Trajectory) -> None: This function will execute the trajectory on the robot arm end-effector, and will also not return anything.
+[INSERT TRACK_OBJECTS_TOOL]
 [INSERT SKILL TOOLS]
 [INSERT SKILLS]
 ENVIRONMENT SET-UP:

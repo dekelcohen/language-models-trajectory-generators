@@ -63,7 +63,7 @@ class TrackingSession:
 
     def __init__(self, robot=None, env=None, cameras=None, provider=None, monitor=None,
                  track_gripper=True, interval=None, logger=None, run_id=None,
-                 write_jsonl=True, tracker_kwargs=None):
+                 write_jsonl=True, tracker_kwargs=None, output_dir=None, save_depth=False):
         self.robot = robot
         self.env = env
         self.cameras = tuple(cameras or config.tracking_cameras)
@@ -72,6 +72,7 @@ class TrackingSession:
         self.track_gripper = bool(track_gripper)
         self.interval = max(1, int(interval if interval is not None else config.track_interval))
         self.logger = logger
+        self.save_depth = bool(save_depth)
         self.targets = {}
         self.gripper_target = None
         self.frame_idx = 0
@@ -82,7 +83,8 @@ class TrackingSession:
         self.last_report = None
         self.errors = 0
         self.monitor = MonitorRunner.from_spec(monitor, logger=logger)
-        self.reporter = TrackingReporter(run_id=run_id, logger=logger, write_jsonl=write_jsonl)
+        self.reporter = TrackingReporter(run_id=run_id, output_dir=output_dir, logger=logger,
+                                         write_jsonl=write_jsonl)
 
     # -- registration ------------------------------------------------------
     def add_target(self, name, world_points):
@@ -115,6 +117,8 @@ class TrackingSession:
                 views = self.capture_views()
             if not views:
                 return None
+            if self.save_depth:
+                self._dump_depth(views)
             report = self._process(views, gripper_pose, trajectory_step, rgb_paths or {})
         except Exception as exc:            # tracking must not break the rollout
             self.errors += 1
@@ -144,6 +148,20 @@ class TrackingSession:
         return views
 
     # -- core --------------------------------------------------------------
+    def _dump_depth(self, views):
+        """--track-save-depth: persist the metric depth arrays behind each decision."""
+        import os
+
+        folder = os.path.join(self.reporter.output_dir, "depth")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            for cam, view in views.items():
+                np.save(os.path.join(folder, f"{cam}_{self.frame_idx:05d}.npy"),
+                        np.asarray(view.depth, dtype=np.float32))
+        except OSError as exc:
+            self._log(f"[tracking] could not save depth: {exc}")
+            self.save_depth = False
+
     def _process(self, views, gripper_pose, trajectory_step, rgb_paths):
         report = TrackFrameReport(frame_idx=self.frame_idx, trajectory_step=trajectory_step,
                                   rgb_paths=dict(rgb_paths))

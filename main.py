@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from debug.dbg_utils import init_loguru_logger
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
 from agent_runner import init_agent, teardown_agent, run_plan, execute_blocks_from_log, query_sim_objects_state
+from providers.trackers.factory import SUPPORTED as tracker_providers
 
 print = functools.partial(print, flush=True)
 
@@ -51,6 +52,17 @@ def build_arg_parser():
     parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
     parser.add_argument("--review-provider", default="vlm", help="review provider for success verification: 'vlm' (uses main model), 'vlm:<model>' (e.g. vlm:or-openai/gpt-5.5), or 'xmem'")
+    # --- Rollout tracking (tracking/, providers/trackers/) ---
+    parser.add_argument("--tracking", action=argparse.BooleanOptionalAction, default=config.tracking_enabled_default,
+                        help="track the affordance object and gripper in 3D during trajectory execution; exposes the track_objects tool to the model and lets a monitor abort a sub-task mid-rollout (default: off)")
+    parser.add_argument("--tracker-provider", dest="tracker_provider", choices=list(tracker_providers), default=config.tracker_provider_default,
+                        help="2D point tracker used by --tracking: 'template' (default, base opencv), 'csrt' (needs opencv-contrib-python), 'remote' (stub)")
+    parser.add_argument("--track-interval", dest="track_interval", type=int, default=config.track_interval,
+                        help="run the tracker every Nth recorded keyframe (1 = every keyframe)")
+    parser.add_argument("--track-save-depth", dest="track_save_depth", action="store_true",
+                        help="also dump the per-frame metric depth arrays used by tracking (debugging; large)")
+    parser.add_argument("--track-log-dir", dest="track_log_dir", default=config.tracking_output_dir,
+                        help="root folder for tracking JSONL logs and summaries")
     parser.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="gemini-3.7-flash", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
     parser.add_argument("--affordance-points", dest="affordance_points", action=argparse.BooleanOptionalAction, default=True, help="ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis (default: True, use --no-affordance-points to disable)")
     parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")

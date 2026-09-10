@@ -14,6 +14,7 @@ from sim_adapter import get_adapter
 from sim_envs.registry import get_simenv
 from config import OK, PROGRESS, FAIL, ENDC
 from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
+from config import START_TRACKING, STOP_TRACKING, GET_TRACKING_REPORT
 # --- Debug helpers ------------------------------------------------------
 # These build app-level overlays (bounding boxes, grasp poses, trajectory previews) out of
 # two adapter primitives - ``draw_marker_sphere`` and ``draw_marker_cylinder`` - so the
@@ -563,16 +564,94 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                     trajectory = trajectory_obj
                     desc = None
 
+                aborted_by_tracking = False
                 for i, point in enumerate(trajectory):
                     try:
                         ee_target_orientation_e = trajectory_point_orientation(robot.ee_start_orientation_e, point)
                     except ValueError as e:
                         raise ValueError(f"Trajectory point {i}: {e}") from e
                     robot.move(env, point[:3], ee_target_orientation_e, gripper_open=robot.gripper_open, is_trajectory=True, desc=desc if i == 0 else None)
+                    # A tracking monitor that returned "abort" (e.g. the object left the
+                    # gripper) stops the rollout here rather than after the last waypoint,
+                    # so the agent can retry from a state close to the failure.
+                    session = getattr(robot, "tracking_session", None)
+                    if session is not None and session.aborted:
+                        aborted_by_tracking = True
+                        logger.info(FAIL + f"Tracking aborted the trajectory at point {i}: "
+                                    f"{session.abort_reason}" + ENDC)
+                        break
 
                 step_env_and_record_loop(env, robot)                
-                
-                env_connection.send([OK + "Finished executing generated trajectory!" + ENDC, robot.trajectory_step])
+
+                if aborted_by_tracking:
+                    session = robot.tracking_session
+                    env_connection.send([FAIL + "Trajectory aborted by the tracking monitor: "
+                                         + str(session.abort_reason) + ENDC,
+                                         robot.trajectory_step,
+                                         {"tracking_abort": True,
+                                          "reason": session.abort_reason,
+                                          "summary": session.summary()}])
+                else:
+                    env_connection.send([OK + "Finished executing generated trajectory!" + ENDC, robot.trajectory_step])
+
+            elif env_connection_received[0] == START_TRACKING:
+
+                # payload: {"targets": [{"name":..., "world_points": [[x,y,z], ...]}],
+                #           "monitor": <source text | {"builtin":...} | None>,
+                #           "track_gripper": bool, "provider": str|None, "interval": int|None}
+                spec = env_connection_received[1] or {}
+                try:
+                    from tracking.session import TrackingSession
+
+                    old = getattr(robot, "tracking_session", None)
+                    if old is not None:
+                        old.stop()
+                    session = TrackingSession(
+                        robot=robot, env=env,
+                        provider=spec.get("provider") or getattr(args, "tracker_provider", None),
+                        monitor=spec.get("monitor"),
+                        track_gripper=bool(spec.get("track_gripper", True)),
+                        interval=spec.get("interval", getattr(args, "track_interval", None)),
+                        logger=logger,
+                        write_jsonl=bool(spec.get("write_jsonl", True)),
+                        output_dir=spec.get("output_dir") or getattr(args, "track_log_dir", None),
+                        save_depth=bool(spec.get("save_depth", getattr(args, "track_save_depth", False))),
+                    )
+                    session.add_targets(spec.get("targets"))
+                    robot.tracking_session = session
+                    message = OK + (f"Tracking started for "
+                                    f"{', '.join(session.targets) or 'no target'} "
+                                    f"in {', '.join(session.cameras)} "
+                                    f"(provider={session.provider}).") + ENDC
+                    env_connection.send([message, {"ok": True, "targets": list(session.targets)}])
+                except Exception as e:
+                    logger.info(FAIL + f"START_TRACKING failed: {e}\n{traceback.format_exc()}" + ENDC)
+                    robot.tracking_session = None
+                    env_connection.send([FAIL + f"Could not start tracking: {e}" + ENDC,
+                                         {"ok": False, "error": str(e)}])
+
+            elif env_connection_received[0] == STOP_TRACKING:
+
+                session = getattr(robot, "tracking_session", None)
+                summary = None
+                if session is not None:
+                    summary = session.summary()
+                    session.stop()
+                    robot.tracking_session = None
+                env_connection.send([OK + "Tracking stopped." + ENDC, summary])
+
+            elif env_connection_received[0] == GET_TRACKING_REPORT:
+
+                session = getattr(robot, "tracking_session", None)
+                if session is None:
+                    env_connection.send([PROGRESS + "No tracking session is active." + ENDC, None])
+                else:
+                    include_frames = bool(env_connection_received[1]) if len(env_connection_received) > 1 else False
+                    payload = session.summary()
+                    payload["description"] = session.describe()
+                    if include_frames:
+                        payload["frames"] = session.reporter.frames
+                    env_connection.send([OK + "Tracking report." + ENDC, payload])
 
             elif env_connection_received[0] == OPEN_GRIPPER:
 

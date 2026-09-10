@@ -67,6 +67,10 @@ class API:
         self.wrist_camera_orientation_q = None
         self.head_image_size = None
         self.wrist_image_size = None
+        # Rollout tracking (tracking/session.py). Lives in the simulator process; the API
+        # only starts/stops it and pulls reports.
+        self.tracking_active = False
+        self.tracking_summary = None
         # Per-(sub)task mutable state. Replaced with a fresh TaskState per subtask.
         self.task = TaskState(start_trajectory_step=self.trajectory_step)
 
@@ -424,6 +428,7 @@ class API:
 
         self.logger.info(PROGRESS + "Executing generated trajectory..." + ENDC)
         self.main_connection.send([EXECUTE_TRAJECTORY, trajectory])
+        tracking_abort = None
         try:
             resp = self.main_connection.recv()
             if isinstance(resp, list) and len(resp) >= 2:
@@ -436,9 +441,153 @@ class API:
                     self.logger.info(_msg)
                 except Exception:
                     pass
+                if len(resp) >= 3 and isinstance(resp[2], dict) and resp[2].get("tracking_abort"):
+                    tracking_abort = resp[2]
         except Exception:
             pass
         self.task.trajectory_length += len(trajectory.points)
+        if tracking_abort is not None:
+            self._handle_tracking_abort(tracking_abort)
+
+    def _handle_tracking_abort(self, payload):
+        """A tracking monitor stopped the rollout: fail the attempt and tell the model why.
+
+        The reason is raised as an exception so it travels the existing error-correction
+        path in ``agent_runner.execute_python_blocks`` (remaining code blocks are skipped
+        and the message is fed back), and it is also recorded on the task so the retry
+        prompt and the reviewer both see it.
+        """
+        reason = payload.get("reason") or "tracking monitor aborted the trajectory"
+        summary = payload.get("summary") or {}
+        self.tracking_summary = summary
+        self.logger.info(FAIL + f"Tracking monitor aborted the trajectory: {reason}" + ENDC)
+        try:
+            self.task.failed_task = True
+            self.task.review_reason = f"Tracking monitor: {reason}"
+            steps = self.task.review_improvement_steps or []
+            self.task.review_improvement_steps = list(steps) + [
+                "The tracked object left the gripper during the trajectory. Re-detect the "
+                "object, re-plan the grasp (deeper/narrower approach) and retry."
+            ]
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"Trajectory aborted by the tracking monitor: {reason}. "
+            "The object is no longer where the plan assumed - re-detect it before continuing."
+        )
+
+    def track_objects(self, targets, monitor=None, track_gripper=True):
+        """Start tracking objects in 3D during the following trajectory executions.
+
+        ``targets``: list of ``{"name": str, "world_points": [[x, y, z], ...]}`` - the 3D
+        points (from ``detect_object`` / affordance points) that identify the object.
+        Three to eight well-spread points on the object give the best robustness: they are
+        tracked independently in each camera and fused with outlier rejection.
+
+        ``monitor``: an optional ``monitor(state) -> dict`` invariant evaluated on every
+        tracked frame. Returning ``{"status": "abort", "reason": ...}`` stops the
+        trajectory immediately and fails the sub-task; ``{"status": "record", ...}`` flags
+        the frames for the reviewer. When omitted, ``tracking.monitors.default_monitor``
+        is used (object must stay attached to the gripper once grasped).
+
+        Returns ``None``; prints which cameras were seeded, as the other tools do.
+        """
+        if not getattr(self.args, "tracking", False):
+            self.logger.info(PROGRESS + "track_objects: tracking is disabled (--tracking is off); ignoring." + ENDC)
+            return
+
+        spec_targets = []
+        for target in (targets or []):
+            if isinstance(target, str):
+                raise ValueError("track_objects targets must be dicts with 'name' and 'world_points'")
+            points = np.asarray(target["world_points"], dtype=float).reshape(-1, 3)
+            spec_targets.append({"name": str(target["name"]), "world_points": points.tolist()})
+        if not spec_targets:
+            raise ValueError("track_objects needs at least one target")
+
+        payload = {
+            "targets": spec_targets,
+            "monitor": self._monitor_spec(monitor),
+            "track_gripper": bool(track_gripper),
+            "provider": getattr(self.args, "tracker_provider", None),
+            "interval": getattr(self.args, "track_interval", None),
+            "output_dir": getattr(self.args, "track_log_dir", None),
+            "save_depth": bool(getattr(self.args, "track_save_depth", False)),
+        }
+        self.logger.info(PROGRESS + f"Starting tracking for {[t['name'] for t in spec_targets]}..." + ENDC)
+        self.main_connection.send([config.START_TRACKING, payload])
+        try:
+            resp = self.main_connection.recv()
+            message = resp[0] if isinstance(resp, list) and resp else str(resp)
+            self.logger.info(message)
+            self.tracking_active = bool(isinstance(resp, list) and len(resp) > 1
+                                        and isinstance(resp[1], dict) and resp[1].get("ok"))
+        except Exception as e:
+            self.logger.info(FAIL + f"track_objects: no response from the environment: {e}" + ENDC)
+            self.tracking_active = False
+            return
+        for target in spec_targets:
+            print(f"Tracking '{target['name']}' with {len(target['world_points'])} points.")
+
+    @staticmethod
+    def _monitor_spec(monitor):
+        """Turn a monitor callable into something that survives the IPC hop.
+
+        The simulator runs in a separate process, so a closure cannot be sent; its source
+        is shipped instead and recompiled there (``tracking.monitor.compile_monitor``).
+        Built-in monitors are referenced by name so no source is needed.
+        """
+        if monitor is None:
+            return None
+        if isinstance(monitor, (str, dict)):
+            return monitor
+        builtin_module = "tracking.monitors"
+        if getattr(monitor, "__module__", None) == builtin_module:
+            return {"builtin": monitor.__name__}
+        import inspect
+        try:
+            source = inspect.getsource(monitor)
+        except (OSError, TypeError) as e:
+            raise ValueError(
+                "track_objects: could not read the monitor's source "
+                f"({e}). Define the monitor as a module-level function, pass its source "
+                "as a string, or use a built-in from tracking.monitors."
+            )
+        return {"source": inspect.cleandoc(source) if source.startswith(" ") else source,
+                "name": getattr(monitor, "__name__", None)}
+
+    def get_tracking_report(self, include_frames=False):
+        """Fetch the tracking summary for the rollout so far (also used by the reviewer)."""
+        if not getattr(self, "tracking_active", False):
+            return None
+        self.main_connection.send([config.GET_TRACKING_REPORT, bool(include_frames)])
+        try:
+            resp = self.main_connection.recv()
+        except Exception as e:
+            self.logger.info(PROGRESS + f"Could not read the tracking report: {e}" + ENDC)
+            return None
+        if not (isinstance(resp, list) and len(resp) > 1) or resp[1] is None:
+            return None
+        summary = resp[1]
+        self.tracking_summary = summary
+        return summary
+
+    def stop_tracking(self):
+        """End the tracking session and return its summary (safe to call when inactive)."""
+        if not getattr(self, "tracking_active", False):
+            return None
+        self.main_connection.send([config.STOP_TRACKING])
+        summary = None
+        try:
+            resp = self.main_connection.recv()
+            if isinstance(resp, list) and len(resp) > 1:
+                summary = resp[1]
+        except Exception as e:
+            self.logger.info(PROGRESS + f"Could not stop tracking cleanly: {e}" + ENDC)
+        self.tracking_active = False
+        if summary:
+            self.tracking_summary = summary
+        return summary
 
 
 

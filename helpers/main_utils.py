@@ -6,6 +6,7 @@ import sys
 import tempfile
 import numpy as np
 import common_utils
+from tracking import monitors as tracking_monitors
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
 
 def get_exec_locals(api, logger):
@@ -16,6 +17,13 @@ def get_exec_locals(api, logger):
         "get_grasp_poses": api.get_grasp_poses,
         "visualize_grasp_pose": api.visualize_grasp_pose,
         "execute_trajectory": api.execute_trajectory,
+        "track_objects": api.track_objects,
+        # Built-in invariants the model can pass to track_objects without importing them.
+        "attached_to_gripper": tracking_monitors.attached_to_gripper,
+        "object_not_lost": tracking_monitors.object_not_lost,
+        "stays_within": tracking_monitors.stays_within,
+        "moved_at_least": tracking_monitors.moved_at_least,
+        "combine": tracking_monitors.combine,
         "open_gripper": api.open_gripper,
         "close_gripper": api.close_gripper,
         "task_completed": api.task_completed,

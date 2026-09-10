@@ -35,6 +35,8 @@ from prompts.main_prompt import (
     NO_DETECT_OBJECT_TOOL,
     DETECT_OBJECT_TOOL_INITIAL_PLANNING,
     NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING,
+    TRACK_OBJECTS_TOOL,
+    NO_TRACK_OBJECTS_TOOL,
     COLLISION_AVOIDANCE,
     CODE_BLOCK_CONVENTIONS,
     INITIAL_PLANNING_1,
@@ -384,6 +386,12 @@ def init_agent(args, logger):
     ctx.args = args
     ctx.logger = logger
 
+    global TRACKING_ENABLED
+    TRACKING_ENABLED = bool(getattr(args, "tracking", False))
+    if TRACKING_ENABLED:
+        logger.info(OK + f"Rollout tracking enabled (provider={args.tracker_provider}, "
+                    f"interval={args.track_interval})." + ENDC)
+
     # OpenAI client (optional)
     openai.api_key = os.getenv("OPENAI_API_KEY")
     client = None
@@ -500,6 +508,11 @@ def teardown_agent(ctx):
 
 
 # --- Prompt builders ----------------------------------------------------
+# Set once from --tracking in init_agent: the track_objects tool is only described to the
+# model when the tracker is actually running, so a disabled feature costs no prompt tokens.
+TRACKING_ENABLED = False
+
+
 def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section, in_context_example,
                        scene_analysis="", skills_index="", loaded_skills="", detect_object_available=True):
     """Fill all placeholders of the subtask MAIN_PROMPT.
@@ -525,6 +538,7 @@ def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section
         .replace("[INSERT TASK]", task)
         .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
         .replace("[INSERT IN CONTEXT EXAMPLE]", in_context_example)
+        .replace("[INSERT TRACK_OBJECTS_TOOL]", TRACK_OBJECTS_TOOL if TRACKING_ENABLED else NO_TRACK_OBJECTS_TOOL)
         .replace("[INSERT SKILL TOOLS]", build_skill_tools_section(skills_index, start_number=7))
         .replace("[INSERT SKILLS]", build_skills_section(skills_index))
     )

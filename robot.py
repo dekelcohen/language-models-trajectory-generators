@@ -46,6 +46,10 @@ class Robot:
 
         self.gripper_open = True
         self.trajectory_step = 1
+        # Rollout tracking (tracking/session.py). Stays None unless --tracking is used, so
+        # the capture path - and therefore the recorded goldens - are untouched by default.
+        self.tracking_session = None
+        self._last_camera_frame = None
 
         i = 0
         self.joint_indices = []
@@ -185,7 +189,28 @@ class Robot:
             self.last_record_gripper_pos = gripper_pos
             self.last_record_step = self.sim_step_counter
             
-            self.trajectory_step += 1    
+            self.trajectory_step += 1
+
+            self._run_tracking(env, eef_pos, eef_ori_q, gripper_pos)
+
+    def _run_tracking(self, env, eef_pos, eef_ori_q, gripper_pos):
+        """Advance the rollout tracker on this keyframe, if one is active.
+
+        Piggy-backs on the existing keyframe cadence (motion-gated, <=5 FPS) so tracking
+        costs nothing when the robot is settling, and stays in step with the frames the
+        reviewer VLM will see. Entirely inert - and free - when tracking is disabled.
+        """
+        session = getattr(self, "tracking_session", None)
+        if session is None or not session.active or session.aborted:
+            return
+        session.on_frame(
+            gripper_pose={"position": eef_pos, "orientation_q": eef_ori_q, "opening": gripper_pos},
+            trajectory_step=self.trajectory_step,
+            rgb_paths={
+                "head": config.rgb_image_trajectory_path.format(step=self.trajectory_step - 1),
+                "wrist": config.wrist_rgb_image_trajectory_path.format(step=self.trajectory_step - 1),
+            },
+        )    
 		
     def _orientation_reached(self, current_orientation_e, target_orientation_e,
                              current_orientation_q=None, target_orientation_q=None):
@@ -438,6 +463,9 @@ class Robot:
         img_w, img_h = frame.width, frame.height
         rgb_array = frame.rgb
         depth_array = frame.depth
+        # Kept so capture_camera_view() can reuse this render (rgb + raw depth) without a
+        # second, redundant render_camera call.
+        self._last_camera_frame = frame
 
         LEGACY_NORMALIZE_DEPTH = False # TODO:False when moving to test like projection matrix     
         
@@ -463,6 +491,33 @@ class Robot:
                 np.save(os.path.splitext(depth_image_path)[0] + ".npy", depth_array.astype(np.float32))
 
         return camera_position, camera_orientation_q, view_matrix, projection_matrix
+
+    def capture_camera_view(self, camera, env):
+        """Render ``camera`` and return a :class:`tracking.types.CameraView`.
+
+        Same render path as :meth:`get_camera_image` (so the tracker sees exactly what the
+        VLM sees) but nothing is written to disk and the depth buffer is converted to
+        metres, hiding the PyBullet/Genesis depth-encoding difference from the tracker.
+        """
+        from tracking.geometry import mat4
+        from tracking.types import CameraView
+
+        camera_position, camera_orientation_q, view_matrix, projection_matrix = self.get_camera_image(
+            camera, env, save_camera_image=False, rgb_image_path=None, depth_image_path=None)
+        frame = self._last_camera_frame
+        depth_metric = camera_math.depth_to_metric(
+            frame.depth, self.sim.depth_encoding, config.near_plane, config.far_plane)
+        return CameraView(
+            name=camera,
+            rgb=np.asarray(frame.rgb),
+            depth=np.asarray(depth_metric, dtype=np.float32),
+            view_matrix=mat4(view_matrix),
+            projection_matrix=mat4(projection_matrix),
+            near=float(config.near_plane),
+            far=float(config.far_plane),
+            position=camera_position,
+            orientation_q=camera_orientation_q,
+        )
 
     def _debug_view_matrices_and_pos(self):
         """Return (view, projection, camera_pos) mirroring the GUI debug view.
