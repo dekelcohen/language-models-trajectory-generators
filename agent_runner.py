@@ -37,6 +37,8 @@ from prompts.main_prompt import (
     NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING,
     TRACK_OBJECTS_TOOL,
     NO_TRACK_OBJECTS_TOOL,
+    VISUALIZE_GRASP_TOOL,
+    NO_VISUALIZE_GRASP_TOOL,
     COLLISION_AVOIDANCE,
     CODE_BLOCK_CONVENTIONS,
     INITIAL_PLANNING_1,
@@ -211,7 +213,7 @@ def _setup_genesis_subproc(args, logger):
     proc, host, port, _python_exe = launch_genesis_child(args, logger)
 
     from providers.json_ipc import JsonIpcConnection
-    conn = JsonIpcConnection(host, port, timeout=getattr(args, "timeout", None))
+    conn = JsonIpcConnection(host, port, timeout=args.timeout)
     conn.wait_until_ready(process=proc, timeout=120)
     return conn, proc
 
@@ -386,11 +388,13 @@ def init_agent(args, logger):
     ctx.args = args
     ctx.logger = logger
 
-    global TRACKING_ENABLED
-    TRACKING_ENABLED = bool(getattr(args, "tracking", False))
-    if TRACKING_ENABLED:
+    if args.tracking:
         logger.info(OK + f"Rollout tracking enabled (provider={args.tracker_provider}, "
                     f"interval={args.track_interval})." + ENDC)
+
+    if args.vis_grasp:
+        logger.info(OK + "Grasp visualization enabled (--vis-grasp): the sub-task agent is asked "
+                    "to draw its contact grasp pose into the images/video." + ENDC)
 
     # OpenAI client (optional)
     openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -508,13 +512,11 @@ def teardown_agent(ctx):
 
 
 # --- Prompt builders ----------------------------------------------------
-# Set once from --tracking in init_agent: the track_objects tool is only described to the
-# model when the tracker is actually running, so a disabled feature costs no prompt tokens.
-TRACKING_ENABLED = False
 
 
 def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section, in_context_example,
-                       scene_analysis="", skills_index="", loaded_skills="", detect_object_available=True):
+                       scene_analysis="", skills_index="", loaded_skills="", detect_object_available=True,
+                       tracking=False, vis_grasp=False):
     """Fill all placeholders of the subtask MAIN_PROMPT.
 
     `skills_index` is the level-1 catalog of subtask-scoped skills (empty when skills are
@@ -522,6 +524,11 @@ def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section
     retry attempt - which starts a brand-new conversation - keeps the know-how it earned.
     `detect_object_available` is False on retries (no detect_object tool), where there is no
     read-only call left to batch load_skill into.
+    `tracking` (args.tracking) describes the track_objects tool only when the tracker is
+    actually running, so a disabled feature costs no prompt tokens.
+    `vis_grasp` (args.vis_grasp) adds the visualize_grasp_pose tool description; without it
+    the placeholder **line** is removed whole, so the prompt stays byte-identical to what it
+    was before the feature existed (LLM-cache entries and goldens unaffected).
     """
     if detect_object_available:
         detect_initial += build_detect_batching_line(skills_index)
@@ -538,7 +545,8 @@ def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section
         .replace("[INSERT TASK]", task)
         .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
         .replace("[INSERT IN CONTEXT EXAMPLE]", in_context_example)
-        .replace("[INSERT TRACK_OBJECTS_TOOL]", TRACK_OBJECTS_TOOL if TRACKING_ENABLED else NO_TRACK_OBJECTS_TOOL)
+        .replace("[INSERT TRACK_OBJECTS_TOOL]", TRACK_OBJECTS_TOOL if tracking else NO_TRACK_OBJECTS_TOOL)
+        .replace("[INSERT VISUALIZE GRASP TOOL]\n", (VISUALIZE_GRASP_TOOL + "\n") if vis_grasp else NO_VISUALIZE_GRASP_TOOL)
         .replace("[INSERT SKILL TOOLS]", build_skill_tools_section(skills_index, start_number=7))
         .replace("[INSERT SKILLS]", build_skills_section(skills_index))
     )
@@ -701,6 +709,9 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
 
     logger.info(PROGRESS + f"RETRYING TASK (attempt {task.attempt_number + 1}/{task.max_attempts})..." + ENDC)
     task.start_attempt_trajectory_step = api.trajectory_step
+    # Each attempt gets its own grasp visualization, so the retry's frames are not
+    # cluttered with the markers of the attempt that just failed.
+    api.clear_grasp_markers()
 
     _, eef_pos = build_llm_context_images_and_pose(ctx.main_connection, api.trajectory_step, logger)
     skills = task.skills
@@ -711,6 +722,8 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
         skills_index=skills.index_text() if skills is not None else "",
         loaded_skills=skills.loaded_block() if skills is not None else "",
         detect_object_available=False,
+        tracking=args.tracking,
+        vis_grasp=args.vis_grasp,
     )
     try:
         logger.info(PROGRESS + f"Env state: {json.dumps(ctx.sim_state)}" + ENDC)
@@ -849,6 +862,8 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
         ee_pos_for_prompt, first_command, coords_section, ic,
         scene_analysis=scene_analysis,
         skills_index=task.skills.index_text(),
+        tracking=args.tracking,
+        vis_grasp=args.vis_grasp,
     )
 
     try:
@@ -869,6 +884,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     messages = run_task_agent_loop(ctx, task, prompt, scene_analysis, attempt_summaries)
 
     logger.info(OK + "FINISHED TASK!" + ENDC)
+    api.clear_grasp_markers()
     return TaskResult(
         success=bool(task.review_succeeded),
         attempts=task.attempt_number,

@@ -29,7 +29,7 @@ import config  # noqa: E402
 from config import (CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS,  # noqa: E402
                     EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED,
                     RESET_EEF, GET_STATE, GET_ROBOT_STATE, VISUALIZE_GRASP_POSE,
-                    VISUALIZE_BOUNDING_BOX)
+                    VISUALIZE_BOUNDING_BOX, CLEAR_GRASP_MARKERS)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -256,6 +256,20 @@ class IpcContractMixin:
         self.assertIsInstance(reply, list)
         self.assertEqual(len(reply), 1)
         self.assertNotIn("Failed", reply[0], f"VISUALIZE_GRASP_POSE errored: {reply[0]}")
+
+        # --vis-grasp: the tagged end-effector payload api.visualize_grasp_pose sends,
+        # carrying both pose lengths at once.
+        reply = self._exchange([VISUALIZE_GRASP_POSE, {
+            "kind": "ee",
+            "poses": [[-0.285, 0.017, 0.692, 0.851], [-0.2, 0.35, 0.5, 0.0, 1.5707963, 1.5707963]],
+            "desc": "ipc contract",
+        }])
+        self.assertIsInstance(reply, list)
+        self.assertNotIn("Failed", reply[0], f"VISUALIZE_GRASP_POSE (ee) errored: {reply[0]}")
+
+        reply = self._exchange([CLEAR_GRASP_MARKERS])
+        self.assertIsInstance(reply, list)
+        self.assertNotIn("Failed", reply[0], f"CLEAR_GRASP_MARKERS errored: {reply[0]}")
 
         reply = self._exchange([VISUALIZE_BOUNDING_BOX, [_sample_cube()]])
         self.assertIsInstance(reply, list)

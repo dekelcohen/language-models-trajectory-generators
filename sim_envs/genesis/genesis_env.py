@@ -59,6 +59,19 @@ def build_arg_parser():
                              "interactive Genesis viewer (mirrors env.py's --direct).")
     parser.add_argument("--backend", default=None,
                         help="Genesis backend override: cpu | gpu | vulkan | metal.")
+    # Tracker fallbacks. ``run_simulation_environment`` reads these off ``args`` when a
+    # START_TRACKING payload omits a field, so the child namespace must carry the same
+    # attributes as main.py's (the launcher does not forward them).
+    parser.add_argument("--tracker-provider", dest="tracker_provider",
+                        default=config.tracker_provider_default,
+                        help="2D point tracker used when a START_TRACKING payload omits one.")
+    parser.add_argument("--track-interval", dest="track_interval", type=int,
+                        default=config.track_interval,
+                        help="Run the tracker every Nth recorded keyframe (1 = every keyframe).")
+    parser.add_argument("--track-save-depth", dest="track_save_depth", action="store_true",
+                        help="Also dump the per-frame metric depth arrays used by tracking.")
+    parser.add_argument("--track-log-dir", dest="track_log_dir", default=config.tracking_output_dir,
+                        help="Root folder for tracking JSONL logs and summaries.")
     return parser
 
 

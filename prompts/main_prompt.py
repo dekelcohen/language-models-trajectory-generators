@@ -30,6 +30,11 @@ track_objects([{"name": "mug", "world_points": [[0.1, 0.5, 0.05], [0.13, 0.5, 0.
 
 NO_TRACK_OBJECTS_TOOL = ""
 
+VISUALIZE_GRASP_TOOL = """6c. visualize_grasp_pose(pose, desc: str = "") -> None: Draws a gripper marker (RGB axes plus orange fingers) at the given end-effector pose inside the 3D simulation, so the intended grasp is visible in the captured images and the video. Pass exactly the same pose value you pass into generate_linear_trajectory (a list of numbers, e.g. [target_x, target_y, target_z, target_rot]); a list of several poses is also accepted. The marker is drawn where the fingers really end up, so it doubles as a check that your pose is where you think it is.
+Call it exactly once per real grasp, in the same code block that builds/executes that motion, and only for the single pose at which the gripper actually engages the object or object part - the pose where you close the gripper on it, or where you push/pull/drag it. Do NOT call it for hover, alignment, descent, lift or retreat waypoints, and do not call it at all if the sub-task has no such contact pose."""
+
+NO_VISUALIZE_GRASP_TOOL = ""
+
 NO_DETECT_OBJECT_TOOL = """1. You cannot call the detect_object(...) tool in this session. Instead, infer and use object positions, orientations, and dimensions from the conversation history and any previously printed outputs. Do not attempt to invoke detect_object."""
  
 NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING  = """Infer and use necessary object positions, orientations, and dimensions from the conversation history and any previously printed outputs. Do not attempt to invoke detect_object."""
@@ -85,6 +90,7 @@ You are, however, able to call any of the following Python functions, if require
    This helper is provided by the environment and already logs motion details. do not call logger for trajectory/motion. 
 6. execute_trajectory(trajectory: Trajectory) -> None: This function will execute the trajectory on the robot arm end-effector, and will also not return anything.
 [INSERT TRACK_OBJECTS_TOOL]
+[INSERT VISUALIZE GRASP TOOL]
 [INSERT SKILL TOOLS]
 [INSERT SKILLS]
 ENVIRONMENT SET-UP:

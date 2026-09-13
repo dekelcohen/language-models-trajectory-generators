@@ -7,13 +7,14 @@ import time
 import config
 import math
 from robot import Robot
-from common_utils import Trajectory
+from robot_profiles import get_robot_profile
+from common_utils import Trajectory, ee_pose_to_grasp_matrix, normalize_grasp_viz_poses
 from debug import trace_utils
 from providers.env_sim_util import _rotmat_to_quat_xyzw
 from sim_adapter import get_adapter
 from sim_envs.registry import get_simenv
 from config import OK, PROGRESS, FAIL, ENDC
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX, CLEAR_GRASP_MARKERS
 from config import START_TRACKING, STOP_TRACKING, GET_TRACKING_REPORT
 # --- Debug helpers ------------------------------------------------------
 # These build app-level overlays (bounding boxes, grasp poses, trajectory previews) out of
@@ -82,7 +83,7 @@ def draw_bounding_box(sim, cube_coords, line_radius=0.002, sphere_radius=0.004, 
 
     return body_ids
     
-def draw_grasp_pose(sim, pose_4x4, axis_length=0.06, finger_length=0.04, finger_spread=0.04, cylinder_radius=0.003, tcp_depth=0.08):
+def draw_grasp_pose(sim, pose_4x4, axis_length=0.06, finger_length=0.04, finger_spread=0.04, cylinder_radius=0.003, tcp_depth=0.08, color=(1, 0.6, 0, 1)):
     """Draw a gripper pose in 3D using visual cylinders/spheres.
 
     Works headless as well as in a GUI (unlike viewer-overlay debug lines).
@@ -106,6 +107,7 @@ def draw_grasp_pose(sim, pose_4x4, axis_length=0.06, finger_length=0.04, finger_
         finger_spread: half-distance between the two fingers (gripper opening).
         cylinder_radius: radius of the drawn cylinders.
         tcp_depth: distance from pose origin to fingertip contact point along Z.
+        color: RGBA of the drawn gripper body (the RGB axes keep their fixed colours).
 
     Returns:
         list of marker IDs (for optional removal later via sim.remove_marker).
@@ -134,7 +136,7 @@ def draw_grasp_pose(sim, pose_4x4, axis_length=0.06, finger_length=0.04, finger_
     finger_left_base = finger_left_tip - z_axis * finger_length
     finger_right_base = finger_right_tip - z_axis * finger_length
 
-    gripper_color = (1, 0.6, 0, 1)  # orange
+    gripper_color = color  # orange by default
     # Finger lines
     body_ids.append(add_debug_cylinder_between(sim, finger_left_base, finger_left_tip, radius=cylinder_radius, color=gripper_color))
     body_ids.append(add_debug_cylinder_between(sim, finger_right_base, finger_right_tip, radius=cylinder_radius, color=gripper_color))
@@ -151,6 +153,69 @@ def draw_grasp_pose(sim, pose_4x4, axis_length=0.06, finger_length=0.04, finger_
     return [bid for bid in body_ids if bid is not None]
 
 
+def ee_grasp_marker_depth(profile):
+    """Distance from a commanded trajectory point to the finger contact point.
+
+    A trajectory point names where the *fingers* go, and ``Robot._apply_gripper_depth_offset``
+    drives the end-effector **link** ``gripper_depth_offset`` further along the approach
+    axis. Where the fingers then really close depends on the hand: franka's
+    ``panda_grasptarget`` is the pad centre (so 0.06 m), while sawyer's ``right_hand`` is a
+    bare wrist frame with the robotiq 2f-85 attached 0.168 m ahead of it (so -0.12 + 0.168 =
+    0.048 m). Using ``gripper_depth_offset`` alone would put the sawyer marker 16.8 cm off,
+    on the wrong side of the commanded point.
+    """
+    return float(profile.gripper_depth_offset) + float(profile.ee_to_finger_contact)
+
+
+def draw_ee_grasp_pose(sim, pose, profile, color=(1, 0.6, 0, 1), **kwargs):
+    """Draw the gripper as it will really sit when the arm reaches ``pose``.
+
+    Args:
+        sim: the active SimAdapter.
+        pose: an end-effector pose the LLM/trajectory pipeline produced - length-4
+            ``[x, y, z, rotation]`` (top-down) or length-6 ``[x, y, z, roll, pitch, yaw]``.
+        profile: the active ``RobotProfile``; supplies the contact depth and the real
+            finger dimensions, so the marker matches the hand in the capture instead of
+            the GraspGen defaults.
+
+    Returns the marker ids, so the caller can clear them later.
+    """
+    matrix = ee_pose_to_grasp_matrix(pose)
+    return draw_grasp_pose(sim, matrix,
+                           finger_length=kwargs.pop("finger_length", float(profile.finger_length)),
+                           finger_spread=kwargs.pop("finger_spread", float(profile.finger_half_spread)),
+                           tcp_depth=kwargs.pop("tcp_depth", ee_grasp_marker_depth(profile)),
+                           color=color,
+                           **kwargs)
+
+
+
+
+def _parse_grasp_viz_payload(payload):
+    """Unpack a VISUALIZE_GRASP_POSE payload into ``(kind, poses, desc)``.
+
+    ``api.visualize_grasp_pose`` sends the tagged dict; a bare array is still accepted so
+    the legacy GraspGen path (raw ``(4,4)`` / ``(N,4,4)`` matrices) keeps working.
+    """
+    if isinstance(payload, dict):
+        kind = payload.get("kind", "matrix")
+        poses = payload.get("poses", [])
+        desc = payload.get("desc") or ""
+        if kind not in ("ee", "matrix"):
+            raise ValueError(f"Unknown grasp visualization kind '{kind}'.")
+        return kind, list(poses), desc
+    kind, poses = normalize_grasp_viz_poses(payload)
+    return kind, poses, ""
+
+
+def _fmt_grasp_poses(kind, poses, max_shown=3):
+    """Short, log-friendly rendering of the poses being drawn."""
+    if kind == "ee":
+        shown = [[round(float(v), 3) for v in pose] for pose in poses[:max_shown]]
+    else:
+        shown = [[round(float(np.asarray(pose)[r, 3]), 3) for r in range(3)] for pose in poses[:max_shown]]
+    suffix = "" if len(poses) <= max_shown else f" (+{len(poses) - max_shown} more)"
+    return f"{shown}{suffix}"
 
 
 # --- Trajectory visualization helpers ----------------------------------
@@ -396,13 +461,13 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
 
     # Environment set-up
     # Initialize env process logger (console + ANSI-stripped file)
-    sim_name = getattr(args, "sim", "pybullet") or "pybullet"
+    sim_name = args.sim or "pybullet"
     logger = init_loguru_logger(f"env_{sim_name}.log")
                     
     logger.info(PROGRESS + "Setting up environment..." + ENDC)
 
     env_connection = _TracingConnection(env_connection)
-    trace_utils.set_context(sim=sim_name, task=getattr(args, "task", None), robot=getattr(args, "robot", None))
+    trace_utils.set_context(sim=sim_name, task=args.task, robot=args.robot)
 
     sim = get_adapter(sim_name) if sim is None else sim
     sim.connect(gui=False)  # headless offscreen rendering
@@ -422,6 +487,7 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
     # Hold ids for visual debug spheres of trajectory points between requests
     trajectory_debug_marker_steps = []
     permanent_marker_ids = []
+    grasp_marker_ids = []
     color_cycle_idx = 0
     if env.simenv.move_to_start_pos():
         robot.move(env, robot.ee_start_position, robot.ee_start_orientation_e, gripper_open=True, is_trajectory=False)
@@ -608,14 +674,14 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                         old.stop()
                     session = TrackingSession(
                         robot=robot, env=env,
-                        provider=spec.get("provider") or getattr(args, "tracker_provider", None),
+                        provider=spec.get("provider") or args.tracker_provider,
                         monitor=spec.get("monitor"),
                         track_gripper=bool(spec.get("track_gripper", True)),
-                        interval=spec.get("interval", getattr(args, "track_interval", None)),
+                        interval=spec.get("interval", args.track_interval),
                         logger=logger,
                         write_jsonl=bool(spec.get("write_jsonl", True)),
-                        output_dir=spec.get("output_dir") or getattr(args, "track_log_dir", None),
-                        save_depth=bool(spec.get("save_depth", getattr(args, "track_save_depth", False))),
+                        output_dir=spec.get("output_dir") or args.track_log_dir,
+                        save_depth=bool(spec.get("save_depth", args.track_save_depth)),
                     )
                     session.add_targets(spec.get("targets"))
                     robot.tracking_session = session
@@ -718,18 +784,36 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                     env_connection.send({})
 
             elif env_connection_received[0] == VISUALIZE_GRASP_POSE:
-                grasp_poses = env_connection_received[1]
+                payload = env_connection_received[1]
                 try:
-                    if isinstance(grasp_poses, np.ndarray) and grasp_poses.ndim == 3:
-                        # Multiple poses (N, 4, 4)
-                        for pose in grasp_poses:
-                            draw_grasp_pose(sim, pose)
-                    else:
-                        # Single pose (4, 4)
-                        draw_grasp_pose(sim, grasp_poses)
-                    env_connection.send([OK + f"Visualized {len(grasp_poses) if isinstance(grasp_poses, np.ndarray) and grasp_poses.ndim == 3 else 1} grasp pose(s)." + ENDC])
+                    kind, poses, desc = _parse_grasp_viz_payload(payload)
+                    depth_offset = ee_grasp_marker_depth(robot.profile)
+                    ids = []
+                    for pose in poses:
+                        if kind == "ee":
+                            ids += draw_ee_grasp_pose(sim, pose, robot.profile)
+                        else:
+                            ids += draw_grasp_pose(sim, pose)
+                    grasp_marker_ids += ids
+                    logger.info(PROGRESS + f"[vis-grasp] drew {len(poses)} {kind} grasp pose(s) "
+                                           f"({len(ids)} markers, contact_depth={depth_offset:.3f}): "
+                                           f"{_fmt_grasp_poses(kind, poses)} {desc}" + ENDC)
+                    env_connection.send([OK + f"Visualized {len(poses)} grasp pose(s)." + ENDC])
                 except Exception as e:
+                    logger.info(FAIL + f"[vis-grasp] failed: {e}" + ENDC)
                     env_connection.send([FAIL + f"Failed to visualize grasp pose: {e}" + ENDC])
+
+            elif env_connection_received[0] == CLEAR_GRASP_MARKERS:
+                removed = 0
+                for marker_id in grasp_marker_ids:
+                    try:
+                        sim.remove_marker(marker_id)
+                        removed += 1
+                    except Exception:
+                        pass
+                grasp_marker_ids = []
+                logger.info(PROGRESS + f"[vis-grasp] cleared {removed} grasp marker(s)." + ENDC)
+                env_connection.send([OK + f"Cleared {removed} grasp marker(s)." + ENDC])
 
             elif env_connection_received[0] == VISUALIZE_BOUNDING_BOX:
                 box_cubes = env_connection_received[1]
@@ -770,13 +854,17 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
                  sim_name: str = "pybullet",
                  ee_offset_from_base=(0.0, 0.08, 0.45),
                  ee_orientation_e_override=None,
-                 strengthen_door=True):
+                 strengthen_door=True,
+                 vis_grasp=None):
     """
     Launch a minimal interactive session that loads the environment with the scene.
     - ``gui=True`` opens the simulator's interactive viewer; ``gui=False`` runs headless.
     - Disables door joint motor forces for easy mouse-pick/drag of the hinge/latch (GUI).
     - In GUI, idles so the scene can be inspected; headless, exits after setup.
     - ``sim_name`` selects the provider, so the same demo drives PyBullet or Genesis.
+    - ``vis_grasp`` draws a gripper marker per given end-effector pose (4 or 6 numbers),
+      the same picture the agent's ``visualize_grasp_pose`` produces - handy for checking a
+      pose from a log without running the LLM.
     """
     logger = init_loguru_logger(f"env_{sim_name}.log")
     try:
@@ -801,21 +889,12 @@ def run_sim_demo(task_p='door', disable_forces: bool = False,
         # The blocks below are door-task debug scratch space; skip them for other sim-envs.
         is_door_task = getattr(env.simenv, "door_id", None) is not None
 
-        DRAW_GRASP_POST_MAT = is_door_task
-        if DRAW_GRASP_POST_MAT:
-            grasp_pose =   np.array([
-                [ 0.854062,   -0.5120964,   0.09129835, -0.34211737], #-0.34211737
-                [-0.49542382, -0.7473097,   0.44281337,  -0.12207034], #-0.12207034
-                [-0.15853497, -0.42342147, -0.89195347,  0.9260877], # 0.9260877
-                [ 0.0,         0.0,         0.0,         1.0]
-            ])
-            
-            # pose[9] - mid lever form above (not sure exactly perpedicular but close)
-            
-            poses, scores = get_grasp_pose_candidates("door handle")
-            
-        
-            draw_grasp_pose(sim, poses[47])
+        for pose in (vis_grasp or []):
+            profile = get_robot_profile(_Args.robot)
+            ids = draw_ee_grasp_pose(sim, pose, profile)
+            print(f"{tag} --vis-grasp: drew pose {[round(float(v), 3) for v in pose]} "
+                  f"({len(ids)} markers, contact_depth={ee_grasp_marker_depth(profile):.3f})")
+
         GRASP_POSE = False 
         if GRASP_POSE:
             trajectory = [[-0.279, -0.126, 0.600],[-0.279, -0.126, 0.700],[-0.300, 0.100, 0.700],[-0.300, 0.100, 0.600]]
@@ -1025,6 +1104,7 @@ if __name__ == "__main__":
     #   python env.py                                   # door (default) on pybullet
     #   python env.py --task franka_kitchen:microwave
     #   python env.py --task grasp --direct
+    #   python env.py "--vis-grasp=-0.285,0.017,0.692,0.851"   # draw a grasp pose
     import argparse as _argparse
     from sim_adapter import SUPPORTED_SIMS as _SUPPORTED_SIMS
     from sim_envs.registry import list_task_ids as _list_task_ids
@@ -1043,13 +1123,27 @@ if __name__ == "__main__":
     _parser.add_argument("--no-strengthen-door", dest="strengthen_door",
                          action="store_false", default=True,
                          help="door task only: do not hold the door shut at startup")
+    _parser.add_argument("--vis-grasp", dest="vis_grasp", action="append", metavar="POSE",
+                         help='draw a gripper marker at an end-effector pose, given as '
+                              '"x,y,z,rotation" (top-down) or "x,y,z,roll,pitch,yaw". '
+                              'Repeatable. Use = (values start with -): '
+                              '--vis-grasp=-0.285,0.017,0.692,0.851')
     _cli = _parser.parse_args()
+
+    def _parse_pose(text):
+        values = [float(v) for v in text.replace(";", ",").split(",") if v.strip() != ""]
+        if len(values) not in (4, 6):
+            raise SystemExit(f"--vis-grasp expects 4 or 6 comma-separated numbers, got {len(values)}: {text!r}")
+        return values
+
+    _vis_grasp_poses = [_parse_pose(t) for t in (_cli.vis_grasp or [])]
 
     run_sim_demo(task_p=_cli.task,
                  disable_forces=_cli.disable_forces,
                  gui=not _cli.direct,
                  sim_name=_cli.sim,
-                 strengthen_door=_cli.strengthen_door)
+                 strengthen_door=_cli.strengthen_door,
+                 vis_grasp=_vis_grasp_poses)
 
 
 

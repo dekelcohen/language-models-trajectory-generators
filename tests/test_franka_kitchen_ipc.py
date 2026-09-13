@@ -30,6 +30,7 @@ class _Args:
     mode = "default"
     robot = "sawyer"  # deliberately wrong: the sim-env must force franka
     task = TASK
+    sim = "pybullet"
     save_grasp_inputs = False
 
 

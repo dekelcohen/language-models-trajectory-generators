@@ -48,6 +48,19 @@ class RobotProfile:
     #: simulators that have no PyBullet joint indices.
     gripper_joint_names: Sequence[str] = ()
 
+    # --- Gripper geometry, for drawing an honest --vis-grasp marker -------------------
+    # Measured in PyBullet off the loaded URDFs (see env.draw_ee_grasp_pose).
+
+    #: Distance from the end-effector link origin to the finger contact point (pad centre)
+    #: along the approach axis. Franka's ``panda_grasptarget`` already *is* the pad centre,
+    #: so 0; sawyer's ``right_hand`` is a bare wrist frame with the robotiq 2f-85 attached
+    #: by a fixed constraint 0.168 m further along the approach.
+    ee_to_finger_contact: float = 0.0
+    #: Length of one finger pad, drawn backwards from the contact point.
+    finger_length: float = 0.054
+    #: Half the open jaw width (contact point to one pad).
+    finger_half_spread: float = 0.04
+
     # Genesis-only PD control. Seeded from
     # genesis-world/examples/tutorials/IK_motion_planning_grasp.py
     genesis_kp: List[float] = field(default_factory=list)
@@ -76,6 +89,9 @@ def franka_profile():
         arm_movement_force=config.arm_movement_force_franka,
         gripper_movement_force=config.gripper_movement_force_franka,
         arm_joint_count=7,
+        ee_to_finger_contact=0.0,  # panda_grasptarget sits at the pad centre
+        finger_length=0.054,
+        finger_half_spread=config.gripper_goal_position_open_franka,
         genesis_kp=[4500, 4500, 3500, 3500, 2000, 2000, 2000, 100, 100],
         genesis_kv=[450, 450, 350, 350, 200, 200, 200, 10, 10],
         genesis_force_range=[87, 87, 87, 87, 12, 12, 12, 100, 100],
@@ -97,6 +113,9 @@ def sawyer_profile():
         arm_movement_force=config.arm_movement_force_sawyer,
         gripper_movement_force=config.gripper_movement_force_sawyer,
         arm_joint_count=None,
+        ee_to_finger_contact=0.168,  # right_hand -> robotiq_2f_85_*_pad
+        finger_length=0.038,
+        finger_half_spread=0.0675,
     )
 
 

@@ -59,6 +59,7 @@ class _Args:
     mode = "default"
     robot = "franka"
     task = TASK
+    sim = "pybullet"
     save_grasp_inputs = False
 
 

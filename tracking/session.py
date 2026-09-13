@@ -425,10 +425,10 @@ def make_session(robot, env, args, targets=None, monitor=None, track_gripper=Tru
     session = TrackingSession(
         robot=robot,
         env=env,
-        provider=getattr(args, "tracker_provider", None),
+        provider=args.tracker_provider,
         monitor=monitor,
         track_gripper=track_gripper,
-        interval=getattr(args, "track_interval", None),
+        interval=args.track_interval,
         logger=logger,
         run_id=run_id or time.strftime("%Y%m%d_%H%M%S"),
     )

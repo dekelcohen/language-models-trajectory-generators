@@ -15,6 +15,8 @@ def _run_env(conn):
     class _Args:
         mode = "default"
         robot = "franka"
+        task = "adroit_door"
+        sim = "pybullet"
 
     import logging
     logger = logging.getLogger("env")

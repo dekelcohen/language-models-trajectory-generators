@@ -129,7 +129,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `--ovr-obj REGEX` | Apply `--ovr-bbox` only to predictions whose label matches regex (else all). |
 | `--viz-point / --vis-point JSON` | Add permanent 3D world marker(s): `"[x,y,z]"` or `"[[..],[..]]"`. |
 | `--vis-traj` | Draw trajectory preview points (sphere markers) in sim. |
-| `--vis-grasp` | Draw grasp-pose candidates (axes + fingers) in sim. |
+| `--vis-grasp` | Draw grasp poses (gripper marker: RGB axes + fingers) in sim, and ask the sub-task agent to visualize its contact grasp pose (§ Grasp-pose visualization). |
 | `--vis-box REGEX` | Draw 3D bbox (cylinders) for objects whose label matches regex. |
 | `--save-grasp-inputs` | Save `masks[0]` `.npy` + projection/view matrices per `detect_object`. |
 
@@ -380,7 +380,10 @@ example; the prompt instructs the model to infer positions from conversation his
 `_build_main_prompt` fills: `[INSERT DETECT_OBJECT_TOOL]`,
 `[INSERT DETECT_OBJECT_TOOL_INITIAL_PLANNING]`, `[INSERT COLLISION AVOIDANCE]`,
 `[INSERT INITIAL PLANNING 1]`, `[INSERT INITIAL PLANNING 2]`, `[INSERT EE POSITION]`,
-`[INSERT TASK]`, `[INSERT 3D COORDINATES PROMPT SECTION]`, `[INSERT IN CONTEXT EXAMPLE]`.
+`[INSERT TASK]`, `[INSERT 3D COORDINATES PROMPT SECTION]`, `[INSERT IN CONTEXT EXAMPLE]`,
+`[INSERT TRACK_OBJECTS_TOOL]` (only with `--tracking`), `[INSERT VISUALIZE GRASP TOOL]`
+(only with `--vis-grasp`; the placeholder **line** is removed otherwise, so a normal run's
+prompt is byte-identical to the pre-feature text).
 The shared planning vars live in `prompts/main_prompt.py` and are reused by the planner
 prompt. `INITIAL_PLANNING_1` deliberately excludes the detect-object line (that line is
 tool/attempt-specific and only belongs in the subtask prompt).
@@ -590,6 +593,7 @@ Cost rises with tier; the free ones run in CI-style seconds.
 | Tier | What | Command | LLM calls |
 |---|---|---|---|
 | 0 | maths, builders, dispatch, IPC codec | `pytest tests/test_side_approach.py` | none |
+| 0 | grasp-marker frame/depth, payload shapes, prompt gating | `pytest tests/test_vis_grasp.py` | none |
 | 1 | headless PyBullet IK reach + a printed reachability atlas | same file (`SimReach`) | none |
 | 2 | full env subprocess opens `franka_kitchen:slide_cabinet` | `$env:LMTG_RUN_SLOW_SIM_TESTS=1; pytest tests/test_side_approach_e2e.py -s` | none |
 | 3 | a real agent run, replayed | `python main.py --replay-log <log>` / `--llm-cache` | none on replay |
@@ -617,6 +621,54 @@ the normal on-disk LLM cache.
 
 `main.py -c/--command` (repeatable) runs commands non-interactively, which is what makes
 tiers 3–4 scriptable.
+
+### Grasp-pose visualization (`--vis-grasp`)
+
+Draws the gripper the robot is *about to be*, so a bad grasp is visible in the captured
+images and the video instead of having to be inferred from a failed rollout.
+
+`visualize_grasp_pose(pose, desc="")` takes **whatever pose the trajectory takes**: a len-4
+`[x, y, z, rotation]`, a len-6 `[x, y, z, roll, pitch, yaw]`, a list of either, or the
+legacy GraspGen `(4,4)` / `(N,4,4)` matrix stack — classified by
+`common_utils.normalize_grasp_viz_poses` and sent as `{"kind", "poses", "desc"}` over
+`VISUALIZE_GRASP_POSE`. `CLEAR_GRASP_MARKERS` removes every marker drawn so far; the runner
+fires it when an attempt ends, so each attempt's frames show only its own grasp.
+
+Two conventions meet here and they do **not** agree:
+
+| Frame | Approach axis | Finger-closing axis |
+|---|---|---|
+| End-effector (`transforms.matrix_from_approach`, what `robot.move` executes) | `+Z` | `+Y` |
+| Grasp / GraspNet (what `env.draw_grasp_pose` draws) | `+Z` | `+X` |
+
+`common_utils.ee_pose_to_grasp_matrix` does the swap once (`X ← ee_Y`, `Y ← -ee_X`,
+`Z ← ee_Z`, which stays right-handed). Drawing the end-effector matrix directly would put
+the fingers 90° off and still look plausible.
+
+The marker is also **depth-corrected**, per robot. Trajectory points name where the
+*fingers* go and `Robot._apply_gripper_depth_offset` drives the end-effector **link** a
+further `profile.gripper_depth_offset` (0.06 m franka, -0.12 m sawyer) along the approach
+axis — but where the fingers then actually close depends on the hand, so the marker's
+`tcp_depth` is `env.ee_grasp_marker_depth(profile)` =
+`gripper_depth_offset + profile.ee_to_finger_contact`:
+
+| Robot | EE link | link → pad centre (`ee_to_finger_contact`) | marker `tcp_depth` |
+|---|---|---|---|
+| franka | `panda_grasptarget` (already the pad centre) | 0.0 | **+0.060** |
+| sawyer | `right_hand` (bare wrist; robotiq 2f-85 fixed 0.168 m ahead) | 0.168 | **+0.048** |
+
+`finger_length` / `finger_half_spread` come from the same profile, so the marker is the
+size of the hand actually loaded. Verified in PyBullet by driving the arm to the pose and
+measuring the pads: franka agrees with `panda_grasptarget` to IK residual (~1-10 mm);
+sawyer's error drops from **166 mm** (using the IK offset alone, which put the marker on the
+*wrong side* of the commanded point) to **3 mm**.
+
+With the flag on, `[INSERT VISUALIZE GRASP TOOL]` adds `main_prompt.VISUALIZE_GRASP_TOOL`,
+which tells the sub-task agent to call it **once per real grasp**, for the single pose where
+the gripper engages the object (closes on it, or pushes/pulls/drags it) — not for hover,
+alignment, descent, lift or retreat waypoints. With the flag off the placeholder line is
+removed whole, so the prompt is byte-identical to the pre-feature text and the API is a pure
+no-op (no IPC traffic). Tests: `tests/test_vis_grasp.py`.
 
 ### Creation & execution (`api.py` ↔ `env.py`)
 - `generate_linear_trajectory(desc, start_pose, end_pose, num_points=20)` → `Trajectory`
@@ -916,6 +968,11 @@ python env.py --help                                # lists every available task
 | `--direct` | `p.DIRECT` instead of GUI — loads, renders once, exits (CI-friendly smoke test). |
 | `--disable-forces` | Zero the joint motor forces so joints can be dragged freely. |
 | `--no-strengthen-door` | Door task only: don't hold the door shut at startup. |
+| `--vis-grasp=POSE` | Draw a gripper marker at an end-effector pose: `"x,y,z,rotation"` or `"x,y,z,roll,pitch,yaw"`. Repeatable. Use `=` (not a space) — the values start with `-`. |
+
+```bash
+python env.py --task door "--vis-grasp=-0.285,0.017,0.692,0.851"
+```
 
 ### Franka Kitchen (`franka_kitchen:*`)
 

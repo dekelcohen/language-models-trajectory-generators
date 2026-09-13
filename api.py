@@ -10,12 +10,13 @@ import models
 import segmentation_adapter
 from segmentation_adapter import get_segmentation_output
 import utils
+import common_utils
 from common_utils import Trajectory, pose_euler
 from sim_adapter import transforms
 from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC, WARNING
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX, CLEAR_GRASP_MARKERS
 from helpers.image_utils import list_file_paths
 from task_state import TaskState
 
@@ -375,24 +376,46 @@ class API:
         self.logger.info(PROGRESS + f"Loaded {len(poses)} grasp pose candidates for '{object_name}'." + ENDC)
         return poses, scores
 
-    def visualize_grasp_pose(self, poses):
-        """Send grasp pose(s) to the simulation environment for 3D visualization.
+    def visualize_grasp_pose(self, poses, desc=""):
+        """Draw grasp pose(s) in the simulation so they show up in the images and video.
 
-        Only active when --vis-grasp flag is set; otherwise a no-op.
+        Only active when --vis-grasp is set; otherwise a no-op.
 
         Args:
-            poses: A single 4x4 matrix or an (N, 4, 4) array of grasp poses.
+            poses: an end-effector pose the robot will execute - ``[x, y, z, rotation]``
+                (top-down) or ``[x, y, z, roll, pitch, yaw]`` (horizontal approach) - a
+                list of such poses, or a pre-computed ``(4,4)`` / ``(N,4,4)`` grasp matrix
+                stack (GraspGen candidates).
+            desc: optional short label logged next to the pose.
         """
         if not self.args.vis_grasp:
             self.logger.info(PROGRESS + "Skipping grasp visualization (--vis-grasp not set)." + ENDC)
             return
-        poses = np.array(poses, dtype=float)
-        self.main_connection.send([VISUALIZE_GRASP_POSE, poses])
+        try:
+            kind, norm_poses = common_utils.normalize_grasp_viz_poses(poses)
+        except Exception as e:
+            self.logger.info(FAIL + f"visualize_grasp_pose: {e}" + ENDC)
+            raise
+        self.logger.info(PROGRESS + f"Visualizing {len(norm_poses)} {kind} grasp pose(s){(' - ' + desc) if desc else ''}: "
+                                    f"{[np.around(np.asarray(p, dtype=float), 3).tolist() for p in norm_poses[:3]]}" + ENDC)
+        self.main_connection.send([VISUALIZE_GRASP_POSE, {"kind": kind, "poses": norm_poses, "desc": desc}])
         resp = self.main_connection.recv()
         if isinstance(resp, list):
             self.logger.info(resp[0])
         else:
             self.logger.info(str(resp))
+
+    def clear_grasp_markers(self):
+        """Remove every grasp marker drawn so far (called between sub-task attempts)."""
+        if not self.args.vis_grasp:
+            return
+        try:
+            self.main_connection.send([CLEAR_GRASP_MARKERS])
+            resp = self.main_connection.recv()
+            if isinstance(resp, list):
+                self.logger.info(resp[0])
+        except Exception as e:
+            self.logger.info(FAIL + f"Failed to clear grasp markers: {e}" + ENDC)
 
 
     def _save_seg_masks(self, masks, segmentation_texts):
@@ -492,7 +515,7 @@ class API:
 
         Returns ``None``; prints which cameras were seeded, as the other tools do.
         """
-        if not getattr(self.args, "tracking", False):
+        if not self.args.tracking:
             self.logger.info(PROGRESS + "track_objects: tracking is disabled (--tracking is off); ignoring." + ENDC)
             return
 
@@ -509,10 +532,10 @@ class API:
             "targets": spec_targets,
             "monitor": self._monitor_spec(monitor),
             "track_gripper": bool(track_gripper),
-            "provider": getattr(self.args, "tracker_provider", None),
-            "interval": getattr(self.args, "track_interval", None),
-            "output_dir": getattr(self.args, "track_log_dir", None),
-            "save_depth": bool(getattr(self.args, "track_save_depth", False)),
+            "provider": self.args.tracker_provider,
+            "interval": self.args.track_interval,
+            "output_dir": self.args.track_log_dir,
+            "save_depth": bool(self.args.track_save_depth),
         }
         self.logger.info(PROGRESS + f"Starting tracking for {[t['name'] for t in spec_targets]}..." + ENDC)
         self.main_connection.send([config.START_TRACKING, payload])
