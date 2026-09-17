@@ -45,8 +45,9 @@ CODE GENERATION CONVENTIONS:
 [INSERT CODE BLOCK CONVENTIONS]
 Additional planner rules:
 - Emit ONE code block per turn.
-- Make sure all variables used in a code block are defined within that block.
+- Variables you define persist across your turns for the rest of this planner run.
 - Do NOT write robot motion/trajectory code here; only call the planner tools above.
+- Identify targets qualitatively (colour, shape, which part of the object) - the low-level agent localises them itself with its own perception. Do NOT hardcode world coordinates from the scene analysis into a subtask prompt: they are VLM estimates, and a wrong one is then trusted over the agent's own measurement and poisons every attempt of that subtask.
 
 ENVIRONMENT SET-UP:
 [INSERT 3D COORDINATES PROMPT SECTION]

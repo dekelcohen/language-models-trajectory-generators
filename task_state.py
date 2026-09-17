@@ -22,6 +22,16 @@ class TaskState:
         # First trajectory image index of the current attempt (VLM review frame sampling)
         self.start_attempt_trajectory_step = start_trajectory_step
 
+        # Namespace the LLM's ```python blocks run in. It is the exec() globals dict itself
+        # (module globals + injected tool handles + whatever the LLM defined), reused across
+        # this task's turns so a value computed in an earlier response stays usable with
+        # ordinary Python semantics. Lifetime is ONE ATTEMPT: execute_python_blocks() clears
+        # it whenever attempt_number moves on (a retry starts a brand-new conversation, so
+        # its namespace must start empty too), and every subtask gets a fresh TaskState.
+        self.exec_env = {}
+        # attempt_number the above dict belongs to; drives that clear-on-new-attempt check.
+        self.exec_env_attempt = 0
+
         # Terminal flags
         self.completed_task = False
         self.failed_task = False

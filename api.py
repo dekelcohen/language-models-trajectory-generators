@@ -430,6 +430,9 @@ class API:
                 self.logger.info(PROGRESS + f"Warning: failed to save segmentation mask [{i}] ({label}): {e}" + ENDC)
 
     def execute_trajectory(self, trajectory):
+        # Rebuild into a plain Trajectory before anything is sent: a custom class from the
+        # model's own code block cannot be reconstructed in the simulator process.
+        trajectory = common_utils.normalize_trajectory(trajectory)
 
         # Downsample preview to max 3 points: start, middle, end
         _preview = trajectory

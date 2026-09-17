@@ -126,7 +126,7 @@ When generating the code for the trajectory, do the following:
 4. When defining the functions, specify the required parameters, and document them clearly in the code. Make sure to include the orientation parameter in both definition and calls (use). make sure all dimensions of caller arguments match the function definition and body
 5. Do not print any of the trajectory variables, since the output will be too long.
 6. [INSERT CODE BLOCK CONVENTIONS]
-7. Make sure all used variables in a python block are defined in this block. you can merge several blocks if appropriate. Use the provided generate_linear_trajectory helper; do not redefine it.
+7. Variables you define persist across turns within the current attempt; a retry attempt starts a fresh namespace, so redefine what you need there. Merge blocks if appropriate. Use the provided generate_linear_trajectory helper; do not redefine it.
 
 SCENE ANALYSIS (produced by a separate perception VLM from the current head-camera image; use it as your observation of the scene):
 [INSERT SCENE ANALYSIS]

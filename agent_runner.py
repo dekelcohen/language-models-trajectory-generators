@@ -585,6 +585,30 @@ class TaskResult:
 
 
 # --- Per-(sub)task execution -------------------------------------------
+def _refresh_exec_env(env, injected_layers):
+    """Prepare the namespace for ONE assistant response, reusing `env` in place.
+
+    The SAME dict object is reused for every turn of a scope (one subtask attempt, or one
+    planner run), because that dict is what `exec` hands to the code as its globals. Reusing
+    it - rather than copying names into a fresh dict - is what gives ordinary Python module
+    semantics across turns:
+      * a function defined in an earlier turn reads the CURRENT value of the names it
+        closes over (its __globals__ is this very dict), instead of a frozen snapshot;
+      * `del x` actually removes x for good;
+      * re-applying the injected layer LAST means tool handles always win, so a name the
+        LLM guessed earlier can never shadow a helper (e.g. side_grasp_pose) that a
+        later load_skill() brings in, and rebinding `math`/`api` lasts one response only.
+
+    `env` is empty on the first call of a scope, pre-seeded here with this module's globals.
+    """
+    if not env:
+        env.update(globals())
+    for layer in injected_layers:
+        if layer:
+            env.update(layer)
+    return env
+
+
 def execute_python_blocks(ctx, task, assistant_content):
     """Execute every ```python block of ONE assistant response and build the user
     feedback prompt describing what actually happened.
@@ -592,13 +616,19 @@ def execute_python_blocks(ctx, task, assistant_content):
     Intent: this is the only place that runs LLM-generated code. It must never let
     the LLM believe an action ran when it did not.
 
-    All blocks share one namespace (variables/imports from an earlier block are
-    visible to later ones), rebuilt per response.
+    Namespace: all blocks of this response share one namespace, and it is the SAME dict
+    across the turns of an attempt (task.exec_env), so a pose computed one turn can be
+    reused the next with normal Python semantics - see _refresh_exec_env(). That namespace
+    lives for exactly ONE ATTEMPT: it is cleared here as soon as task.attempt_number moves
+    on (api.task_completed() bumps it before any further block runs), so no state leaks into
+    a retry - which rebuilds the conversation from scratch - nor into the next subtask,
+    which gets a fresh TaskState.
 
     Cases handled:
       1. No ```python block in the response  -> NO_TOOL_CALL_PROMPT (nudge to emit a tool call).
       2. Block raises                        -> ERROR_CORRECTION_PROMPT with the traceback;
-                                                remaining blocks are ABORTED.
+                                                remaining blocks are ABORTED. Names bound
+                                                before the exception survive, as in Python.
       3. Block prints                        -> output collected and prepended via
                                                 PRINT_OUTPUT_PROMPT; execution CONTINUES
                                                 (a print must not silently drop later
@@ -620,11 +650,15 @@ def execute_python_blocks(ctx, task, assistant_content):
     if len(assistant_content.split("```python")) <= 1:
         return "" if task.completed_task else NO_TOOL_CALL_PROMPT
 
+    if task.attempt_number != task.exec_env_attempt:
+        task.exec_env.clear()
+        task.exec_env_attempt = task.attempt_number
+
     code_block = assistant_content.split("```python")
-    exec_env = globals().copy()
-    exec_env.update(ctx.exec_locals)
-    if skills is not None:
-        exec_env.update(skills.exec_locals())
+    exec_env = _refresh_exec_env(
+        task.exec_env,
+        [ctx.exec_locals, skills.exec_locals() if skills is not None else None],
+    )
 
     feedback = ""
     error = False
@@ -961,10 +995,12 @@ def run_plan(ctx, command, max_iterations=None):
     )
 
     iteration = 0
+    # LLM-defined names carried between planner turns; lives for THIS planner run only.
+    planner_carried = {}
     while not (planner.plan_completed_flag or planner.plan_failed_flag) and iteration < max_iterations:
         iteration += 1
         subtasks_before = len(planner.subtask_results)
-        new_prompt = _run_planner_code_blocks(messages, planner_locals, planner_skills)
+        new_prompt = _run_planner_code_blocks(messages, planner_locals, planner_skills, planner_carried)
 
         if planner.plan_completed_flag or planner.plan_failed_flag:
             break
@@ -998,18 +1034,22 @@ def run_plan(ctx, command, max_iterations=None):
     return planner
 
 
-def _run_planner_code_blocks(messages, planner_locals, skills=None):
+def _run_planner_code_blocks(messages, planner_locals, skills=None, carried=None):
     """Execute the ```python blocks in the planner's latest message; return the
     follow-up user prompt built from captured stdout / errors (plus any skill text
-    requested via load_skill/read_file, which is appended verbatim rather than printed)."""
+    requested via load_skill/read_file, which is appended verbatim rather than printed).
+
+    `carried` is the planner's cross-turn namespace (owned by run_plan, one dict per
+    planner run) and is reused in place, so names the planner defined in earlier turns keep
+    ordinary Python semantics here - see _refresh_exec_env(). Pass None for a throwaway
+    namespace that lives only for this response.
+    """
     new_prompt = ""
     content = messages[-1]["content"] if messages and isinstance(messages[-1], dict) else ""
     code_block = content.split("```python")
     if len(code_block) > 1:
         block_number = 0
-        # Shared namespace for all blocks in this planner response (reset per response).
-        exec_env = globals().copy()
-        exec_env.update(planner_locals)
+        exec_env = _refresh_exec_env({} if carried is None else carried, [planner_locals])
         for block in code_block:
             if len(block.split("```")) > 1:
                 code = block.split("```")[0]
