@@ -292,8 +292,10 @@ the last subtask's printed `result`, on failure read `result.reviewer_reason`/
 occlusions/blockers (incl. the arm itself) and insert a prep subtask, then dispatch the
 next subtask or `plan_completed()`/`plan_failed()`.
 
-`_run_planner_code_blocks` splits on ```` ```python ````, `exec`s each block with
-`globals().copy()` updated by `planner_locals`, captures stdout via `redirect_stdout`.
+`_run_planner_code_blocks` splits on ```` ```python ````, `exec`s each block in the
+planner-run namespace (`_refresh_exec_env`: module globals + `planner_locals` re-applied
+each turn, reusing the `carried` dict `run_plan` owns — so planner variables persist across
+planner turns), captures stdout via `redirect_stdout`.
 On exception → `ERROR_CORRECTION_PROMPT`; on stdout → `PRINT_OUTPUT_PROMPT`; on no tool
 call → a nudge to emit a proper block.
 
@@ -343,8 +345,9 @@ retry vs. done.
   | `continue_task_turn(ctx, task, feedback) -> messages` | continue the CURRENT attempt (not completed, not failed): feed execution results back and get the next response | attaches latest head/wrist frames + `EEF_POS_SNIPPET` per `config.ENABLE_EEF_POS_IMAGE` / `--lm-images`; never sends an empty user turn (providers such as Bedrock reject an assistant-final conversation) → falls back to `CONTINUE_TASK_PROMPT` |
   | `run_task_agent_loop(ctx, task, prompt, scene_analysis, attempt_summaries) -> messages` | drive one (sub)task to termination: execute → feedback → next LLM turn | invariant: conversation always ends on an assistant response with pending blocks. Per iteration exactly one of: `completed_task` → exit; `failed_task` → `handle_task_failure`; else → `continue_task_turn`. Assumes the first assistant response was produced by `execute_task` |
 
-  - All blocks of one response share a single namespace (a variable/import from an earlier
-    block is visible to later ones); it is rebuilt per response.
+  - All blocks of one response share a single namespace — and that namespace is the **same
+    dict for every turn of the current attempt** (`task.exec_env`), so a pose computed in one
+    response is still usable in the next. See *Exec namespace lifetime* below.
   - **A `print()` must not abort the response.** Earlier versions reused one `error` flag for
     "exception" and "has print output", so a first block that printed silently dropped every
     later block (typically all `execute_trajectory` calls) while the LLM was told only
@@ -364,6 +367,35 @@ retry vs. done.
 `generate_linear_trajectory`, plus the built-in tracking invariants
 (`attached_to_gripper`, `object_not_lost`, `stays_within`, `moved_at_least`, `combine`;
 §13) and `api`, `math`, `np`, `logger`.
+
+### Exec namespace lifetime — persists across turns, never across rollouts
+
+Names the LLM defines survive from one assistant response to the next, so it can compute a
+pose once and reuse it. The namespace is wiped at every **attempt** boundary.
+
+| scope | namespace | lives for | reset by |
+|---|---|---|---|
+| subtask agent | `task.exec_env` (+ `task.exec_env_attempt`) | one **attempt** | `execute_python_blocks` when `task.attempt_number` changes; a new subtask gets a fresh `TaskState` |
+| planner | `planner_carried`, local to `run_plan()` | one **planner run** | a new `run_plan()` call |
+
+- `_refresh_exec_env(env, injected_layers)` reuses the **same dict** each turn (seeding it
+  with module globals when empty) and re-applies the injected layer — `ctx.exec_locals` /
+  `planner_locals` plus `skills.exec_locals()` — **last**.
+- Reusing one dict (rather than copying names into a fresh one) is what gives ordinary
+  Python module semantics; a copy-forward design silently breaks all three:
+
+  | | copy-forward | same dict (implemented) |
+  |---|---|---|
+  | function defined turn 1, its globals reassigned turn 2 | reads the **turn-1 snapshot** | reads the current value |
+  | `del x` | x **reappears** next turn | gone for good |
+  | `load_skill()` introduces a name the LLM already guessed | LLM's guess **shadows the real helper** | injected helper wins |
+
+- Rebinding an injected name (`math = 5`, `api = ...`) therefore lasts **one response only**.
+- Names bound before an exception survive, as in Python; the traceback still aborts the
+  remaining blocks of that response.
+- Prompt contract: `MAIN_PROMPT` rule 7 and the planner's "Additional planner rules" state
+  this, so the LLM knows a retry starts from an empty namespace.
+- Covered by `tests/test_exec_locals_persistence.py` (no sim / no LLM).
 
 <details><summary>Why the retry drops detect_object + in-context example</summary>
 
@@ -552,6 +584,29 @@ position linearly and orientation by quaternion **slerp**, and promotes a len-4 
 the orientation it already stands for — so a top-down hover can be chained straight into a
 side approach. Euler lerp is wrong here: triples differing on more than one axis swing the
 gripper through orientations neither endpoint asked for.
+</details>
+
+<details>
+<summary><code>execute_trajectory</code> input normalization — why a custom class cannot cross</summary>
+
+`api.execute_trajectory` first calls `common_utils.normalize_trajectory`, which rebuilds
+whatever it was given into a real `Trajectory` whose `points` are plain lists of Python
+floats. This is a **transport** requirement, not a style preference: the trajectory is sent
+to the simulator process over `multiprocessing.Pipe` (PyBullet) or JSON (Genesis).
+
+A class the model defines inside its own code block is pickled **by reference** as
+`<module>.<name>`. The exec namespace is seeded from `agent_runner.globals()`, so such a
+class reports `__module__ == "agent_runner"` while not being an attribute of it — the send
+dies with `PicklingError: Can't pickle <class 'agent_runner._Arc'>`. Even registering a
+surrogate module would not help: the *child* interpreter cannot reconstruct the class either.
+Numpy is stripped for a related reason — the JSON transport rejects arrays outright, and
+pickle's array format is version-sensitive across the two interpreters.
+
+Accepted: a real `Trajectory`, any duck-typed object exposing `.points` (the common case —
+the model imitating `Trajectory` to build an arc), or a bare sequence of poses. Anything else
+raises `TypeError` carrying an actionable message, which the model reads and retries within
+the same attempt. Covered by `tests/test_trajectory_normalization.py`, which reproduces the
+original `PicklingError` before asserting the fix.
 </details>
 
 <details>
@@ -860,7 +915,8 @@ the attempt counter (final attempt accepts without review).
   `conversation_messages`, `attempt_number`, `start_attempt_trajectory_step`,
   `completed_task`, `failed_task`, `review_succeeded`, `review_reason`,
   `review_improvement_steps`, `accepted_without_review`, `segmentation_texts`,
-  `segmentation_count`, `trajectory_length`.
+  `segmentation_count`, `trajectory_length`, plus `exec_env` / `exec_env_attempt` (the
+  LLM's Python namespace — **per attempt**, see §5 *Exec namespace lifetime*).
 - `execute_task` assigns a fresh `api.task`; a local `task` alias makes
   `api.task_completed()` mutations visible. `teardown_agent` resets `api.task`.
 

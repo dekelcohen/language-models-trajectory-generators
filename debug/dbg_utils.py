@@ -305,6 +305,17 @@ def init_loguru_logger(file_basename: str = "vlm_traj.log"):
     # Remove default logger so we control both sinks
     loguru_logger.remove()
 
+    # The console stream uses the Windows ANSI codepage (cp1252/cp1255/...), so a single
+    # non-encodable char in an LLM reply (e.g. the arrow in "lever -> door") would raise
+    # UnicodeEncodeError inside the sink and silently drop the whole log record. Degrade
+    # those chars to '?' on the console instead; the file sink stays utf-8 and keeps them.
+    for _stream in (orig_stdout, orig_stderr):
+        try:
+            if getattr(_stream, "errors", None) not in ("replace", "backslashreplace", "ignore"):
+                _stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+
     # Ensure console does NOT print the re-logged stdio lines again
     def _console_filter(record):
         try:

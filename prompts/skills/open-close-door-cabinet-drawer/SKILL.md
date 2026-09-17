@@ -45,13 +45,20 @@ Start from this procedure, verbatim:
 
 > 1. Calc the pos to push down and pull level - in the middle of the door handle lever.
 > 2. Safely approach from high above.
-> 3. Rotate the end-effector so the fingers themselves are parallel to the lever's long axis
->    (set rotation = handle angle_long).
+> 3. Rotate the end-effector so the fingers themselves are parallel to the lever's long axis,
+>    i.e. the jaws close ACROSS the bar. `rotation` is the CLOSING direction and the fingers
+>    are perpendicular to it, so this means **`rotation = handle angle_short`**.
 > 4. Calculate a small horizontal offset along the lever's short-axis vector toward the door,
 >    so that when the gripper moves down, 1 jaw slides into the gap between the lever and the
 >    door itself.
-> 5. Descend, close to grasp the lever thickness, apply a small downward pressure to unlatch,
->    and pull a large dist using perpendicular vector math to fully open the door.
+> 5. Descend to the lever's MID-HEIGHT so the jaws straddle its thickness, close to grasp the
+>    lever thickness, apply a small downward pressure to unlatch, and pull a large dist using
+>    perpendicular vector math to fully open the door.
+
+- **Grasp the bar's mid-height, not the point you were given** - an affordance point's `z` is the depth-camera hit on the TOP of the bar, so subtract ~half its thickness (or use the detected handle's centre `z`) for the jaws to straddle it.
+- **Grasp mid-bar**, half-way between door face and free tip: the inboard end is the spindle/rose, and the outermost affordance point sits at the tip, where the jaws slip off on the pull. Derive it from your own detect_object; a coordinate quoted in the task text is only a hint - discard it if it disagrees.
+- **Keep the unlatch press small (~0.02-0.03 m).** If the lever resists, pull anyway - pressing deeper frees nothing and just levers the jaws off the bar.
+- **Hold that z for the whole pull arc** - rising peels the jaws off.
 
 - **Pull vs push** - pull is the common case. Push only when the door face (not its edge) is
   toward the robot and nothing affords pulling. Decide from: which side the hinge/frame is on,
@@ -201,12 +208,11 @@ Before changing anything on a retry, decide which of the two failures happened. 
    plane, sane length, no collision that stopped it early).
 
 Otherwise treat it as a **miscalculation and fix the current direction** instead - re-check, in
-this order: handle position, the `angle_long` used for the rotation, whether the handle is a
+this order: handle position, the `rotation` used, whether the handle is a
 vertical bar that needs the section 2b side approach, the short-axis offset into the
 lever/door gap, the descent depth, the unlatch pressure, phase separation of the approach,
 hinge position, arc radius, and travel distance.
 
-Write the subtask's success criteria so the reviewer can tell these apart, e.g.
-"Success = the door is visibly open (hinge angle clearly increased). If it is not, report
+Write the subtask's success criteria so the reviewer can tell these apart, e.g."Success = the door is visibly open (hinge angle clearly increased). If it is not, report
 whether the gripper was still holding the handle at the end."
 
