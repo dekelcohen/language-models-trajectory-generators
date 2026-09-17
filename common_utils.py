@@ -15,6 +15,61 @@ class Trajectory:
         self.desc = desc # short sentence to describe the motion and its end_pose
 
 
+_TRAJECTORY_HELP = (
+    "execute_trajectory() expects the Trajectory returned by generate_linear_trajectory(), "
+    "or a plain list of [x, y, z, rotation] poses. {problem} Note that a class YOU define in "
+    "a code block cannot be sent to the simulator (it lives in a separate process and cannot "
+    "reconstruct your class) - build the motion out of plain lists of floats, or chain several "
+    "generate_linear_trajectory() calls, instead of wrapping poses in a custom object."
+)
+
+
+def normalize_trajectory(trajectory):
+    """Coerce whatever was handed to ``execute_trajectory`` into a real :class:`Trajectory`.
+
+    The trajectory crosses a process boundary (``multiprocessing.Pipe`` for PyBullet, JSON
+    for Genesis), so every element has to be something the far side can rebuild. Anything
+    defined inside the LLM's own code block cannot be: it is pickled *by reference* as
+    ``agent_runner.<name>``, which does not exist there (or even here), and the send fails
+    with ``PicklingError``. Numpy scalars/arrays are equally unwelcome - the JSON transport
+    rejects them outright and pickle's array format is version-sensitive across the two
+    interpreters.
+
+    So: accept a real ``Trajectory``, any duck-typed object exposing ``.points``, or a bare
+    sequence of poses, and always return a ``Trajectory`` whose ``points`` are plain lists of
+    Python floats. Raise ``TypeError`` with an actionable message otherwise - the model reads
+    it and retries in the same attempt.
+    """
+    desc = ""
+    points = trajectory
+    if hasattr(trajectory, "points"):
+        points = trajectory.points
+        desc = getattr(trajectory, "desc", "") or ""
+        if not isinstance(desc, str):
+            desc = str(desc)
+
+    if isinstance(points, np.ndarray):
+        points = points.tolist()
+    if isinstance(points, (str, bytes)) or not isinstance(points, Iterable):
+        raise TypeError(_TRAJECTORY_HELP.format(
+            problem=f"Got {type(trajectory).__name__} instead."))
+
+    normalized = []
+    for i, pose in enumerate(points):
+        if isinstance(pose, np.ndarray):
+            pose = pose.tolist()
+        if isinstance(pose, (str, bytes)) or not isinstance(pose, Iterable):
+            raise TypeError(_TRAJECTORY_HELP.format(
+                problem=f"Pose {i} is a {type(pose).__name__}, not a list of numbers."))
+        try:
+            normalized.append([float(v) for v in pose])
+        except (TypeError, ValueError):
+            raise TypeError(_TRAJECTORY_HELP.format(
+                problem=f"Pose {i} = {pose!r} contains a value that is not a number.")) from None
+
+    return Trajectory(normalized, desc)
+
+
 # --- End-effector pose formats ------------------------------------------------
 #
 # Two pose lengths travel through the trajectory pipeline, and the length IS the
