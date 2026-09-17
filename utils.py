@@ -290,6 +290,126 @@ def project_3d_world_pos_to_2d_pixel(camera_position, camera_orientation_q, came
         pixel_2d = [pixel_x, pixel_y]
     return pixel_2d
     
+def sample_surface_depth(depth_array, x, y, radius=None, mask=None, percentile=None):
+    """Depth of the NEAREST surface in a small patch around pixel ``(x, y)``.
+
+    Reading the single pixel under a VLM's affordance point is fragile: the features worth
+    grasping are thin (the adroit door lever bar is ~7 px thick at 5.5 mm/px from the head
+    camera), so a 1-2 px pointing error silently returns the depth of whatever is *behind*
+    the feature - the door face, 10 cm away, or the background, a metre away. The 3D point
+    then lands nowhere near anything graspable, and nothing downstream can tell.
+
+    A patch fixes it because the feature is the near surface: take a low percentile of the
+    finite depths in the window. Depth is monotonically increasing with distance in BOTH
+    encodings this repo handles - PyBullet's nonlinear OpenGL buffer and Genesis's linear
+    metres - so "low" means "near" without having to linearise first.
+
+    Not ``min()``: one bad pixel (depth noise, an anti-aliased silhouette edge straddling
+    foreground and background) would win outright. The percentile is then snapped to the
+    closest value actually present, so the result is always a measured depth and never an
+    interpolation *between* the feature and the background.
+
+    Args:
+        depth_array: 2D array, any monotonic-in-distance depth encoding.
+        x, y: pixel column/row. Rounded and bounds-checked.
+        radius: half-width of the square window; ``config.affordance_depth_patch_radius``.
+        mask: optional boolean array of the same shape; only pixels inside it are sampled.
+            Used to confine the patch to a segmented object.
+        percentile: ``config.affordance_depth_percentile`` when omitted.
+
+    Returns:
+        ``(z, info)`` with ``z`` the chosen depth (``None`` when nothing usable was found)
+        and ``info`` a dict carrying ``center`` (the old single-pixel value, for diagnosing
+        how much the patch changed), ``n_used``, ``n_total``, ``near``, ``far`` and
+        ``mask_used``.
+    """
+    radius = config.affordance_depth_patch_radius if radius is None else int(radius)
+    percentile = config.affordance_depth_percentile if percentile is None else float(percentile)
+
+    depth_array = np.asarray(depth_array)
+    if depth_array.ndim > 2:
+        depth_array = depth_array[..., 0]
+    height, width = depth_array.shape[:2]
+
+    xi, yi = int(round(float(x))), int(round(float(y)))
+    info = {"center": None, "n_used": 0, "n_total": 0, "near": None, "far": None,
+            "mask_used": mask is not None}
+    if not (0 <= xi < width and 0 <= yi < height):
+        return None, info
+
+    center = float(depth_array[yi, xi])
+    info["center"] = center if np.isfinite(center) else None
+
+    x0, x1 = max(0, xi - radius), min(width, xi + radius + 1)
+    y0, y1 = max(0, yi - radius), min(height, yi + radius + 1)
+    patch = np.asarray(depth_array[y0:y1, x0:x1], dtype=float)
+
+    selected = np.isfinite(patch)
+    info["n_total"] = int(selected.size)
+    if mask is not None:
+        mask = np.asarray(mask)
+        if mask.ndim > 2:
+            mask = mask[..., 0]
+        if mask.shape[:2] == (height, width):
+            selected &= np.asarray(mask[y0:y1, x0:x1]).astype(bool)
+        else:
+            info["mask_used"] = False
+
+    values = patch[selected]
+    if values.size == 0:
+        # Every candidate was non-finite or outside the mask; the raw centre pixel is the
+        # only thing left, and only if it is finite.
+        return info["center"], info
+
+    info["n_used"] = int(values.size)
+    info["near"], info["far"] = float(values.min()), float(values.max())
+    target = float(np.percentile(values, percentile))
+    z = float(values[int(np.argmin(np.abs(values - target)))])
+    return z, info
+
+
+def depth_matches_object(z, depth_array, mask, tolerance=None):
+    """Is ``z`` the depth of *some part of* the masked object, rather than of its backdrop?
+
+    An affordance point can be off the object entirely - the VLM pointed at the wrong thing,
+    or at the right thing one pixel too far. Comparing against a single object depth is
+    meaningless (an object spans a range of depths), so compare against the mask's own depth
+    distribution and allow a tolerance derived from that same spread. Working in percentiles
+    and in a fraction of the observed spread keeps this unit-free, so it holds for the
+    OpenGL-buffer and linear-metre encodings alike.
+
+    Returns ``(ok, info)``. ``ok`` is ``True`` when the check cannot be run (no mask, no
+    finite depths under it, ``z is None``) - this is a guard against a bad point, not a
+    second source of truth.
+    """
+    info = {"checked": False, "low": None, "high": None, "tolerance": None}
+    if z is None or mask is None or depth_array is None:
+        return True, info
+
+    depth_array = np.asarray(depth_array)
+    if depth_array.ndim > 2:
+        depth_array = depth_array[..., 0]
+    mask = np.asarray(mask)
+    if mask.ndim > 2:
+        mask = mask[..., 0]
+    if mask.shape[:2] != depth_array.shape[:2]:
+        return True, info
+
+    values = np.asarray(depth_array, dtype=float)[mask.astype(bool)]
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return True, info
+
+    low, high = np.percentile(values, [1.0, 99.0])
+    # The percentiles already dropped the mask's own outliers; the tolerance only has to
+    # absorb depth noise, so scale it to the object's thickness with a floor for the case
+    # of a mask that is essentially a single flat surface.
+    tolerance = max(0.25 * float(high - low), 1e-4) if tolerance is None else float(tolerance)
+    info.update({"checked": True, "low": float(low), "high": float(high),
+                 "tolerance": float(tolerance)})
+    return bool(low - tolerance <= z <= high + tolerance), info
+
+
 def get_world_point_world_frame(camera_position, camera_orientation_q, camera, image_size, point, cam_info=None):
     """
     Calc 3D world pos x,y,z from 2D pixel_point [x=point[0],y=point[1]] + depth value (point[2])

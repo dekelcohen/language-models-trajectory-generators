@@ -1,4 +1,5 @@
 import math
+import os
 import random
 
 # Simulation
@@ -205,22 +206,25 @@ llm_cache_dir = "./cache"               # root cache folder (auto-created)
 llm_cache_float_tolerance = 1e-2        # abs diff allowed per float when smart-matching env state
 
 # Paths
-images_folder = "./images" 
-rgb_image_wrist_path = "./images/rgb_image_wrist.png"
-depth_image_wrist_path = "./images/depth_image_wrist.png"
-rgb_image_head_path = "./images/rgb_image_head.png"
-depth_image_head_path = "./images/depth_image_head.png"
-bounding_cube_mask_image_path = "./images/bounding_cube_mask_{object}_{mask}.png"
+# IMAGES_ROOT env var lets concurrent runs (e.g. 2 copilot sessions on the same checkout)
+# write to isolated folders instead of overwriting each other's ./images. Example:
+#   $env:IMAGES_ROOT="./images_run1"; python main.py
+images_folder = os.environ.get("IMAGES_ROOT", "./images")
+rgb_image_wrist_path = images_folder + "/rgb_image_wrist.png"
+depth_image_wrist_path = images_folder + "/depth_image_wrist.png"
+rgb_image_head_path = images_folder + "/rgb_image_head.png"
+depth_image_head_path = images_folder + "/depth_image_head.png"
+bounding_cube_mask_image_path = images_folder + "/bounding_cube_mask_{object}_{mask}.png"
 
 # Overlays and runs
 overlay_folder = images_folder + "/overlay"
-overlay_image_path = "./images/overlay/overlay_{step}.png"
+overlay_image_path = images_folder + "/overlay/overlay_{step}.png"
 runs_dir = "./runs"
 
 # Logging throttles
 # Only write trajectory frames every N steps (>=1)
 trajectory_log_every = 5
-trajectory_folder = "./images/trajectory"
+trajectory_folder = images_folder + "/trajectory"
 video_folder = images_folder + "/videos"
 trajectory_video_fps = 15
 trajectory_image_base = "rgb_image"
@@ -234,20 +238,20 @@ perception_log_first_n = 1
 # Optionally, re-log every M frames (0 disables)
 perception_log_interval_frames = 0
 
-langsam_image_path = "./images/langsam_image_{object}.png"
-xmem_input_path = "./images/xmem_input.png"
-xmem_output_path = "./images/xmem_output_{step}.png"
+langsam_image_path = images_folder + "/langsam_image_{object}.png"
+xmem_input_path = images_folder + "/xmem_input.png"
+xmem_output_path = images_folder + "/xmem_output_{step}.png"
 
 # Segmentation overlay output for any provider
 # Visualization
 # Keep this many recent preview-steps of trajectory markers (spheres) visible (rolling window).
 visualize_traj_history_steps = 6
-seg_overlay_image_path = "./images/seg_overlay_{provider}_{object}.png"
+seg_overlay_image_path = images_folder + "/seg_overlay_{provider}_{object}.png"
 
 # Snapshot of the exact head-camera image the perception VLM analyzed for a given
 # scene analysis. Kept separate from the trajectory frames so the reviewer VLM can be
 # shown the start-of-attempt scene without it being mistaken for a trajectory frame.
-scene_analysis_image_path = "./images/scene_analysis_head_{step}.png"
+scene_analysis_image_path = images_folder + "/scene_analysis_head_{step}.png"
 
 # Affordance-pointing coordinate format text injected into SCENE_PERCEPTION_PROMPT
 # (replaces COORDINATES_FORMAT_PLACEHOLDER). Selected by the perception VLM's
@@ -256,6 +260,21 @@ affordance_coords_format_by_key = {
     "yx_norm_1000": "The points are in [y, x] format normalized to 0-1000",
     "xy_pixels": "The points are in [x, y] pixel coordinates",
 }
+
+# Depth sampling for affordance points (see utils.sample_surface_depth).
+# A VLM points at a thin feature - the adroit door lever bar is ~7 px thick at 5.5 mm/px -
+# so a 1-2 px pointing error read from a SINGLE pixel lands on the door face (+0.1 m) or on
+# the background (+1 m). Sampling a small patch and keeping a near percentile recovers the
+# feature instead of the surface behind it.
+# Radius 2 -> a 5x5 window: wide enough to contain feature pixels after a 2 px miss, narrow
+# enough (27 mm) not to reach past a graspable feature.
+affordance_depth_patch_radius = 2
+# Which depth inside the patch counts as "the near surface". Not min(): a single bad pixel
+# (depth noise, an anti-aliased silhouette edge) would win. 10th percentile tolerates ~2 such
+# pixels in a 5x5 window while still selecting the foreground when only ~1/8 of the window
+# covers it. Depth is monotonic in distance for BOTH encodings (PyBullet's nonlinear OpenGL
+# buffer and Genesis's linear metres), so a low percentile means "near" in either.
+affordance_depth_percentile = 10.0
 
 # Output - ANSI escape color codes:
 OK = "\033[92m"       # Bright Green

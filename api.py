@@ -188,8 +188,14 @@ class API:
             self.logger.info(PROGRESS + f"Warning: failed to save affordance-points overlay: {e}" + ENDC)
             return None
 
-    def convert_2d_point_to_3d_world(self, points_xy, object_name, print_out=False, capture=True):
+    def convert_2d_point_to_3d_world(self, points_xy, object_name, print_out=False, capture=True,
+                                     mask=None):
         """Convert ranked 2D affordance pixel points to 3D world coordinates.
+
+        The depth under each point is sampled over a small patch rather than read from the
+        single pixel (see ``utils.sample_surface_depth``): the features a VLM points at are
+        only a few pixels thick, so a 1-2 px pointing error read pixel-wise returns the
+        backdrop's depth and puts the 3D point 10 cm to 1 m behind the thing to grasp.
 
         Args:
             points_xy: list of [x, y] pixel points (already denormalized), ordered
@@ -198,6 +204,10 @@ class API:
             capture: re-capture the head camera first. Pass False when the caller has
                 just captured (e.g. scene perception): the 2D points refer to THAT image,
                 so re-rendering would risk mismatched pixels and waste a render.
+            mask: optional boolean segmentation mask of the target object. When given, the
+                patch is confined to it and the sampled depth is cross-checked against the
+                object's own depth range; a point that fails is dropped rather than
+                returned as a confident coordinate on the wrong surface.
         Returns:
             list of 3D world points (np.ndarray) aligned with the input order; entries
             for invalid/out-of-range points are None.
@@ -212,11 +222,22 @@ class API:
                 self.logger.info(PROGRESS + f"Warning: affordance point ({xi},{yi}) out of image bounds {w}x{h}; skipping." + ENDC)
                 world_points.append(None)
                 continue
-            z = float(depth_array[yi, xi])
-            if not np.isfinite(z):
+            z, info = utils.sample_surface_depth(depth_array, xi, yi, mask=mask)
+            if z is None or not np.isfinite(z):
                 self.logger.info(PROGRESS + f"Warning: non-finite depth at affordance point ({xi},{yi}); skipping." + ENDC)
                 world_points.append(None)
                 continue
+            ok, check = utils.depth_matches_object(z, depth_array, mask)
+            if not ok:
+                self.logger.info(PROGRESS + f"Warning: affordance point ({xi},{yi}) depth {z:.4f} is outside "
+                                 f"{object_name}'s depth range [{check['low']:.4f}, {check['high']:.4f}] "
+                                 f"(+/-{check['tolerance']:.4f}); skipping." + ENDC)
+                world_points.append(None)
+                continue
+            center = info.get("center")
+            if center is not None and abs(center - z) > 1e-6:
+                self.logger.info(PROGRESS + f"Affordance point ({xi},{yi}): patch depth {z:.4f} replaces "
+                                 f"center-pixel {center:.4f} ({info['n_used']}/{info['n_total']} px sampled)." + ENDC)
             world_point = utils.get_world_point_world_frame(
                 self.head_camera_position, self.head_camera_orientation_q, "head",
                 self.head_image_size, [xi, yi, z], cam_info=self.cam_info,
@@ -432,7 +453,7 @@ class API:
     def execute_trajectory(self, trajectory):
         # Rebuild into a plain Trajectory before anything is sent: a custom class from the
         # model's own code block cannot be reconstructed in the simulator process.
-        trajectory = common_utils.normalize_trajectory(trajectory)
+        trajectory = common_utils.Trajectory.normalize(trajectory)
 
         # Downsample preview to max 3 points: start, middle, end
         _preview = trajectory

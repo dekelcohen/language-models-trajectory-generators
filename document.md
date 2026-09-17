@@ -100,6 +100,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `--depth-format` | `norm_1m` | Depth reconstruction: `norm_1m` \| `norm_zfar` \| `raw`. |
 | `--timeout` | `15.0` | Timeout secs; `<=0` disables. |
 | `--delete-images` | off | Wipe image folders before recreating. |
+| `--images-root DIR` | `./images` (or `$IMAGES_ROOT`) | Root folder for all image/video/trajectory output (`config.images_folder` and every path derived from it). Parsed from `sys.argv` *before* `config`/other modules import, via `_apply_early_images_root()` at the top of `main.py`, so it must reach every module regardless of import order. Set this per run to allow 2+ concurrent experiments on the same checkout without overwriting each other's outputs, e.g. `--images-root ./images_run1` / `./images_run2`. |
 | `--review-provider` | `vlm` | Success check: `vlm`, `vlm:<model>` (e.g. `vlm:or-openai/gpt-5.5`), or `xmem`. |
 | `--planner-perception-vlm` | `or-google/gemini-3.7-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
 | `--affordance-points` / `--no-affordance-points` | on | Ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis. Disable to drop the pointing block from the perception prompt entirely. |
@@ -235,9 +236,10 @@ generate motion code — only decomposition + dispatch.
   `ctx.api.convert_2d_point_to_3d_world(points_xy, object_name)`, appends an
   "AFFORDANCE POINTS (…3D world coords, best-first)" section, and records
   `ctx.affordance_points`.
-- `api.API.convert_2d_point_to_3d_world(points_xy, object_name)`: reuses
+- `api.API.convert_2d_point_to_3d_world(points_xy, object_name, mask=None)`: reuses
   `_capture_head_image_and_depth()` (extracted shared helper also used by `detect_object`),
-  reads `depth_array[y, x]` per point (bounds/NaN-guarded), calls
+  samples the depth of each point over a small **patch** via `utils.sample_surface_depth`
+  (bounds/NaN-guarded, see below), calls
   `utils.get_world_point_world_frame(head_pos, head_orient_q, "head", head_image_size,
   [x, y, z], cam_info)`, prints `Affordance-pointing of {object_name}: <xyz>`, and saves the
   overlay via `_overlay_affordance_points` (cv2 circles colored green→yellow by rank).
@@ -245,6 +247,58 @@ generate motion code — only decomposition + dispatch.
   the same object (ranked affordance points + the segmentation-bbox position) instead of
   repeating a failed grasp position.
 
+</details>
+
+<details><summary>Why affordance depth is sampled over a patch, not one pixel</summary>
+
+The things worth grasping are *thin*. From the head camera 1.2 m away at 5.5 mm/px, the
+adroit door's lever bar is about **7 px** thick. Reading `depth_array[yi, xi]` meant a 1-2 px
+pointing error — well inside what any pointing VLM produces — silently returned the depth of
+the **door face behind the bar** (+0.1 m) or of the **room behind the door** (+1 m). The 3D
+point then landed nowhere near anything graspable and nothing downstream could tell.
+
+`utils.sample_surface_depth(depth_array, x, y, radius, mask, percentile)` samples a square
+window and keeps a **low percentile** of the finite depths in it:
+
+- Depth increases monotonically with distance in **both** encodings this repo handles —
+  PyBullet's nonlinear OpenGL buffer and Genesis's linear metres — so "low percentile" means
+  "near surface" without having to linearise first.
+- Not `min()`: one bad pixel (depth noise, an anti-aliased silhouette edge straddling
+  foreground and background) would capture every point. The default 10th percentile
+  (`config.affordance_depth_percentile`) tolerates ~2 such pixels in a 5×5 window while still
+  selecting the foreground when only ~1/8 of the window covers it.
+- The percentile is **snapped to the nearest value actually present**, so the result is always
+  a measured depth and never an interpolation *between* the feature and its backdrop — such a
+  depth would describe a surface that does not exist.
+- Radius 2 → a 5×5 window (`config.affordance_depth_patch_radius`): wide enough to contain
+  feature pixels after a 2 px miss, narrow enough (27 mm) not to reach past a graspable
+  feature. A miss larger than the window is *not* rescued — no silent guessing.
+- Returns `(z, info)`; `info["center"]` is the old single-pixel value, so the log line
+  `patch depth X replaces center-pixel Y (n/N px sampled)` shows exactly when it mattered.
+
+`utils.depth_matches_object(z, depth_array, mask)` is the optional second guard: given a
+segmentation mask it checks the sampled depth against the 1st–99th percentile of the depths
+*under that mask*, with a tolerance scaled to the object's own thickness. An object spans a
+range of depths, so comparing against a single value would be meaningless, and working in
+percentiles keeps it unit-free across both encodings. It **accepts when it cannot run** (no
+mask, empty mask, mismatched shape) — it is a guard against a bad point, not a second source
+of truth. Scene perception has no mask yet at pointing time (nothing has called
+`detect_object`), so today it is inert plumbing that activates for any caller that passes
+`mask=`.
+
+Measured on the live door scene (`tests/test_affordance_depth_sampling.py`): 3 px below the
+bar, single-pixel sampling is **0.22 m** off the lever axis while the patch stays within
+**0.05 m**. Where the single pixel already hit the bar, the patch costs at most the bar's own
+radius — it reports the *near* surface, so on a curved feature it can legitimately land up to
+one radius closer than the exact pixel. A live rollout put the best affordance point at
+`[-0.284, 0.018, 0.700]` against a true lever midpoint of `[-0.277, 0.009, 0.672]` — 1.1 cm in
+XY, the rest being the bar's top surface vs its axis.
+
+Tests: 19 pure-numpy cases plus the same four in-sim assertions run against **both** PyBullet
+(`opengl`) and Genesis (`linear_metric`), which is what proves the sampler is
+encoding-agnostic. The in-sim tests project the lever's URDF-derived world midpoint into the
+head camera and skip loudly if the door is ever moved, rather than quietly testing the wrong
+pixels.
 </details>
 - `run_plan(ctx, command, max_iterations=8)`:
   - `--no-plan` → `execute_task(ctx, command, max_attempts=args.attempts)` and return.
@@ -587,26 +641,28 @@ gripper through orientations neither endpoint asked for.
 </details>
 
 <details>
-<summary><code>execute_trajectory</code> input normalization — why a custom class cannot cross</summary>
+<summary><code>Trajectory</code> is transport-safe by construction</summary>
 
-`api.execute_trajectory` first calls `common_utils.normalize_trajectory`, which rebuilds
-whatever it was given into a real `Trajectory` whose `points` are plain lists of Python
-floats. This is a **transport** requirement, not a style preference: the trajectory is sent
-to the simulator process over `multiprocessing.Pipe` (PyBullet) or JSON (Genesis).
+`Trajectory.__init__` coerces `points` to lists of plain Python floats and `desc` to `str`,
+so a Trajectory that cannot cross a process boundary cannot be built. The trajectory is sent
+to the simulator over `multiprocessing.Pipe` (PyBullet) or JSON (Genesis).
 
-A class the model defines inside its own code block is pickled **by reference** as
-`<module>.<name>`. The exec namespace is seeded from `agent_runner.globals()`, so such a
-class reports `__module__ == "agent_runner"` while not being an attribute of it — the send
-dies with `PicklingError: Can't pickle <class 'agent_runner._Arc'>`. Even registering a
-surrogate module would not help: the *child* interpreter cannot reconstruct the class either.
-Numpy is stripped for a related reason — the JSON transport rejects arrays outright, and
-pickle's array format is version-sensitive across the two interpreters.
+A class the model defines inside its own code block is exactly what cannot cross: it is
+pickled **by reference** as `<module>.<name>`, and since the exec namespace is seeded from
+`agent_runner.globals()` such a class reports `__module__ == "agent_runner"` while not being
+an attribute of it — the send dies with
+`PicklingError: Can't pickle <class 'agent_runner._Arc'>`. Even registering a surrogate
+module would not help: the *child* interpreter cannot reconstruct the class either. Numpy is
+stripped for a related reason — the JSON transport rejects arrays outright, and pickle's
+array format is version-sensitive across the two interpreters.
 
-Accepted: a real `Trajectory`, any duck-typed object exposing `.points` (the common case —
-the model imitating `Trajectory` to build an arc), or a bare sequence of poses. Anything else
-raises `TypeError` carrying an actionable message, which the model reads and retries within
-the same attempt. Covered by `tests/test_trajectory_normalization.py`, which reproduces the
-original `PicklingError` before asserting the fix.
+`Trajectory.normalize(obj)` is the entry point for input that may not be a Trajectory yet:
+it accepts a real `Trajectory` (returned unchanged), any duck-typed object exposing `.points`
+(the common case — the model imitating `Trajectory` to build an arc), or a bare sequence of
+poses. Anything else raises `TypeError` carrying an actionable message, which the model reads
+and retries within the same attempt. `api.execute_trajectory` calls it before the first
+`send()`. Covered by `tests/test_trajectory_normalization.py`, which reproduces the original
+`PicklingError` before asserting the fix.
 </details>
 
 <details>
@@ -1460,6 +1516,12 @@ has no `shapely` and nothing on the tracking path needs it.
 ---
 
 ## Changelog
+
+- **`--images-root DIR`**: overrides `config.images_folder` (default `./images`) so 2+
+  concurrent runs on the same checkout write images/videos/trajectory frames to isolated
+  folders instead of clobbering each other. Also honors `$IMAGES_ROOT` env var; the CLI
+  flag is read from `sys.argv` before `config` is imported so every module — including
+  ones that do `from config import <path>` at import time — sees the override.
 
 - **Rollout tracking of the gripper + affordance objects** (§13): per-keyframe 2D tracks in
   both cameras, fused into 3D world coordinates, with an LLM-authored (or built-in)

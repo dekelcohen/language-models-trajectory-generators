@@ -10,64 +10,73 @@ from config import images_folder, trajectory_folder, overlay_folder, video_folde
 from sim_adapter.transforms import ee_euler_from_approach, matrix_from_euler
 
 class Trajectory:
-    def __init__(self, points, desc):
-        self.points = points # a straight-line end-effector trajectory between two EE poses
-        self.desc = desc # short sentence to describe the motion and its end_pose
+    """An end-effector trajectory, guaranteed to be transport-safe by construction.
 
+    ``points`` is always a list of lists of plain Python floats and ``desc`` a plain ``str``,
+    because a Trajectory is sent to the simulator process over ``multiprocessing.Pipe``
+    (PyBullet) or JSON (Genesis). Coercion happens in ``__init__`` rather than at the send
+    site so there is no way to build one that cannot travel.
 
-_TRAJECTORY_HELP = (
-    "execute_trajectory() expects the Trajectory returned by generate_linear_trajectory(), "
-    "or a plain list of [x, y, z, rotation] poses. {problem} Note that a class YOU define in "
-    "a code block cannot be sent to the simulator (it lives in a separate process and cannot "
-    "reconstruct your class) - build the motion out of plain lists of floats, or chain several "
-    "generate_linear_trajectory() calls, instead of wrapping poses in a custom object."
-)
+    Anything the model defines inside its own code block is exactly what cannot travel: it is
+    pickled *by reference* as ``<module>.<name>``, and since the exec namespace is seeded from
+    ``agent_runner.globals()`` such a class claims ``__module__ == "agent_runner"`` while not
+    being an attribute of it - the send dies with ``PicklingError``. Numpy is stripped for a
+    related reason: the JSON transport rejects arrays outright, and pickle's array format is
+    version-sensitive across the two interpreters.
 
-
-def normalize_trajectory(trajectory):
-    """Coerce whatever was handed to ``execute_trajectory`` into a real :class:`Trajectory`.
-
-    The trajectory crosses a process boundary (``multiprocessing.Pipe`` for PyBullet, JSON
-    for Genesis), so every element has to be something the far side can rebuild. Anything
-    defined inside the LLM's own code block cannot be: it is pickled *by reference* as
-    ``agent_runner.<name>``, which does not exist there (or even here), and the send fails
-    with ``PicklingError``. Numpy scalars/arrays are equally unwelcome - the JSON transport
-    rejects them outright and pickle's array format is version-sensitive across the two
-    interpreters.
-
-    So: accept a real ``Trajectory``, any duck-typed object exposing ``.points``, or a bare
-    sequence of poses, and always return a ``Trajectory`` whose ``points`` are plain lists of
-    Python floats. Raise ``TypeError`` with an actionable message otherwise - the model reads
-    it and retries in the same attempt.
+    Use :meth:`normalize` for input that may not be a Trajectory yet.
     """
-    desc = ""
-    points = trajectory
-    if hasattr(trajectory, "points"):
-        points = trajectory.points
-        desc = getattr(trajectory, "desc", "") or ""
-        if not isinstance(desc, str):
-            desc = str(desc)
 
-    if isinstance(points, np.ndarray):
-        points = points.tolist()
-    if isinstance(points, (str, bytes)) or not isinstance(points, Iterable):
-        raise TypeError(_TRAJECTORY_HELP.format(
-            problem=f"Got {type(trajectory).__name__} instead."))
+    _HELP = (
+        "execute_trajectory() expects the Trajectory returned by generate_linear_trajectory(), "
+        "or a plain list of [x, y, z, rotation] poses. {problem} Note that a class YOU define in "
+        "a code block cannot be sent to the simulator (it lives in a separate process and cannot "
+        "reconstruct your class) - build the motion out of plain lists of floats, or chain several "
+        "generate_linear_trajectory() calls, instead of wrapping poses in a custom object."
+    )
 
-    normalized = []
-    for i, pose in enumerate(points):
-        if isinstance(pose, np.ndarray):
-            pose = pose.tolist()
-        if isinstance(pose, (str, bytes)) or not isinstance(pose, Iterable):
-            raise TypeError(_TRAJECTORY_HELP.format(
-                problem=f"Pose {i} is a {type(pose).__name__}, not a list of numbers."))
-        try:
-            normalized.append([float(v) for v in pose])
-        except (TypeError, ValueError):
-            raise TypeError(_TRAJECTORY_HELP.format(
-                problem=f"Pose {i} = {pose!r} contains a value that is not a number.")) from None
+    def __init__(self, points, desc=""):
+        self.points = Trajectory._coerce_points(points) # a straight-line end-effector trajectory between two EE poses
+        self.desc = "" if desc is None else desc if isinstance(desc, str) else str(desc) # short sentence to describe the motion and its end_pose
 
-    return Trajectory(normalized, desc)
+    @staticmethod
+    def _coerce_points(points):
+        """Every pose as a list of plain Python floats, or ``TypeError`` explaining why not."""
+        if isinstance(points, np.ndarray):
+            points = points.tolist()
+        if isinstance(points, (str, bytes)) or not isinstance(points, Iterable):
+            raise TypeError(Trajectory._HELP.format(
+                problem=f"Got {type(points).__name__} instead."))
+
+        coerced = []
+        for i, pose in enumerate(points):
+            if isinstance(pose, np.ndarray):
+                pose = pose.tolist()
+            if isinstance(pose, (str, bytes)) or not isinstance(pose, Iterable):
+                raise TypeError(Trajectory._HELP.format(
+                    problem=f"Pose {i} is a {type(pose).__name__}, not a list of numbers."))
+            try:
+                coerced.append([float(v) for v in pose])
+            except (TypeError, ValueError):
+                raise TypeError(Trajectory._HELP.format(
+                    problem=f"Pose {i} = {pose!r} contains a value that is not a number.")) from None
+        return coerced
+
+    @staticmethod
+    def normalize(trajectory):
+        """Whatever was handed to ``execute_trajectory``, as a real :class:`Trajectory`.
+
+        Accepts a ``Trajectory`` (returned unchanged - the constructor already coerced it),
+        any duck-typed object exposing ``.points`` (the common case: the model imitating this
+        class to build an arc), or a bare sequence of poses. Raises ``TypeError`` with an
+        actionable message otherwise; the model reads it and retries within the same attempt.
+        """
+        if isinstance(trajectory, Trajectory):
+            return trajectory
+        if hasattr(trajectory, "points"):
+            return Trajectory(trajectory.points, getattr(trajectory, "desc", ""))
+        return Trajectory(trajectory)
+
 
 
 # --- End-effector pose formats ------------------------------------------------

@@ -3,6 +3,25 @@ import sys
 import argparse
 import functools
 
+
+def _apply_early_images_root():
+    """Read --images-root from argv and export it as IMAGES_ROOT before `config` (and
+    everything that imports values out of it) loads, so every module sees the override.
+    Lets 2 concurrent runs (e.g. 2 copilot sessions on the same checkout) write to
+    isolated image/video/trajectory folders instead of overwriting each other's ./images.
+    """
+    argv = sys.argv[1:]
+    for i, arg in enumerate(argv):
+        if arg == "--images-root" and i + 1 < len(argv):
+            os.environ["IMAGES_ROOT"] = argv[i + 1]
+            return
+        if arg.startswith("--images-root="):
+            os.environ["IMAGES_ROOT"] = arg.split("=", 1)[1]
+            return
+
+
+_apply_early_images_root()
+
 import config
 import segmentation_adapter
 from dotenv import load_dotenv
@@ -51,6 +70,9 @@ def build_arg_parser():
     parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
     parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
     parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
+    parser.add_argument("--images-root", type=str, default=None, metavar="DIR",
+                        help="root folder for images/videos/trajectory output (default: ./images, or $IMAGES_ROOT). "
+                             "Set this to run 2+ concurrent experiments on the same checkout without overwriting ")
     parser.add_argument("--review-provider", default="vlm", help="review provider for success verification: 'vlm' (uses main model), 'vlm:<model>' (e.g. vlm:or-openai/gpt-5.5), or 'xmem'")
     # --- Rollout tracking (tracking/, providers/trackers/) ---
     parser.add_argument("--tracking", action=argparse.BooleanOptionalAction, default=config.tracking_enabled_default,
