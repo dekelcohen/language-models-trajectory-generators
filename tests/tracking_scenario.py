@@ -7,8 +7,15 @@ exact ground-truth world position to compare the fused estimate against.
 
 Nothing here imports a simulator: the caller passes an already-connected
 :class:`sim_adapter.base.SimAdapter`.
+
+The scenario is also parameterised over the **3D lift provider**
+(``providers/tracker3d``): every test body takes a ``tracker3d`` argument, the plain test
+methods leave it at ``None`` (the session default, i.e. ``depth_fusion``, so the default
+path is unchanged), and ``test_scenario_holds_for_every_tracker3d_provider`` replays the
+whole scenario once per provider that can actually be constructed here.
 """
 
+import logging
 import os
 import sys
 
@@ -17,10 +24,13 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config  # noqa: E402
+from providers.tracker3d import factory as tracker3d_factory  # noqa: E402
 from sim_adapter import camera_math  # noqa: E402
 from tracking import geometry, monitors  # noqa: E402
 from tracking.session import TrackingSession  # noqa: E402
 from tracking.types import CameraView  # noqa: E402
+
+log = logging.getLogger("tracking_scenario")
 
 RES = 256
 FOV = 60.0
@@ -129,6 +139,76 @@ OUT_OF_WRIST_VIEW = [0.45, 0.45, 0.1]
 POSITION_TOL = 0.04
 
 
+class ProviderBand:
+    """The accuracy a given 3D lift provider is *expected* to reach on this scene.
+
+    Bands are two-sided on purpose. An upper bound catches a regression; the lower bound
+    on a deliberately weak provider catches the opposite - a provider silently becoming
+    accurate means it is no longer the thing the test thinks it is measuring, and the
+    documented finding below would need re-deriving rather than quietly disappearing.
+    """
+
+    def __init__(self, median_max, occluded_max, median_min=0.0, occluded_min=0.0,
+                 note=""):
+        self.median_max = float(median_max)
+        self.occluded_max = float(occluded_max)
+        self.median_min = float(median_min)
+        self.occluded_min = float(occluded_min)
+        self.note = note
+
+
+# Measured on this scenario (grasp scene, head+wrist, 256x256, PyBullet):
+#   depth_fusion  scripted median  9.8 mm | head-camera blackout  14.6 mm
+#   triangulate   scripted median  6.8 mm | head-camera blackout 141.4 mm
+#   rigid_refine  scripted median  2.2 mm | head-camera blackout 141.4 mm
+# With a clear line of sight the triangulators are as good as (or better than) depth
+# fusion. Under the painted occluder they are an order of magnitude worse, and that is
+# structural rather than a bug: at exactly two cameras the DLT is an exactly-determined
+# system, so the reprojection residual a triangulator would use to reject a bad
+# correspondence is ~0 by construction (a 47 px drift moves the 3D point >1 cm while the
+# residual stays at 0.18 px). Depth fusion still has the depth buffer to disagree with.
+# The weakness is therefore asserted as a two-sided expectation instead of being hidden by
+# loosening the shared bands: if triangulation ever became occlusion-robust at 2 views,
+# this band must be re-derived rather than silently drift.
+TRACKER3D_BANDS = {
+    "depth_fusion": ProviderBand(median_max=POSITION_TOL, occluded_max=2 * POSITION_TOL),
+    "triangulate": ProviderBand(median_max=POSITION_TOL, occluded_max=0.30,
+                                occluded_min=0.05,
+                                note="2-view DLT is exactly determined, so its "
+                                     "residual-based outlier rejection is structurally "
+                                     "blind during the head camera's blackout"),
+    # Triangulation plus a rigid-shape constraint; still a 2-view system under occlusion,
+    # so only an upper bound is asserted while that provider is being tuned.
+    "rigid_refine": ProviderBand(median_max=POSITION_TOL, occluded_max=0.30),
+}
+#: Anything registered later (e.g. ``rigid_refine``) gets a deliberately wide band until
+#: it has been measured, so a new provider joins the sweep without being mis-asserted.
+DEFAULT_BAND = ProviderBand(median_max=0.15, occluded_max=0.40)
+
+
+def band_for(name):
+    return TRACKER3D_BANDS.get(name, DEFAULT_BAND)
+
+
+def available_tracker3d(names=None):
+    """Providers from ``factory.SUPPORTED`` that can actually be constructed here.
+
+    Discovery rather than a hard-coded list, so a newly registered provider is swept
+    automatically; one whose optional dependencies are missing (LAPA's torch/DINOv2
+    clone) is skipped instead of failing the suite.
+    """
+    out = []
+    for name in (names or tracker3d_factory.SUPPORTED):
+        try:
+            tracker3d_factory.get_tracker3d(name)
+        except Exception as exc:
+            log.info("[scenario] 3D provider '%s' unavailable: %s: %s",
+                     name, type(exc).__name__, exc)
+            continue
+        out.append(name)
+    return out
+
+
 class TrackingScenarioMixin:
     """The whole tracking scenario, shared by the PyBullet and Genesis test cases.
 
@@ -145,7 +225,14 @@ class TrackingScenarioMixin:
             self.sim.step()
         return np.asarray(position, dtype=float)
 
-    def make_session(self, monitor=None, **kwargs):
+    def make_session(self, monitor=None, tracker3d=None, **kwargs):
+        """Build the session under test.
+
+        ``tracker3d=None`` deliberately does *not* forward anything, so the default path
+        constructs exactly the session it did before this scenario was parameterised.
+        """
+        if tracker3d is not None:
+            kwargs["tracker3d"] = tracker3d
         return TrackingSession(robot=self.robot, env=self.env, provider="template",
                                monitor=monitor, write_jsonl=False, **kwargs)
 
@@ -186,8 +273,14 @@ class TrackingScenarioMixin:
 
     def test_tracks_scripted_object_motion(self):
         """Fused world coordinates follow a scripted motion in both cameras."""
+        self._run_scripted_motion()
+
+    def _run_scripted_motion(self, tracker3d=None, band=None):
+        """The scripted-motion assertions; returns the median error in metres."""
+        band = band or band_for(tracker3d or "depth_fusion")
         start = self.place(OBJECT_START)
-        session = self.make_session(monitor=monitors.object_not_lost("cube", patience=6))
+        session = self.make_session(monitor=monitors.object_not_lost("cube", patience=6),
+                                    tracker3d=tracker3d)
         offset = self.seed(session, "cube", start)
 
         errors, seeded_frames = [], {"head": None, "wrist": None}
@@ -204,19 +297,31 @@ class TrackingScenarioMixin:
 
         self.assertEqual(session.errors, 0, "tracking raised internally")
         self.assertGreaterEqual(len(errors), 8, "object was lost for most of the run")
-        self.assertLess(float(np.median(errors)), POSITION_TOL,
-                        f"median world-position error {np.median(errors):.3f} m too large")
+        median = float(np.median(errors))
+        log.info("[scenario] scripted motion | tracker3d=%s median=%.4f m band=[%.3f, %.3f]",
+                 session.tracker3d_name, median, band.median_min, band.median_max)
+        self.assertLess(median, band.median_max,
+                        f"median world-position error {median:.3f} m too large "
+                        f"for '{session.tracker3d_name}'")
+        self.assertGreaterEqual(median, band.median_min,
+                                f"'{session.tracker3d_name}' is unexpectedly accurate "
+                                f"({median:.3f} m) - re-derive its band: {band.note}")
         self.assertIsNotNone(seeded_frames["head"], "head camera never seeded")
         self.assertFalse(session.aborted)
 
         summary = session.summary()
         self.assertEqual(summary["frames"], 12)
         self.assertIn("cube", summary["objects"])
+        return median
 
     def test_wrist_camera_is_seeded_from_head(self):
         """The wrist cam starts blind to the object and is bootstrapped by the head cam."""
+        self._run_cross_camera_bootstrap()
+
+    def _run_cross_camera_bootstrap(self, tracker3d=None, band=None):
+        band = band or band_for(tracker3d or "depth_fusion")
         start = self.place(OUT_OF_WRIST_VIEW)
-        session = self.make_session()
+        session = self.make_session(tracker3d=tracker3d)
         offset = self.seed(session, "cube", start)
 
         # Frame 0 with the object still at its seed pose: only the head can see it.
@@ -249,14 +354,22 @@ class TrackingScenarioMixin:
         self.assertTrue(any(e.reason == "unseeded" and e.donor == "head" for e in wrist_events),
                         "wrist seeding did not come from the head camera")
         self.assertIsNotNone(last_err, "object was lost by the end of the run")
-        self.assertLess(last_err, 2 * POSITION_TOL)
+        log.info("[scenario] cross-camera bootstrap | tracker3d=%s wrist_seed_frame=%d "
+                 "final_error=%.4f m", session.tracker3d_name, wrist_seed_frame, last_err)
+        self.assertLess(last_err, 2 * band.median_max)
+        return wrist_seed_frame, last_err
 
     def test_occluded_camera_is_reseeded_from_the_other(self):
         """Blinding the head camera must repair its track from the wrist camera."""
+        self._run_painted_occluder()
+
+    def _run_painted_occluder(self, tracker3d=None, band=None):
+        """Returns the error (m) at the end of the head camera's blackout."""
+        band = band or band_for(tracker3d or "depth_fusion")
         # At the spawn pose both cameras see the object, which is the precondition for
         # testing what happens when one of them is blinded.
         centre = self.place(OBJECT_START)
-        session = self.make_session()
+        session = self.make_session(tracker3d=tracker3d)
         offset = self.seed(session, "cube", centre)
 
         for step in range(3):
@@ -291,16 +404,28 @@ class TrackingScenarioMixin:
         self.assertIsNotNone(state.world_point,
                              "object was lost even though one camera still saw it")
         self.assertIn("wrist", state.visible_cams)
-        self.assertLess(tracking_error(session.last_report, "cube", centre, offset),
-                        2 * POSITION_TOL)
+        error = tracking_error(session.last_report, "cube", centre, offset)
+        log.info("[scenario] painted occluder | tracker3d=%s occluded_error=%.4f m "
+                 "band=[%.3f, %.3f] reseeds=%d", session.tracker3d_name, error,
+                 band.occluded_min, band.occluded_max, len(head_reseeds))
+        self.assertLess(error, band.occluded_max,
+                        f"'{session.tracker3d_name}' drifted {error:.3f} m under occlusion")
+        self.assertGreaterEqual(error, band.occluded_min,
+                                f"'{session.tracker3d_name}' held {error:.3f} m under "
+                                f"occlusion, better than its documented band: {band.note}")
+        return error
 
     def test_detach_trips_the_attachment_invariant(self):
         """``attached_to_gripper`` aborts the rollout when the object leaves the gripper."""
+        self._run_detach_abort()
+
+    def _run_detach_abort(self, tracker3d=None):
         gripper = np.asarray(self.gripper_pose()["position"], dtype=float)
         held = self.place(gripper + np.array([0.0, 0.0, -0.05]))
 
         session = self.make_session(
-            monitor=monitors.attached_to_gripper("cube", max_dist=0.12, grace_frames=1))
+            monitor=monitors.attached_to_gripper("cube", max_dist=0.12, grace_frames=1),
+            tracker3d=tracker3d)
         self.seed(session, "cube", held)
 
         for step in range(3):
@@ -319,3 +444,31 @@ class TrackingScenarioMixin:
         self.assertTrue(session.aborted, "detached object did not trip the invariant")
         self.assertIn("cube", session.abort_reason)
         self.assertEqual(session.summary()["status"], "abort")
+
+    # -- provider sweep ----------------------------------------------------
+    def test_scenario_holds_for_every_tracker3d_provider(self):
+        """Replay the whole scenario against each constructible 3D lift provider.
+
+        The three behavioural assertions (cross-camera bootstrap, occluder repair, detach
+        abort) are provider-agnostic and must hold everywhere; only the numeric accuracy
+        band varies, per :data:`TRACKER3D_BANDS`.
+        """
+        providers = available_tracker3d()
+        if not providers:
+            self.skipTest("no 3D lift provider is constructible in this environment")
+        log.info("[scenario] sweeping 3D lift providers: %s", providers)
+
+        measured = {name: {} for name in providers}
+        for name in providers:
+            band = band_for(name)
+            with self.subTest(tracker3d=name, case="scripted_motion"):
+                measured[name]["median_m"] = self._run_scripted_motion(name, band)
+            with self.subTest(tracker3d=name, case="cross_camera_bootstrap"):
+                self._run_cross_camera_bootstrap(name, band)
+            with self.subTest(tracker3d=name, case="painted_occluder"):
+                measured[name]["occluded_m"] = self._run_painted_occluder(name, band)
+            with self.subTest(tracker3d=name, case="detach_abort"):
+                self._run_detach_abort(name)
+        log.info("[scenario] 3D provider accuracy: %s",
+                 {k: {m: round(v, 4) for m, v in vals.items()} for k, vals in measured.items()})
+

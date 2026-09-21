@@ -9,10 +9,16 @@ and is driven once per recorded keyframe by ``Robot.step_env_and_record``. One f
     4. score each camera (:mod:`tracking.health`) and re-seed unhealthy cameras from the
        healthy one - this is what recovers from arm occlusion and what seeds the wrist
        camera once the object finally enters its view
-    5. weighted-fuse the surviving per-camera world points
+    5. lift the surviving cameras to one world point via a
+       :class:`providers.tracker3d.base.MultiCamTracker3D` (``depth_fusion`` by default,
+       which is the weighted average this session has always used)
     6. read the gripper pose from FK, optionally cross-check it visually
     7. run the monitor; an ``abort`` latches ``self.aborted`` so ``EXECUTE_TRAJECTORY``
        can stop between waypoints
+
+Step 5 is a provider seam so that geometry-based lifts (``triangulate``, ``lapa``) can
+replace depth sampling *without* touching re-seeding, health scoring, monitors, reporting
+or the abort latch - those are trust and policy concerns that apply to every lift.
 
 Every step is defensive: any exception is caught, logged once and downgraded, because a
 tracking bug must never break a rollout that would otherwise have succeeded.
@@ -23,6 +29,7 @@ import time
 import numpy as np
 
 import config
+from providers.tracker3d.factory import get_tracker3d
 from providers.trackers.factory import get_tracker
 from tracking import geometry
 from tracking.health import CamHealthState, decide_reseeds, score_camera
@@ -49,6 +56,12 @@ class _TargetTrackers:
         self.trackers = {cam: get_tracker(provider, **tracker_kwargs) for cam in cameras}
         self.health = {cam: CamHealthState() for cam in cameras}
         self.seeded = {cam: False for cam in cameras}
+        # Which seed point each camera's tracked point corresponds to. A re-seed drops seed
+        # points its camera cannot image, so the arrays are *not* positionally aligned
+        # across cameras - a triangulator that zips them would fuse different physical
+        # points into a confident, smooth, wrong 3D estimate. ``-1`` marks a point with no
+        # correspondence (the centroid fallback).
+        self.point_index = {cam: None for cam in cameras}
         # Local offsets of the seed points around their centroid. Re-seeding only knows a
         # single world point (the donor's estimate), so the offsets rebuild a point *set*
         # around it and the object keeps multi-point outlier rejection after a re-seed.
@@ -63,7 +76,8 @@ class TrackingSession:
 
     def __init__(self, robot=None, env=None, cameras=None, provider=None, monitor=None,
                  track_gripper=True, interval=None, logger=None, run_id=None,
-                 write_jsonl=True, tracker_kwargs=None, output_dir=None, save_depth=False):
+                 write_jsonl=True, tracker_kwargs=None, output_dir=None, save_depth=False,
+                 tracker3d=None, tracker3d_kwargs=None):
         self.robot = robot
         self.env = env
         self.cameras = tuple(cameras or config.tracking_cameras)
@@ -85,6 +99,18 @@ class TrackingSession:
         self.monitor = MonitorRunner.from_spec(monitor, logger=logger)
         self.reporter = TrackingReporter(run_id=run_id, output_dir=output_dir, logger=logger,
                                          write_jsonl=write_jsonl)
+        # The 3D lift. ``depth_fusion`` reproduces the historical weighted average exactly,
+        # so the default path is unchanged and ``tests/golden/**`` stay valid.
+        self.tracker3d_kwargs = dict(tracker3d_kwargs or {})
+        self.tracker3d_kwargs.setdefault("logger", logger)
+        if isinstance(tracker3d, str) or tracker3d is None:
+            self.tracker3d_name = (tracker3d
+                                   or getattr(config, "tracker3d_provider_default", "depth_fusion"))
+            self.tracker3d = get_tracker3d(self.tracker3d_name, **self.tracker3d_kwargs)
+        else:
+            self.tracker3d = tracker3d
+            self.tracker3d_name = getattr(tracker3d, "name", "custom")
+        self.lift_errors = 0
 
     # -- registration ------------------------------------------------------
     def add_target(self, name, world_points):
@@ -277,44 +303,49 @@ class TrackingSession:
                                    - np.asarray(last, dtype=float)) > config.track_max_jump_m)
 
     def _fuse(self, state, views, z_eyes):
-        estimates = {}
-        # A camera whose track is healthy must not be dragged around by one that is
-        # occluded or barely matching: an occluder's surface deprojects to a world point
-        # tens of centimetres off, and averaging it in corrupts an otherwise good frame.
-        healthy = {c for c, t in state.cams.items() if t.status == "ok" and t.world_point is not None}
-        for cam, track in state.cams.items():
-            if track.world_point is None or (healthy and cam not in healthy):
-                continue
-            weight = geometry.camera_weight(track.confidence, z_eyes.get(cam, 1.0),
-                                            track.n_visible, track.depth_valid)
-            estimates[cam] = (track.world_point, weight * max(track.health, 1e-3))
+        """Delegate the 3D lift to the configured provider.
 
-        # Disagreement is measured over *every* surviving camera, so the report still
-        # shows it, but a clear loser is left out of the average. A camera that has
-        # latched onto an occluder keeps a high template score for many frames, so
-        # waiting for the re-seed cooldown to repair it would poison the estimate in
-        # the meantime.
-        _fused, disagreement, _used = geometry.fuse_world_points(estimates)
-        trusted = self._drop_disagreeing(state, estimates)
-        fused, _gap, used = geometry.fuse_world_points(trusted)
-        return fused, disagreement, used
+        ``z_eyes`` is no longer needed here - a provider that wants eye-space depth derives
+        it itself - but the argument is kept so the call sites read the same.
 
-    @staticmethod
-    def _drop_disagreeing(state, estimates):
-        """Remove cameras that disagree with the clearly healthiest one."""
-        if len(estimates) < 2:
-            return estimates
-        best = max(estimates, key=lambda c: state.cams[c].health)
-        best_point = np.asarray(estimates[best][0], dtype=float)
-        best_health = state.cams[best].health
-        trusted = {}
-        for cam, entry in estimates.items():
-            gap = float(np.linalg.norm(np.asarray(entry[0], dtype=float) - best_point))
-            clear_winner = best_health >= 1.25 * max(state.cams[cam].health, 1e-6)
-            if cam != best and gap > config.track_disagree_m and clear_winner:
-                continue
-            trusted[cam] = entry
-        return trusted or estimates
+        A provider that fails outright must not lose the object: ``depth_fusion`` is always
+        available and always correct-ish, so it is the fallback. That matters most for the
+        experimental providers, where a checkpoint or a GPU could disappear mid-rollout.
+        """
+        try:
+            result = self.tracker3d.lift(
+                state.name, views, state.cams,
+                point_index={cam: self.targets[state.name].point_index.get(cam)
+                             for cam in state.cams} if state.name in self.targets else None,
+                seed_world_points=(self.targets[state.name].seed_points_world
+                                   if state.name in self.targets else None),
+            )
+        except Exception as exc:
+            self.lift_errors += 1
+            if self.lift_errors <= 3:
+                self._log(f"[tracking] 3D lift '{self.tracker3d_name}' failed for "
+                          f"'{state.name}': {type(exc).__name__}: {exc}")
+            result = None
+
+        if result is None or not result.ok:
+            if self.tracker3d_name != "depth_fusion":
+                result = self._fallback_lift(state, views, result)
+            elif result is None:
+                return None, None, []
+
+        state.lift_meta = dict(result.meta)
+        return result.world_point, result.disagreement, list(result.used_cams)
+
+    def _fallback_lift(self, state, views, failed):
+        """Depth fusion as the safety net when an experimental provider produces nothing."""
+        from providers.tracker3d.depth_fusion import DepthFusionTracker3D
+        if getattr(self, "_fallback3d", None) is None:
+            self._fallback3d = DepthFusionTracker3D(logger=self.logger)
+        result = self._fallback3d.lift(state.name, views, state.cams)
+        result.meta["fell_back_from"] = self.tracker3d_name
+        if failed is not None:
+            result.meta["why"] = failed.meta.get("why")
+        return result
 
     def _reseed(self, target, cam, view, world_point, reason, donor):
         """Project a donor world point into ``cam`` and re-initialise its tracker there."""
@@ -332,12 +363,18 @@ class TrackingSession:
         # multi-point outlier rejection survives a re-seed.
         seed_world = world_point[None, :] + target.local_offsets
         pixels = []
-        for wp in seed_world:
+        indices = []
+        for i, wp in enumerate(seed_world):
             _snapped, px, _why = geometry.surface_point(view, wp)
             if _snapped is not None:
                 pixels.append(px)
+                indices.append(i)
         if not pixels:
+            # Nothing but the donor centroid is imaged here. It has no seed-point identity,
+            # so it is marked -1: a triangulator must not match it against another camera's
+            # seed point 0, which is a different place on the object.
             pixels = [pixel]
+            indices = [-1]
 
         try:
             tracker = target.trackers[cam]
@@ -348,6 +385,7 @@ class TrackingSession:
             return event
 
         target.seeded[cam] = True
+        target.point_index[cam] = np.asarray(indices, dtype=int)
         state = target.health[cam]
         state.last_reseed_frame = self.frame_idx
         state.low_conf_frames = 0

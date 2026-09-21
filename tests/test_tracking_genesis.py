@@ -9,7 +9,8 @@ Identical assertions, different simulator: every test body lives in
 this run actually proves is that the tracking geometry is simulator-agnostic - Genesis
 renders **linear metric** depth where PyBullet renders a non-linear GL z-buffer, and the
 whole pipeline (occlusion test, deprojection, cross-camera re-seeding, fusion) has to come
-out at the same world coordinates regardless.
+out at the same world coordinates regardless. The 3D-lift provider sweep runs here too, so
+each ``providers/tracker3d`` provider is exercised on both simulators.
 """
 
 import os

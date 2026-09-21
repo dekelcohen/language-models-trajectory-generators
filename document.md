@@ -115,7 +115,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 | Arg | Default | Purpose |
 |-----|---------|---------|
 | `--tracking / --no-tracking` | off | Enable per-frame 3D tracking of the gripper + affordance objects during trajectory execution. Off by default: the capture path is untouched when inactive, so goldens cannot drift. |
-| `--tracker-provider` | `template` | 2D point tracker: `template` (base-cv2 NCC, no extra deps) \| `csrt` (needs `opencv-contrib-python`) \| `remote` (stub). |
+| `--tracker-provider` | `template` | 2D point tracker: `template` (base-cv2 NCC, no extra deps) \| `csrt` (needs `opencv-contrib-python`) \| `cotracker` (CoTracker3 online; needs `torch`, downloads the model once into `TORCH_HOME`, defaults to `<repo>/cache/torch`) \| `remote` (stub). |
 | `--track-interval` | `1` | Track every Nth keyframe (`Robot.step_env_and_record`). |
 | `--track-save-depth` | off | Also dump the metric depth array behind every decision (`<log-dir>/depth/<cam>_<frame>.npy`). |
 | `--track-log-dir` | `./outputs/tracking` | Where `track.jsonl` + `summary.json` are written. |
@@ -186,7 +186,7 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `segmentation_adapter.py` | Provider-agnostic 2D segmentation dispatch. |
 | `utils.py` | Point-cloud → bounding cube, 3D↔2D projection, intrinsics/extrinsics. |
 | `tracking/` | Rollout tracking (§13): `session.py` (orchestrator), `geometry.py` (project/deproject, occlusion test, fusion), `health.py` (per-camera health + re-seed policy), `monitor.py` (monitor contract), `monitors.py` (built-in invariants), `report.py` (JSONL + summary), `types.py`. |
-| `providers/trackers/` | Pluggable 2D point trackers: `base.py` (`PointTracker` ABC), `template_tracker.py` (default), `csrt_tracker.py`, `remote_tracker.py` (stub), `factory.py`. |
+| `providers/trackers/` | Pluggable 2D point trackers: `base.py` (`PointTracker` ABC), `template_tracker.py` (default), `csrt_tracker.py`, `cotracker_tracker.py` (CoTracker3 online, sliding-window, reports `meta["stale_frames"]`), `remote_tracker.py` (stub), `factory.py`. |
 
 ---
 
@@ -1467,6 +1467,29 @@ NCC per point patch) is the default because `cv2.TrackerCSRT` lives in
 is opt-in and prints an install hint. `remote` documents the streaming JSON protocol for a
 future server (e.g. CoTracker) and raises `NotImplementedError`.
 
+**`cotracker`** (`providers/trackers/cotracker_tracker.py`) — CoTracker3 via
+`torch.hub.load("facebookresearch/co-tracker", "cotracker3_online")`, one predictor per
+camera, `cuda:0` when available else CPU (`--tracker-provider cotracker`, `device` kwarg).
+The **online** entry point is used on purpose: the offline model needs the whole clip up
+front. It consumes a sliding window of `window = 2 * step` frames (16/8 for CoTracker3) and
+only emits a prediction every `step` frames, so `update()` returns **the most recent
+available prediction** — never an extrapolation — and reports its age in
+`TrackResult.meta["stale_frames"]` (`0` = computed from this frame) alongside `fresh`,
+`window`, `step`, `flushes` and `device`. Per-point scores are decayed by
+`tracker_cotracker_stale_decay` per stale frame so `TrackResult.confidence` degrades while a
+camera coasts, which is what lets `tracking/health.py` down-weight or re-seed it. `init`
+pre-fills the window with copies of the seed frame (`warm_start=True`), so a fresh seed or a
+cross-camera re-seed produces a real prediction on the very next frame instead of waiting a
+full window; re-seeding drops the frame buffer and the model's online state (re-running the
+`is_first_step` pass with the new queries) but **keeps the loaded weights**. Points whose
+visibility falls below threshold, or that leave the image, come back `visible=False` with
+score `0`. The first run downloads the checkpoint (~97 MB) into `TORCH_HOME` (default
+`<repo>/cache/torch`, git-ignored); afterwards set `TORCH_HOME` to that directory and the
+provider runs offline. Without network *and* without a cache the factory raises an
+actionable error naming `TORCH_HOME` instead of a hub traceback. Measured on an RTX A1000
+(4 GB, torch 2.0.1+cu117, 320×240 input): ~2 s per window flush (~6 s for the first, cuDNN
+warm-up), ~0 ms on the frames in between, sub-pixel accuracy on a fresh flush.
+
 **IPC** — opcodes `START_TRACKING=23`, `STOP_TRACKING=24`, `GET_TRACKING_REPORT=25`.
 Because the agent and the simulator are separate processes, a monitor cannot cross the pipe
 as a closure: `api._monitor_spec` sends it as **source text** (`inspect.getsource`) or as a
@@ -1481,7 +1504,8 @@ built-in name + kwargs, and `tracking/monitor.py` compiles it on the far side.
 `track_search_scale`, `track_occlusion_tol`, `track_reseed_self_occlusion_m`,
 `track_depth_min/max`, `track_point_conf_min`, `track_reseed_conf`, `track_health_min`,
 `track_reseed_patience`, `track_reseed_cooldown`, `track_disagree_m`, `track_max_jump_m`,
-`track_lost_patience`, `track_attach_max_dist`, `track_attach_grace_frames`.
+`track_lost_patience`, `track_attach_max_dist`, `track_attach_grace_frames`,
+`tracker_cotracker_variant/_device/_torch_home/_vis_threshold/_stale_decay`.
 
 </details>
 
@@ -1490,6 +1514,11 @@ built-in name + kwargs, and `tracking/monitor.py` compiles it on the far side.
 - `tests/test_tracking_unit.py` (39, free) — geometry/fusion maths, the re-seed policy on
   synthetic low-confidence and disagreement cases, the monitor contract, the built-in
   invariants, and the tracker providers on synthetic images. No simulator.
+- `tests/test_cotracker_tracker.py` (24 free + 1 gated) — the CoTracker provider driven by a
+  *fake* predictor (`model=` kwarg): ABC conformance, the window/staleness contract, score
+  decay, visibility → lost, points leaving the frame, re-seed (online state restarts, weights
+  are kept) and the `TORCH_HOME` error message. Skipped wholesale without torch. The real
+  checkpoint test runs only with `COTRACKER_REAL_TEST=1` (~50 s on CPU, ~10 s on `cuda:0`).
 - `tests/test_tracking_pybullet.py` (5) and `tests/test_tracking_genesis.py` (5) — **no LLM,
   no agent, no IPC**: a real `TrackingSession` against real head/wrist renders, with the
   object moved directly through `SimAdapter.set_base_pose` so every frame has an exact

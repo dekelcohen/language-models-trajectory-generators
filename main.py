@@ -78,7 +78,7 @@ def build_arg_parser():
     parser.add_argument("--tracking", action=argparse.BooleanOptionalAction, default=config.tracking_enabled_default,
                         help="track the affordance object and gripper in 3D during trajectory execution; exposes the track_objects tool to the model and lets a monitor abort a sub-task mid-rollout (default: off)")
     parser.add_argument("--tracker-provider", dest="tracker_provider", choices=list(tracker_providers), default=config.tracker_provider_default,
-                        help="2D point tracker used by --tracking: 'template' (default, base opencv), 'csrt' (needs opencv-contrib-python), 'remote' (stub)")
+                        help="2D point tracker used by --tracking: 'template' (default, base opencv), 'csrt' (needs opencv-contrib-python), 'cotracker' (CoTracker3 online, needs torch + a one-off torch.hub download into TORCH_HOME), 'remote' (stub)")
     parser.add_argument("--track-interval", dest="track_interval", type=int, default=config.track_interval,
                         help="run the tracker every Nth recorded keyframe (1 = every keyframe)")
     parser.add_argument("--track-save-depth", dest="track_save_depth", action="store_true",

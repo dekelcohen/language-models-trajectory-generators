@@ -153,7 +153,24 @@ CLEAR_GRASP_MARKERS = 26
 # Tracking is opt-in (--tracking). When disabled nothing in the capture path changes,
 # so the PyBullet regression goldens stay bit-identical.
 tracking_enabled_default = False
-tracker_provider_default = "template"   # template | csrt | remote
+tracker_provider_default = "template"   # template | csrt | cotracker | remote
+# CoTracker3 provider (--tracker-provider cotracker). The online model is fetched once via
+# torch.hub into TORCH_HOME and reused offline afterwards; None honours the environment
+# and falls back to <repo>/cache/torch.
+tracker_cotracker_variant = "cotracker3_online"
+tracker_cotracker_device = None          # None = cuda:0 when available, else cpu
+tracker_cotracker_torch_home = None      # None = $TORCH_HOME or <repo>/cache/torch
+# Visibility probability above which a CoTracker point counts as visible (ignored when the
+# predictor already returns a boolean mask, which CoTracker3 does).
+tracker_cotracker_vis_threshold = 0.5
+# The online model only emits a prediction every `step` frames; per-point scores lose this
+# much confidence per frame the reported result is old (see TrackResult.meta["stale_frames"]).
+tracker_cotracker_stale_decay = 0.05
+# How the per-camera 2D tracks become one world point.
+#   depth_fusion - deproject through each camera's depth buffer, then weighted-average
+#   triangulate  - multi-view DLT from 2D + calibration only, no depth buffer
+#   lapa         - LAPA's learned per-view weighting on top of that triangulation
+tracker3d_provider_default = "depth_fusion"
 tracking_cameras = ("head", "wrist")
 # Run the tracker every Nth recorded keyframe (1 = every keyframe).
 track_interval = 1

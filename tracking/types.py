@@ -129,6 +129,7 @@ class TrackedObjectState:
     lost: bool = True
     disagreement: Optional[float] = None     # metres between per-camera world points
     reseeds: List[ReseedEvent] = field(default_factory=list)
+    lift_meta: dict = field(default_factory=dict)   # which 3D provider produced world_point
 
     @property
     def visible_cams(self) -> List[str]:
@@ -143,6 +144,7 @@ class TrackedObjectState:
             "disagreement": None if self.disagreement is None else round(float(self.disagreement), 5),
             "cams": {c: t.to_dict() for c, t in self.cams.items()},
             "reseeds": [r.to_dict() for r in self.reseeds],
+            **({"lift": self.lift_meta} if self.lift_meta else {}),
         }
 
 

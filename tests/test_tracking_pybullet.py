@@ -12,7 +12,9 @@ Covered:
 * an occluded camera is re-seeded from the healthy one instead of latching onto the
   occluder (cross-camera repair);
 * the built-in ``attached_to_gripper`` invariant aborts the session when the object is
-  detached from the gripper mid-rollout.
+  detached from the gripper mid-rollout;
+* the whole scenario replayed against every constructible ``providers/tracker3d`` lift
+  provider, each with its own measured accuracy band (see ``TRACKER3D_BANDS``).
 
 Run with::
 

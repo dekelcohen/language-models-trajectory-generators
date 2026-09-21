@@ -6,7 +6,7 @@ lookup, lazy import so an optional dependency never breaks startup).
 
 import config
 
-SUPPORTED = ("template", "csrt", "remote")
+SUPPORTED = ("template", "csrt", "cotracker", "remote")
 
 
 def get_tracker(name=None, **kwargs):
@@ -22,6 +22,11 @@ def get_tracker(name=None, **kwargs):
     if name == "csrt":
         from providers.trackers.csrt_tracker import CSRTTracker
         return CSRTTracker(**kwargs)
+    if name == "cotracker":
+        # Lazy: importing this pulls in torch, and constructing it may hit torch.hub.
+        # Neither must happen unless the provider is actually selected.
+        from providers.trackers.cotracker_tracker import CoTrackerTracker
+        return CoTrackerTracker(**kwargs)
     if name == "remote":
         from providers.trackers.remote_tracker import RemoteTracker
         return RemoteTracker(**kwargs)
