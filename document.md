@@ -102,7 +102,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `--delete-images` | off | Wipe image folders before recreating. |
 | `--images-root DIR` | `./images` (or `$IMAGES_ROOT`) | Root folder for all image/video/trajectory output (`config.images_folder` and every path derived from it). Parsed from `sys.argv` *before* `config`/other modules import, via `_apply_early_images_root()` at the top of `main.py`, so it must reach every module regardless of import order. Set this per run to allow 2+ concurrent experiments on the same checkout without overwriting each other's outputs, e.g. `--images-root ./images_run1` / `./images_run2`. |
 | `--review-provider` | `vlm` | Success check: `vlm`, `vlm:<model>` (e.g. `vlm:or-openai/gpt-5.5`), or `xmem`. |
-| `--planner-perception-vlm` | `or-google/gemini-3.7-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
+| `--planner-perception-vlm` | `gemini-3.8-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
 | `--affordance-points` / `--no-affordance-points` | on | Ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis. Disable to drop the pointing block from the perception prompt entirely. |
 | `--attempts` | `2` | Global default per-task attempts (1 first + retries with review between). |
 | `--no-plan` | off | Skip planner; run command as a single `execute_task`. |

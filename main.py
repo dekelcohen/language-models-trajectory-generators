@@ -50,7 +50,7 @@ def _pybullet_task_help():
 
 def build_arg_parser():
     parser = argparse.ArgumentParser(description="Main Program.")
-    parser.add_argument("-lm", "--language_model", default="azure-gpt-5", help="select language model (e.g. azure-gpt-5, gpt-4o, or-google/gemini-2.5-flash)")
+    parser.add_argument("-lm", "--language_model", default="azure-gpt-5", help="select language model (e.g. azure-gpt-5, gpt-4o, or-google/gemini-2.5-flash, copilot-claude-opus-5 via the local `copilot` CLI)")
     parser.add_argument("--lm-images", action=argparse.BooleanOptionalAction, default=True, help="pass images to LLM prompts (default: True, use --no-lm-images to disable)")
     parser.add_argument("--max-tokens", type=int, default=60000, help="max completion tokens for LLM responses")
     parser.add_argument("--reasoning-effort", type=str, default=None, choices=["xhigh", "high", "medium", "low", "minimal", "none"], help="reasoning effort for reasoning models (OpenRouter, Gemini)")
@@ -85,7 +85,7 @@ def build_arg_parser():
                         help="also dump the per-frame metric depth arrays used by tracking (debugging; large)")
     parser.add_argument("--track-log-dir", dest="track_log_dir", default=config.tracking_output_dir,
                         help="root folder for tracking JSONL logs and summaries")
-    parser.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="gemini-3.7-flash", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
+    parser.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="gemini-3.8-flash", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
     parser.add_argument("--affordance-points", dest="affordance_points", action=argparse.BooleanOptionalAction, default=True, help="ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis (default: True, use --no-affordance-points to disable)")
     parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")
     parser.add_argument("--ovr-obj",  type=str, default=None, help=(

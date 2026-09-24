@@ -735,7 +735,7 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
     # review frames) so the request stays under provider image caps (Bedrock max 20).
     messages = task.conversation_messages
     models.strip_images_from_messages(messages)
-    messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, summary_prompt, messages, "user", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache})
+    messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, summary_prompt, messages, "user", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache, "conversation_key": task.conversation_key})
     task.conversation_messages = messages
     logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
 
@@ -771,7 +771,7 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
     retry_prompt += "\n" + TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", combined_summary)
 
     logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-    messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, retry_prompt, [], "system", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache})
+    messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, retry_prompt, [], "system", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache, "conversation_key": task.conversation_key})
     task.conversation_messages = messages
     task.failed_task = False  # reset to resume normal flow on the retry
     return messages
@@ -803,7 +803,7 @@ def continue_task_turn(ctx, task, feedback):
     if not (feedback and feedback.strip()) and not img_paths:
         feedback = CONTINUE_TASK_PROMPT
 
-    messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, feedback, task.conversation_messages, "user", image_paths=img_paths, options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache})
+    messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, feedback, task.conversation_messages, "user", image_paths=img_paths, options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache, "conversation_key": task.conversation_key})
     task.conversation_messages = messages
     logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
     return messages
@@ -910,7 +910,8 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     messages = models.call_llm_cached(
         main_connection, client, args.language_model, new_prompt, messages, role="system",
         image_paths=image_paths if args.lm_images else None,
-        options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache},
+        options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": llm_cache,
+                 "conversation_key": task.conversation_key},
     )
     task.conversation_messages = messages
     logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
@@ -991,7 +992,8 @@ def run_plan(ctx, command, max_iterations=None):
     messages = models.call_llm_cached(
         ctx.main_connection, ctx.client, args.language_model, prompt, [], role="system",
         image_paths=image_paths,
-        options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache},
+        options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache,
+                 "conversation_key": "planner"},
     )
 
     iteration = 0
@@ -1022,7 +1024,8 @@ def run_plan(ctx, command, max_iterations=None):
         logger.info(PROGRESS + f"Planner: iteration {iteration}/{max_iterations}..." + ENDC)
         messages = models.call_llm_cached(
             ctx.main_connection, ctx.client, args.language_model, new_prompt, messages, "user",
-            options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache},
+            options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache,
+                     "conversation_key": "planner"},
         )
 
     if planner.plan_completed_flag:

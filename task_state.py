@@ -6,6 +6,7 @@ so each subtask gets an independent conversation, attempt counter, review outcom
 and segmentation bookkeeping while the physical robot/sim state and continuous
 `trajectory_step` numbering (held on API) carry over between subtasks.
 """
+import uuid
 
 
 class TaskState:
@@ -16,6 +17,11 @@ class TaskState:
 
         # Conversation for this task
         self.conversation_messages = []
+        # Logical id of this task's conversation, kept distinct from the planner's
+        # (they interleave). Providers that hold conversation state outside the
+        # messages list - the Copilot CLI, which replays turns into a `copilot`
+        # session - use it to keep the two conversations in separate sessions.
+        self.conversation_key = f"task-{uuid.uuid4().hex[:8]}"
 
         # Attempt bookkeeping
         self.attempt_number = 0
