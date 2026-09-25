@@ -254,6 +254,21 @@ class SimEnvDoor(SimEnvBase):
         """
         return False
 
+    def get_shoulder_camera_params(self):
+        """Base-mounted shoulder view tuned for the door handle.
+
+        The eye uses a door-specific [0.15, -0.30, 0.50] m base-frame offset:
+        still a high local -Y side mast rigidly attached to the base, but pulled
+        back from the handle enough to keep the measured head/shoulder ray angle
+        near 80 degrees instead of an overly rear-biased view.  Aiming at
+        [0.40, -0.12, 0.58] in the same base frame points at the visible latch
+        surface rather than the link origin inside the handle geometry.
+        """
+        return {
+            "base_offset": [0.15, -0.30, 0.50],
+            "target_offset": [0.40, -0.12, 0.58],
+        }
+
     def get_3d_coordinates_prompt_section(self):
         return (
             "The 3D coordinate system of the environment is as follows:\n"

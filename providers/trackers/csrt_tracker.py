@@ -70,23 +70,25 @@ class CSRTTracker(PointTracker):
         bgr = self._to_bgr(frame)
         h, w = bgr.shape[:2]
         pts = self._as_points(points)
-        self._trackers, keep = [], []
+        # One slot per requested point; a box that does not fit starts (and stays) dead so
+        # output row j is still seed point j (see PointTracker).
+        self._trackers = []
         size = 2 * self.patch_half + 1
         for pt in pts:
             x = float(pt[0]) - self.patch_half
             y = float(pt[1]) - self.patch_half
             if x < 0 or y < 0 or x + size > w or y + size > h:
+                self._trackers.append(None)
                 continue
             trk = self._factory()
             trk.init(bgr, (x, y, float(size), float(size)))
             self._trackers.append(trk)
-            keep.append(pt)
-        if not keep:
+        self._alive = np.array([t is not None for t in self._trackers], dtype=bool)
+        if not np.any(self._alive):
             raise ValueError("CSRTTracker.init: no point had a full box inside the image")
-        self._points = np.asarray(keep, dtype=float)
-        self._alive = np.ones(len(keep), dtype=bool)
-        self._miss = np.zeros(len(keep), dtype=int)
-        self.n_points = len(keep)
+        self._points = np.array(pts, dtype=float, copy=True)
+        self._miss = np.zeros(len(pts), dtype=int)
+        self.n_points = len(pts)
         self.initialised = True
 
     def reset(self):

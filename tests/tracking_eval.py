@@ -46,7 +46,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config  # noqa: E402
-from sim_adapter import camera_math, transforms  # noqa: E402
+from sim_adapter import camera_math  # noqa: E402
+from sim_adapter.transforms import rotation_matrix  # noqa: E402
 from tracking import geometry  # noqa: E402
 from tracking.session import TrackingSession  # noqa: E402
 from tracking.types import CameraView  # noqa: E402
@@ -61,16 +62,13 @@ SCHEMA = "tracking_eval/v1"
 LOST_PENALTY_M = 1.0
 #: Error below which the object counts as re-acquired after an occlusion window.
 RECOVERY_THRESHOLD_M = 0.05
+#: Real-time runs: scripted scene motion frames per sim second. The scripted deltas
+#: (grasp 1 cm/frame, door hinge 0.02 rad/frame) were tuned per lock-step frame; at 10 Hz
+#: they become 10 cm/s and ~11 deg/s - brisk manipulation speeds.
+DEFAULT_MOTION_RATE_HZ = 10.0
 
 
 # -- ground-truth bookkeeping ---------------------------------------------
-def quat_matrix(quat_xyzw):
-    """3x3 rotation matrix for an xyzw quaternion (identity when ``quat`` is ``None``)."""
-    if quat_xyzw is None:
-        return np.eye(3)
-    return np.asarray(transforms.matrix_from_quat(list(quat_xyzw)), dtype=float).reshape(3, 3)
-
-
 @dataclass
 class SeedOffset:
     """The constant surface-vs-origin bias captured when a target is seeded.
@@ -85,7 +83,7 @@ class SeedOffset:
 
     def expected(self, position, quat=None):
         """Where a perfect tracker's fused point should sit for this ground-truth pose."""
-        rot = quat_matrix(quat) if self.rotating else np.eye(3)
+        rot = rotation_matrix(quat) if self.rotating else np.eye(3)
         return np.asarray(position, dtype=float) + rot @ np.asarray(self.local, dtype=float)
 
     def to_dict(self):
@@ -98,7 +96,7 @@ def capture_seed_offset(seed_points, position, quat=None):
     delta = centroid - np.asarray(position, dtype=float)
     if quat is None:
         return SeedOffset(local=delta, rotating=False)
-    return SeedOffset(local=quat_matrix(quat).T @ delta, rotating=True)
+    return SeedOffset(local=rotation_matrix(quat).T @ delta, rotating=True)
 
 
 @dataclass
@@ -115,6 +113,19 @@ class FrameSample:
     disagreement: Optional[float] = None
     latency_ms: float = 0.0
     lift_meta: dict = field(default_factory=dict)
+    #: Per-point ground truth (independent of which subset of points is visible):
+    #: median over every tracked, depth-valid point of |own-camera lift - that seed's GT|.
+    point_err_m: Optional[float] = None
+    n_points_scored: int = 0
+    #: For pose-fitting lifts: mean |pose.apply(seed_i) - GT_i| over *all* seed points.
+    pose_err_m: Optional[float] = None
+    #: ``{cam: status}`` and ``{cam: seeded}`` - what each camera was doing this frame.
+    cam_status: dict = field(default_factory=dict)
+    blind_cams: list = field(default_factory=list)
+    #: Real-time runs only: sim time of this sample, and how old (sim seconds) the estimate
+    #: being scored is - frame exposure to now, i.e. latency + the frame period it waits.
+    t: Optional[float] = None
+    age_s: Optional[float] = None
 
     @property
     def error_m(self) -> Optional[float]:
@@ -139,7 +150,15 @@ class FrameSample:
             "dropped": bool(self.dropped),
             "disagreement": None if self.disagreement is None else round(float(self.disagreement), 6),
             "latency_ms": round(float(self.latency_ms), 3),
+            "point_err_m": None if self.point_err_m is None else round(self.point_err_m, 6),
+            "n_points_scored": int(self.n_points_scored),
+            "pose_err_m": None if self.pose_err_m is None else round(self.pose_err_m, 6),
+            "cam_status": dict(self.cam_status),
+            "blind_cams": list(self.blind_cams),
             "lift": dict(self.lift_meta or {}),
+            **({} if self.t is None else
+               {"t": round(float(self.t), 5),
+                "age_s": None if self.age_s is None else round(float(self.age_s), 5)}),
         }
 
 
@@ -241,6 +260,15 @@ def compute_metrics(samples, lost_penalty_m=LOST_PENALTY_M,
         occl_errors = [e for e, s in zip(errors, samples) if s.occluded]
         latencies = [float(s.latency_ms) for s in samples]
         n_lost = sum(1 for s in samples if s.lost or s.predicted is None)
+        ages = [float(s.age_s) for s in samples if s.age_s is not None]
+        recover = frames_to_recover(samples, errors, recovery_threshold_m)
+        timed = [s for s in samples if s.t is not None]
+        s_to_recover = None
+        if recover is not None and timed:
+            last_occl = max(i for i, s in enumerate(samples) if s.occluded)
+            nxt = min(last_occl + 1 + recover, n_frames - 1)
+            if samples[nxt].t is not None and samples[last_occl].t is not None:
+                s_to_recover = round(float(samples[nxt].t - samples[last_occl].t), 4)
 
         return {
             "n_frames": n_frames,
@@ -255,12 +283,20 @@ def compute_metrics(samples, lost_penalty_m=LOST_PENALTY_M,
             "n_dropped_frames": sum(1 for s in samples if s.dropped),
             "err_during_occlusion_m": _median(occl_errors),
             "n_occluded_frames": len(occl_errors),
-            "frames_to_recover": frames_to_recover(samples, errors, recovery_threshold_m),
+            "frames_to_recover": recover,
+            "s_to_recover": s_to_recover,
+            "age_s_median": _median(ages),
+            "age_s_p95": _percentile(ages, 95),
+            "age_s_max": max(ages) if ages else None,
             "max_jump_m": max_jump_m(samples),
             "median_disagreement_m": _median([float(s.disagreement) for s in samples
                                               if s.disagreement is not None]),
             "latency_ms_mean": round(float(np.mean(latencies)), 3) if latencies else None,
             "latency_ms_p95": round(_percentile(latencies, 95), 3) if latencies else None,
+            "median_point_err_m": _median([s.point_err_m for s in samples
+                                           if s.point_err_m is not None]),
+            "median_pose_err_m": _median([s.pose_err_m for s in samples
+                                          if s.pose_err_m is not None]),
             "lost_penalty_m": float(lost_penalty_m),
             "recovery_threshold_m": float(recovery_threshold_m),
         }
@@ -271,9 +307,41 @@ def compute_metrics(samples, lost_penalty_m=LOST_PENALTY_M,
 
 
 #: Metrics that aggregate across objects by taking the worst (rather than the mean) value.
-_WORST_KEYS = ("p95_l2_m", "max_l2_m", "max_jump_m", "pct_lost", "latency_ms_p95")
+_WORST_KEYS = ("p95_l2_m", "max_l2_m", "max_jump_m", "pct_lost", "latency_ms_p95",
+               "age_s_p95", "age_s_max", "s_to_recover")
 _MEAN_KEYS = ("median_l2_m", "median_l2_valid_m", "err_during_occlusion_m", "latency_ms_mean",
-              "median_disagreement_m")
+              "median_disagreement_m", "median_point_err_m", "median_pose_err_m",
+              "age_s_median")
+
+
+#: Named camera-visibility scenarios (see :func:`blind_schedule`).
+SCENARIOS = ("occlusion", "head_only", "wrist_only", "handoff")
+
+
+def blind_schedule(scenario, n_frames, specs=None):
+    """``{cam: [(start, end)]}`` blackout windows for a named scenario plus ``cam:start:end``.
+
+    * ``occlusion``  - nothing blacked out (the painted disc occluder does the work)
+    * ``head_only``  - the wrist never sees the object
+    * ``wrist_only`` - the head never sees it; detection at t=0 falls back to the wrist
+    * ``handoff``    - seeded in the head only (wrist blind for the first third); the wrist
+      must be seeded *from the head's estimate* (Step 0.5), then the head goes blind for the
+      second half and tracking has to continue on the wrist alone.
+    """
+    n = int(n_frames)
+    table = {
+        None: {}, "occlusion": {},
+        "head_only": {"wrist": [(0, None)]},
+        "wrist_only": {"head": [(0, None)]},
+        "handoff": {"wrist": [(0, max(1, n // 3))], "head": [(max(2, n // 2), None)]},
+    }
+    if scenario not in table:
+        raise ValueError(f"unknown scenario {scenario!r}; expected one of {SCENARIOS}")
+    out = {cam: list(ws) for cam, ws in table[scenario].items()}
+    for spec in specs or ():
+        cam, start, end = (str(spec).split(":") + ["", ""])[:3]
+        out.setdefault(cam, []).append((int(start or 0), int(end) if end else None))
+    return out or None
 
 
 def aggregate_metrics(per_object):
@@ -340,15 +408,129 @@ class SceneDriver:
     def is_occluded(self, frame_idx, obj):
         return False
 
+    # -- camera blackout schedule ---------------------------------------------
+    #: ``{cam: [(start, end), ...]}`` - frames ``[start, end)`` in which ``cam`` images
+    #: nothing usable (RGB black, depth invalid). Used to script "seen only from the head",
+    #: "seen only from the wrist" and hand-over scenarios; ``end=None`` = until the end.
+    blind = None
+
+    def is_blind(self, cam, frame_idx):
+        for start, end in (self.blind or {}).get(cam, ()):
+            if frame_idx >= int(start) and (end is None or frame_idx < int(end)):
+                return True
+        return False
+
+    def seed_camera(self, default="head"):
+        """The camera detection runs in at t=0: the first one that is not blacked out."""
+        for cam in (default,) + tuple(c for c in getattr(self, "cameras", ()) if c != default):
+            if not self.is_blind(cam, 0):
+                return cam
+        return default
+
+    def apply_blind(self, views, frame_idx):
+        for cam, view in (views or {}).items():
+            if self.is_blind(cam, frame_idx):
+                view.rgb[:] = 0
+                view.depth[:] = 0.0              # below track_depth_min -> invalid everywhere
+        return views
+
     def gripper_pose(self):
         return None
 
     def describe(self):
-        return {"scene": self.name, "n_frames": int(self.n_frames),
+        info = {"scene": self.name, "n_frames": int(self.n_frames),
                 "objects": list(self.objects)}
+        if self.blind:
+            info["blind"] = {c: [list(w) for w in ws] for c, ws in self.blind.items()}
+        return info
 
 
-class GraspSceneDriver(SceneDriver):
+class SimSceneDriver(SceneDriver):
+    """Shared plumbing of the booted-simulator scenes (grasp, door).
+
+    Owns camera selection, per-frame rendering with the painted disc occluder and the
+    blackout schedule, the occlusion window, gripper pose, and grid seeding. Subclasses
+    supply the motion, the ground-truth pose and the affordance seed.
+    """
+
+    def __init__(self, sim, env, robot, n_frames, occlusion=None, occluder_cam="head",
+                 seeding=None, n_seed_points=None, blind=None):
+        self.sim = sim
+        self.env = env
+        self.robot = robot
+        self.n_frames = int(n_frames)
+        self.occlusion = (int(occlusion[0]), int(occlusion[1])) if occlusion else None
+        self.occluder_cam = occluder_cam
+        self.seeding = seeding or config.track_seeding_default
+        self.n_seed_points = int(config.track_seed_points if n_seed_points is None
+                                 else n_seed_points)
+        self.blind = blind
+        self.cameras = tuple(config.tracking_cameras)
+        self._seed_offset = None
+        # The arm sags ~0.1 mm per 30-frame run under its position motors; sub-pixel, but it
+        # moves the wrist view enough to swing NCC matches and grid seeds, so a second run in
+        # the same process measured 3-7 mm instead of 4.2 mm. Snapshot once per robot (so a
+        # driver built later on the same sim still restores the *boot* pose) and restore it
+        # in reset(): every run then starts from identical state.
+        if getattr(robot, "_eval_home_q", None) is None:
+            robot._eval_home_q = [(j, sim.get_joint_state(robot.id, j).position)
+                                  for j in range(sim.num_joints(robot.id))]
+
+    def restore_robot(self):
+        for joint, position in getattr(self.robot, "_eval_home_q", None) or ():
+            self.sim.reset_joint_state(self.robot.id, joint, position)
+
+    def select_cameras(self, names):
+        self.cameras = tuple(names or config.tracking_cameras)
+
+    def _grid_seed(self, view, body_id, link_index, affordance_px, points):
+        """``points`` replaced by a mask grid when ``seeding == "grid"`` and the mask allows."""
+        if self.seeding != "grid":
+            return points
+        from tracking.seeding import mask_grid_seed, sim_link_mask
+
+        grid, _px, info = mask_grid_seed(view, sim_link_mask(view, body_id, link_index),
+                                         affordance_px=affordance_px,
+                                         n_points=self.n_seed_points)
+        log.info("[eval] grid seeding (body %s link %s): %s", body_id, link_index, info)
+        return points if grid is None else grid
+
+    def views(self, frame_idx):
+        """Always render here, so the measured latency is the *tracking* step only.
+
+        Leaving the session to render would fold the simulator's camera capture (tens of
+        milliseconds) into every provider's latency and drown the difference between them.
+        """
+        views = {}
+        for cam in self.cameras:
+            try:
+                views[cam] = self.robot.capture_camera_view(cam, self.env)
+            except Exception as exc:
+                log.warning("[eval] camera '%s' capture failed: %s", cam, exc)
+        if self.is_occluded(frame_idx, self.objects[0]):
+            target = views.get(self.occluder_cam)
+            if target is not None:
+                position, _quat = self.ground_truth(self.objects[0])
+                offset = self._seed_offset if self._seed_offset is not None else np.zeros(3)
+                paint_occluder(target, position + offset)
+        return self.apply_blind(views, frame_idx) or None
+
+    def is_occluded(self, frame_idx, obj):
+        return bool(self.occlusion) and self.occlusion[0] <= frame_idx < self.occlusion[1]
+
+    def gripper_pose(self):
+        pos, quat = self.sim.get_link_pose(self.robot.id, self.robot.ee_index)
+        return {"position": list(pos), "orientation_q": list(quat)}
+
+    def describe(self):
+        info = super().describe()
+        info.update({"seeding": self.seeding, "n_seed_points": self.n_seed_points,
+                     "occlusion_window": list(self.occlusion) if self.occlusion else None,
+                     "occluder_cam": self.occluder_cam})
+        return info
+
+
+class GraspSceneDriver(SimSceneDriver):
     """The scripted grasp scene from ``tracking_scenario``, with an occlusion window.
 
     Phase 1 (frames ``0..occlusion_start``): the object translates smoothly.
@@ -363,25 +545,18 @@ class GraspSceneDriver(SceneDriver):
 
     def __init__(self, sim, env, robot, object_id, obj_name="cube", n_frames=30,
                  start=None, step_vector=(0.010, 0.0, 0.003), occlusion=(12, 19),
-                 occluder_cam="head", settle=3):
-        self.sim = sim
-        self.env = env
-        self.robot = robot
-        self.object_id = object_id
-        self.objects = (obj_name,)
-        self.n_frames = int(n_frames)
+                 occluder_cam="head", settle=3, seeding=None, n_seed_points=None,
+                 blind=None):
+        super().__init__(sim, env, robot, n_frames, occlusion=occlusion,
+                         occluder_cam=occluder_cam, seeding=seeding,
+                         n_seed_points=n_seed_points, blind=blind)
         from tracking_scenario import OBJECT_START
 
+        self.object_id = object_id
+        self.objects = (obj_name,)
         self.start = np.asarray(start if start is not None else OBJECT_START, dtype=float)
         self.step_vector = np.asarray(step_vector, dtype=float)
-        self.occlusion = (int(occlusion[0]), int(occlusion[1])) if occlusion else None
-        self.occluder_cam = occluder_cam
         self.settle = int(settle)
-        self.cameras = tuple(config.tracking_cameras)
-        self._seed_offset = None
-
-    def select_cameras(self, names):
-        self.cameras = tuple(names or config.tracking_cameras)
 
     # -- scene control ----------------------------------------------------
     def _place(self, position):
@@ -390,13 +565,17 @@ class GraspSceneDriver(SceneDriver):
             self.sim.step()
 
     def reset(self):
+        self.restore_robot()
         self._place(self.start)
         log.info("[eval] scene '%s' reset, object at %s", self.name, list(np.round(self.start, 4)))
 
     def seed_points(self, obj):
-        view = self.robot.capture_camera_view("head", self.env)
+        cam = self.seed_camera()
+        view = self.robot.capture_camera_view(cam, self.env)
         position, _quat = self.ground_truth(obj)
-        points, _pixels = surface_seed_points(view, position)
+        points, pixels = surface_seed_points(view, position)
+        log.info("[eval] seeding '%s' from the %s camera", obj, cam)
+        points = self._grid_seed(view, self.object_id, -1, pixels, points)
         self._seed_offset = points.mean(axis=0) - position
         return points
 
@@ -407,43 +586,204 @@ class GraspSceneDriver(SceneDriver):
     def advance(self, frame_idx):
         self._place(self.start + self.step_vector * float(frame_idx))
 
-    def views(self, frame_idx):
-        """Always render here, so the measured latency is the *tracking* step only.
-
-        Leaving the session to render would fold the simulator's camera capture (tens of
-        milliseconds) into every provider's latency and drown the difference between them.
-        """
-        views = {}
-        for cam in self.cameras:
-            try:
-                views[cam] = self.robot.capture_camera_view(cam, self.env)
-            except Exception as exc:
-                log.warning("[eval] camera '%s' capture failed: %s", cam, exc)
-        if self._occluding(frame_idx):
-            target = views.get(self.occluder_cam)
-            if target is not None:
-                position, _quat = self.ground_truth(self.objects[0])
-                offset = self._seed_offset if self._seed_offset is not None else np.zeros(3)
-                paint_occluder(target, position + offset)
-        return views or None
-
-    def _occluding(self, frame_idx):
-        return bool(self.occlusion) and self.occlusion[0] <= frame_idx < self.occlusion[1]
-
-    def is_occluded(self, frame_idx, obj):
-        return self._occluding(frame_idx)
-
-    def gripper_pose(self):
-        pos, quat = self.sim.get_link_pose(self.robot.id, self.robot.ee_index)
-        return {"position": list(pos), "orientation_q": list(quat)}
-
     def describe(self):
         info = super().describe()
         info.update({"start": [round(float(v), 4) for v in self.start],
-                     "step_vector": [round(float(v), 4) for v in self.step_vector],
-                     "occlusion_window": list(self.occlusion) if self.occlusion else None,
-                     "occluder_cam": self.occluder_cam})
+                     "step_vector": [round(float(v), 4) for v in self.step_vector]})
         return info
+
+
+class DoorSceneDriver(SimSceneDriver):
+    """The Adroit door: seed from a 2D affordance point, then swing hinge + latch.
+
+    Unlike the grasp scene the object *rotates* (hinge ~43 deg, latch to its 0.8 rad stop),
+    so ground truth carries the latch link's quaternion and the seed offset rotates with it.
+    Everything scene-specific (aim point on the lever, hinge/latch rates, seed cross) is
+    reused from ``test_tracking_door_pybullet`` so the two can never drift apart.
+    """
+
+    name = "door_arc"
+
+    def __init__(self, sim, env, robot, n_frames=None, occlusion=None, occluder_cam="head",
+                 seeding=None, n_seed_points=None, blind=None):
+        import test_tracking_door_pybullet as door
+
+        super().__init__(sim, env, robot, n_frames or door.FRAMES, occlusion=occlusion,
+                         occluder_cam=occluder_cam, seeding=seeding,
+                         n_seed_points=n_seed_points, blind=blind)
+        self._door = door
+        self.objects = (door.OBJECT,)
+        state = env.simenv.get_state()
+        self.door_id = state["door_id"]
+        self.hinge_index = state["door_hinge_index"]
+        self.latch_index = state["latch_index"]
+        self.handle_link = state["door_handle_latch"]
+        self.affordance = None
+
+    def reset(self):
+        self.restore_robot()
+        for joint in (self.hinge_index, self.latch_index):
+            self.sim.reset_joint_state(self.door_id, joint, 0.0)
+            self.sim.set_joint_position(self.door_id, joint, target=0.0, force=200)
+        for _ in range(self._door.SUBSTEPS * 4):
+            self.sim.step()
+        self._last_mf = None
+        self._step_acc = 0.0
+        log.info("[eval] scene '%s' reset, door closed", self.name)
+
+    def _handle_pose(self):
+        pos, quat = self.sim.get_link_pose(self.door_id, self.handle_link)
+        return np.asarray(pos, dtype=float), np.asarray(quat, dtype=float)
+
+    def _aim_point(self, view):
+        """Same derivation as the door test: the lever-root cap facing the camera."""
+        pos, quat = self._handle_pose()
+        rot = rotation_matrix(quat)
+        best, best_z = None, float("inf")
+        for sign in (-1.0, 1.0):
+            local = (np.array([0.0, sign * self._door.LATCH_AXLE_HALF_LENGTH, 0.0])
+                     - self._door.LATCH_INERTIAL_ORIGIN)
+            world = pos + rot @ local
+            _pixel, z_eye = geometry.project_world_to_pixel(view, world)
+            if 0.0 < z_eye < best_z:
+                best, best_z = world, z_eye
+        return best
+
+    def seed_points(self, obj):
+        view = self.robot.capture_camera_view(self.seed_camera(), self.env)
+        pixel, _z = geometry.project_world_to_pixel(view, self._aim_point(view))
+        self.affordance = {"point": [int(round(pixel[0])), int(round(pixel[1]))],
+                           "label": self._door.OBJECT}
+        points, _pixels = self._door.seed_from_affordance_point(view, self.affordance)
+        points = self._grid_seed(view, self.door_id, self.handle_link,
+                                 [self.affordance["point"]], points)
+        position, _quat = self._handle_pose()
+        self._seed_offset = points.mean(axis=0) - position
+        log.info("[eval] door seeded from affordance pixel %s (%d points)",
+                 self.affordance["point"], len(points))
+        return points
+
+    def ground_truth(self, obj):
+        return self._handle_pose()
+
+    def advance(self, frame_idx):
+        """``frame_idx`` is a motion frame and may be fractional (real-time runs advance the
+        scene on the camera clock). The physics budget stays ``SUBSTEPS`` per whole motion
+        frame, accumulated, so the door's dynamics per second do not depend on the fps."""
+        mf = float(frame_idx)
+        self.sim.set_joint_position(self.door_id, self.hinge_index,
+                                    target=self._door.HINGE_STEP * mf, force=200)
+        self.sim.set_joint_position(self.door_id, self.latch_index,
+                                    target=min(self._door.LATCH_MAX,
+                                               self._door.LATCH_STEP * mf), force=200)
+        last = getattr(self, "_last_mf", None)
+        if last is None or mf <= last:
+            steps, self._step_acc = self._door.SUBSTEPS, 0.0
+        else:
+            self._step_acc = getattr(self, "_step_acc", 0.0) + self._door.SUBSTEPS * (mf - last)
+            steps = int(self._step_acc + 1e-9)
+            self._step_acc -= steps
+        self._last_mf = mf
+        for _ in range(steps):
+            self.sim.step()
+
+    def describe(self):
+        info = super().describe()
+        info.update({"hinge_step": self._door.HINGE_STEP, "latch_step": self._door.LATCH_STEP,
+                     "affordance": self.affordance})
+        return info
+
+
+# -- shared CLI (tests/tools/run_tracking_eval.py, tests/tools/render_tracking_video.py) --
+SCENES = ("grasp", "door", "synthetic")
+DEFAULT_FRAMES = {"grasp": 30, "synthetic": 24}          # door: test_tracking_door_pybullet.FRAMES
+
+
+def add_eval_args(parser):
+    """Scene / tracker / seeding / visibility argument groups shared by the eval tools."""
+    scene = parser.add_argument_group("scene")
+    scene.add_argument("--scene", default="grasp", choices=list(SCENES))
+    scene.add_argument("--frames", type=int, default=None,
+                       help="frames to run (default: 30 grasp, 40 door, 24 synthetic)")
+
+    trackers = parser.add_argument_group("trackers (every 2D x 3D combination is run)")
+    trackers.add_argument("--provider", nargs="+", default=[config.tracker_provider_default],
+                          help="2D tracker provider(s): template | klt | csrt | cotracker | remote")
+    trackers.add_argument("--tracker3d", nargs="+", default=[config.tracker3d_provider_default],
+                          help="3D lift provider(s): depth_fusion | triangulate | rigid_refine | "
+                               "weighted_triangulate | pose_tracker")
+    trackers.add_argument("--cameras", nargs="+", default=None,
+                          help=f"tracked cameras (default {' '.join(config.tracking_cameras)}; "
+                               f"3-cam: {' '.join(config.tracking_cameras_3)})")
+
+    seeding = parser.add_argument_group("seeding")
+    seeding.add_argument("--seeding", default=config.track_seeding_default,
+                         choices=["affordance", "grid"],
+                         help="affordance: 5 points at one pixel (historical); grid: spread over "
+                              "the sim instance mask, affordance points first")
+    seeding.add_argument("--seed-points", type=int, default=config.track_seed_points,
+                         help="grid seeding size")
+
+    vis = parser.add_argument_group("visibility (occlusion / camera blackouts)")
+    vis.add_argument("--occlusion", type=int, nargs="*", default=[12, 19],
+                     help="[start end) painted disc occlusion window; pass no values to disable")
+    vis.add_argument("--scenario", default="occlusion", choices=list(SCENARIOS),
+                     help="camera visibility schedule: occlusion (disc only) | head_only | "
+                          "wrist_only | handoff (seed head -> seed wrist from head -> head blind)")
+    vis.add_argument("--blind", nargs="*", default=None, metavar="CAM:START:END",
+                     help="extra blackout windows, e.g. wrist:0:10 head:20: (END empty = to end)")
+
+    timing = parser.add_argument_group(
+        "timing (real-time model, tracking/realtime.py; windows above are in motion frames)")
+    timing.add_argument("--camera-fps", type=float, default=config.track_camera_fps,
+                        help="camera rate in sim time; the tracker pays its latency in sim time "
+                             "and each camera frame scores the latest *published* estimate "
+                             "(default %(default)s; 0 = historical lock-step, the world waits)")
+    timing.add_argument("--latency", default=config.track_latency_mode,
+                        help="measured | zero | a config.track_latency_profiles name "
+                             f"({', '.join(sorted(config.track_latency_profiles))})")
+    timing.add_argument("--motion-rate", type=float, default=DEFAULT_MOTION_RATE_HZ,
+                        help="scripted motion frames per sim second (default %(default)s: "
+                             "grasp 10 cm/s, door hinge ~11 deg/s)")
+    return parser
+
+
+def timing_kwargs(args):
+    """``TrackingEvalRunner`` kwargs from the ``timing`` group."""
+    fps = float(getattr(args, "camera_fps", 0.0) or 0.0)
+    if fps <= 0:
+        return {}
+    return {"camera_fps": fps, "latency": getattr(args, "latency", None),
+            "motion_rate_hz": getattr(args, "motion_rate", None)}
+
+
+def build_scene(args):
+    """Boot the scene named by :func:`add_eval_args`. ``(scene, tracker_kwargs_by_provider)``."""
+    occlusion = tuple(args.occlusion) if args.occlusion else None
+    if args.scene == "synthetic":
+        return SyntheticSphereScene(n_frames=args.frames or DEFAULT_FRAMES["synthetic"],
+                                    occlusion=occlusion), {}
+    if args.scene == "door":
+        import test_tracking_door_pybullet as door
+
+        sim, env, robot = door._boot()
+        n_frames = args.frames or door.FRAMES
+    else:
+        from test_tracking_pybullet import _boot
+
+        sim, env, robot = _boot()
+        n_frames = args.frames or DEFAULT_FRAMES["grasp"]
+    common = dict(n_frames=n_frames, occlusion=occlusion, seeding=args.seeding,
+                  n_seed_points=args.seed_points,
+                  blind=blind_schedule(args.scenario, n_frames, args.blind))
+    if args.scene == "door":
+        # The handle is a ~9 px feature: the default 25x25 NCC template is mostly wood grain
+        # (measured in test_tracking_door_pybullet). KLT likewise wants a window that stays on
+        # the lever (win 11 / fb 0.5 px: 0.041/0.084 m vs 0.060/0.342 at the default 21/1.0,
+        # lock-step pose_tracker). CoTracker needs no such tuning.
+        return (DoorSceneDriver(sim, env, robot, **common),
+                {"template": dict(door.TRACKER_KWARGS), "klt": {"win": 11, "fb_max_px": 0.5}})
+    return GraspSceneDriver(sim, env, robot, env.simenv.object_id, **common), {}
 
 
 # -- simulator-free reference scene ---------------------------------------
@@ -613,7 +953,8 @@ class TrackingEvalRunner:
     def __init__(self, scene, tracker_provider=None, tracker3d=None, cameras=None,
                  tracker_kwargs=None, tracker3d_kwargs=None, monitor=None,
                  lost_penalty_m=LOST_PENALTY_M, recovery_threshold_m=RECOVERY_THRESHOLD_M,
-                 keep_frames=True, label=None):
+                 keep_frames=True, label=None, frame_hook=None, camera_fps=None,
+                 latency=None, motion_rate_hz=None):
         self.scene = scene
         self.tracker_provider = tracker_provider or config.tracker_provider_default
         self.tracker3d = tracker3d or getattr(config, "tracker3d_provider_default", "depth_fusion")
@@ -624,9 +965,22 @@ class TrackingEvalRunner:
         self.lost_penalty_m = float(lost_penalty_m)
         self.recovery_threshold_m = float(recovery_threshold_m)
         self.keep_frames = bool(keep_frames)
+        # Real-time mode (camera_fps > 0): the scene moves in sim time at motion_rate_hz
+        # motion frames per second, the camera samples it at camera_fps, the tracker pays
+        # its latency in sim time, and every camera frame scores the *latest published*
+        # estimate against the ground truth *now*. None/0 = the historical lock-step loop
+        # (one motion frame = one tracked frame, the world waits for the tracker).
+        self.camera_fps = float(camera_fps) if camera_fps else 0.0
+        self.latency = latency
+        self.motion_rate_hz = float(motion_rate_hz or DEFAULT_MOTION_RATE_HZ)
+        #: Optional ``fn(frame_idx, views, report, samples)`` observer, called after every
+        #: frame with the *rendered* views and the session's report. Used by the video
+        #: renderer; it never affects scoring and its exceptions are swallowed.
+        self.frame_hook = frame_hook
         self.label = label or f"{self.tracker_provider}+{self.tracker3d}"
         self.samples: Dict[str, List[FrameSample]] = {}
         self.offsets: Dict[str, SeedOffset] = {}
+        self.seed_local: Dict[str, np.ndarray] = {}
         self.session = None
 
     # -- run --------------------------------------------------------------
@@ -658,12 +1012,17 @@ class TrackingEvalRunner:
                                        tracker3d=self.tracker3d,
                                        tracker_kwargs=self.tracker_kwargs,
                                        tracker3d_kwargs=self.tracker3d_kwargs,
-                                       monitor=self.monitor, write_jsonl=False)
+                                       monitor=self.monitor, write_jsonl=False,
+                                       camera_fps=self.camera_fps or None,
+                                       latency=self.latency)
         for obj in self.scene.objects:
             points = np.asarray(self.scene.seed_points(obj), dtype=float).reshape(-1, 3)
             position, quat = self.scene.ground_truth(obj)
             offset = capture_seed_offset(points, position, quat)
             self.offsets[obj] = offset
+            # Every seed point in the body frame: GT_i(t) = p(t) + R(t) @ local_i.
+            R0 = rotation_matrix(quat)
+            self.seed_local[obj] = (points - np.asarray(position, dtype=float)) @ R0
             self.samples[obj] = []
             self.session.add_target(obj, points)
             log.info("[eval] seeded '%s' with %d point(s) | origin=%s seed_offset_local=%s "
@@ -672,6 +1031,8 @@ class TrackingEvalRunner:
                      float(np.linalg.norm(offset.local)), offset.rotating)
 
     def _loop(self):
+        if self.camera_fps > 0:
+            return self._loop_realtime()
         for frame in range(self.scene.n_frames):
             self.scene.advance(frame)
             truth = {obj: self.scene.ground_truth(obj) for obj in self.scene.objects}
@@ -686,17 +1047,94 @@ class TrackingEvalRunner:
             for obj in self.scene.objects:
                 position, quat = truth[obj]
                 self.samples[obj].append(
-                    self._sample(frame, obj, report, position, quat, latency_ms))
+                    self._sample(frame, obj, report, position, quat, latency_ms, views))
+
+            if self.frame_hook is not None:
+                try:
+                    self.frame_hook(frame, views, report,
+                                    {obj: self.samples[obj][-1] for obj in self.scene.objects})
+                except Exception as exc:        # visualisation must never break a run
+                    log.warning("[eval] frame_hook failed at frame %d: %s", frame, exc)
 
             if self.session.aborted:
                 log.warning("[eval] session aborted at frame %d: %s", frame,
                             self.session.abort_reason)
                 break
 
-    def _sample(self, frame, obj, report, position, quat, latency_ms):
+    def _loop_realtime(self):
+        """The world moves on the sim clock; the tracker catches up when it can.
+
+        Every camera frame ``k`` (sim time ``t = k / camera_fps``): move the scene to motion
+        frame ``t * motion_rate_hz``, let the session take the frame if its tracker is free
+        (``tick``), then score whatever estimate is *published* at ``t`` - computed on an
+        older frame - against the ground truth at ``t``. Lag therefore shows up as error, as
+        it would on a real robot. Frames before the first published result are not scored
+        (``n_warmup_frames``); a frame the tracker was too busy to take still scores the
+        previous estimate.
+        """
+        duration = self.scene.n_frames / self.motion_rate_hz
+        n_cam = max(1, int(round(duration * self.camera_fps)))
+        self.n_warmup_frames = 0
+        pipe = self.session.pipeline
+        log.info("[eval] realtime | camera %.1f fps, motion %.1f Hz, %.2f s sim, %d camera "
+                 "frames, %s", self.camera_fps, self.motion_rate_hz, duration, n_cam,
+                 pipe.describe() if pipe is not None else None)
+        for k in range(n_cam):
+            t = k / self.camera_fps
+            mf = k * self.motion_rate_hz / self.camera_fps
+            self.scene.advance(mf)
+            truth = {obj: self.scene.ground_truth(obj) for obj in self.scene.objects}
+            gripper = self.scene.gripper_pose()
+            rendered = {}
+
+            def views_fn(mf=mf, rendered=rendered):
+                rendered["views"] = self.scene.views(mf)
+                return rendered["views"]
+
+            computed = self.session.tick(t, views_fn=views_fn, gripper_pose=gripper,
+                                         trajectory_step=k)
+            published = self.session.last_report
+            if computed is not None:
+                log.debug("[eval] t=%.3f computed frame %s (available %.3f, cost %.1f ms)", t,
+                          computed.camera_frame, computed.available_at,
+                          1000.0 * (computed.latency_s or 0.0))
+            if published is None:
+                self.n_warmup_frames += 1
+                continue
+            pub_views = pipe.published.views if pipe is not None and pipe.published else None
+            age = self.session.estimate_age(t)
+            for obj in self.scene.objects:
+                position, quat = truth[obj]
+                sample = self._sample(k, obj, published, position, quat,
+                                      1000.0 * float(published.latency_s or 0.0), pub_views,
+                                      motion_frame=mf)
+                sample.t, sample.age_s = t, age
+                self.samples[obj].append(sample)
+
+            if self.frame_hook is not None:
+                try:
+                    views = rendered.get("views")
+                    if views is None:           # dropped frame: render for the video only
+                        views = self.scene.views(mf)
+                    self.frame_hook(k, views, published,
+                                    {obj: self.samples[obj][-1] for obj in self.scene.objects})
+                except Exception as exc:        # visualisation must never break a run
+                    log.warning("[eval] frame_hook failed at frame %d: %s", k, exc)
+
+            if self.session.aborted:
+                log.warning("[eval] session aborted at t=%.3f: %s", t, self.session.abort_reason)
+                break
+        if pipe is not None:
+            log.info("[eval] realtime done | %s", pipe.describe()["stats"])
+
+    def _sample(self, frame, obj, report, position, quat, latency_ms, views=None,
+                motion_frame=None):
+        mf = frame if motion_frame is None else motion_frame
         expected = self.offsets[obj].expected(position, quat)
         sample = FrameSample(frame=frame, obj=obj, expected=expected, latency_ms=latency_ms,
-                             occluded=bool(self.scene.is_occluded(frame, obj)))
+                             occluded=bool(self.scene.is_occluded(mf, obj)))
+        sample.blind_cams = [c for c in self.cameras
+                             if hasattr(self.scene, "is_blind") and self.scene.is_blind(c, mf)]
         if report is None:
             sample.dropped = True
             sample.lost = True
@@ -710,7 +1148,49 @@ class TrackingEvalRunner:
                             else np.asarray(state.world_point, dtype=float))
         sample.disagreement = state.disagreement
         sample.lift_meta = dict(state.lift_meta or {})
+        sample.cam_status = {c: t.status for c, t in state.cams.items()}
+        try:
+            self._score_points(sample, obj, state, position, quat, views)
+        except Exception as exc:                    # scoring must never break a run
+            log.debug("[eval] per-point scoring failed at frame %d: %s", frame, exc)
         return sample
+
+    def _score_points(self, sample, obj, state, position, quat, views):
+        local = self.seed_local.get(obj)
+        if local is None:
+            return
+        R = rotation_matrix(quat)
+        gt = local @ R.T + np.asarray(position, dtype=float)
+        pose = getattr(state, "pose", None)
+        if pose is not None:
+            template = np.asarray(self._template(obj), dtype=float).reshape(-1, 3)
+            if len(template) == len(gt):
+                sample.pose_err_m = float(np.mean(np.linalg.norm(pose.apply(template) - gt,
+                                                                 axis=1)))
+        target = self.session.targets.get(obj) if self.session is not None else None
+        if target is None or not views:
+            return
+        errs = []
+        for cam, track in state.cams.items():
+            view = views.get(cam)
+            idx = target.point_index.get(cam)
+            if view is None or track.points_2d is None or not track.seeded:
+                continue
+            pts = np.asarray(track.points_2d, dtype=float).reshape(-1, 2)
+            idx = (np.arange(len(pts)) if idx is None
+                   else np.asarray(idx, dtype=int).reshape(-1))
+            if len(idx) != len(pts):
+                continue
+            world, valid = geometry.points_to_world(view, pts, track.visible)
+            for j in range(len(pts)):
+                if valid[j] and 0 <= idx[j] < len(gt):
+                    errs.append(float(np.linalg.norm(world[j] - gt[idx[j]])))
+        if errs:
+            sample.point_err_m = float(np.median(errs))
+            sample.n_points_scored = len(errs)
+
+    def _template(self, obj):
+        return self.session.targets[obj].seed_points_world
 
     # -- reporting --------------------------------------------------------
     def config_payload(self):
@@ -724,6 +1204,10 @@ class TrackingEvalRunner:
             "lost_penalty_m": self.lost_penalty_m,
             "recovery_threshold_m": self.recovery_threshold_m,
             "seed_offset_frame": "local",
+            "timing": ({"mode": "lockstep"} if self.camera_fps <= 0 else
+                       {"mode": "realtime", "camera_fps": self.camera_fps,
+                        "motion_rate_hz": self.motion_rate_hz,
+                        "latency": str(self.latency or config.track_latency_mode)}),
             **self.scene.describe(),
         }
 
@@ -747,6 +1231,10 @@ class TrackingEvalRunner:
                 "abort_reason": getattr(self.session, "abort_reason", None),
             },
         }
+        pipe = getattr(self.session, "pipeline", None)
+        if pipe is not None:
+            payload["realtime"] = dict(pipe.describe(),
+                                       n_warmup_frames=getattr(self, "n_warmup_frames", 0))
         if failure:
             payload["error"] = failure
         if self.keep_frames:
@@ -783,6 +1271,8 @@ _TABLE_COLUMNS = (
     ("max_jump_m", "jump_m"),
     ("latency_ms_mean", "lat_ms"),
     ("latency_ms_p95", "lat_p95"),
+    ("age_s_median", "age_s"),
+    ("median_pose_err_m", "pose_m"),
     ("peak_vram_mb", "vram_mb"),
 )
 

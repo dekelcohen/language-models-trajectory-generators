@@ -557,7 +557,11 @@ class API:
             "monitor": self._monitor_spec(monitor),
             "track_gripper": bool(track_gripper),
             "provider": self.args.tracker_provider,
+            "tracker3d": getattr(self.args, "tracker3d", None),
+            "cameras": getattr(self.args, "track_cameras", None),
             "interval": self.args.track_interval,
+            "camera_fps": getattr(self.args, "track_camera_fps", None),
+            "latency": getattr(self.args, "track_latency", None),
             "output_dir": self.args.track_log_dir,
             "save_depth": bool(self.args.track_save_depth),
         }

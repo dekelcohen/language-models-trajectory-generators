@@ -9,6 +9,11 @@ Implementations must:
   * be tolerant of points leaving the frame (report them as not visible, do not raise)
   * report a per-point confidence in [0, 1]
   * support re-``init`` at any time (the session re-seeds a camera from the other camera)
+  * keep **one output row per seed point, in seed order**, for the tracker's lifetime. A
+    seed that cannot be tracked (patch off-image, featureless) is kept as a slot that is
+    never visible - it must not be dropped. The 3D lift maps row ``j`` to seed id
+    ``point_index[cam][j]``; dropping a row silently shifts every later correspondence
+    (measured: a wrist re-seed of 18 points came back as 13 and the rigid fit went red).
 """
 
 from abc import ABC, abstractmethod

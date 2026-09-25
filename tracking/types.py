@@ -13,9 +13,11 @@ Conventions (identical to the rest of the repo, see ``sim_adapter/base.py``):
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
+
+from sim_adapter.transforms import quat_from_matrix, rotation_angle
 
 STATUS_OK = "ok"
 STATUS_WARN = "warn"
@@ -51,6 +53,9 @@ class CameraView:
     far: float
     position: Optional[Sequence[float]] = None
     orientation_q: Optional[Sequence[float]] = None
+    #: Optional (H, W) int instance mask from the simulator (PyBullet: object uid in the
+    #: low 24 bits, link index + 1 above). Only used to seed; never needed to track.
+    segmentation: Optional[np.ndarray] = None
 
     @property
     def height(self) -> int:
@@ -79,6 +84,9 @@ class CamTrack:
     health: float = 0.0
     status: str = "unseeded"                    # unseeded|ok|low_confidence|occluded|lost|jumped|rejected
     reseeded_reason: Optional[str] = None
+    #: Frames since the 2D tracker last computed these points (windowed trackers such as
+    #: online CoTracker only refresh every ``step`` frames; 0 = fresh this frame).
+    stale_frames: int = 0
 
     @property
     def n_visible(self) -> int:
@@ -119,6 +127,55 @@ class ReseedEvent:
 
 
 @dataclass
+class ObjectPose:
+    """6-DoF pose of a tracked object **relative to its seed-time configuration**.
+
+    ``R, t`` map the seed-time template points to where they are now:
+    ``current_i = R @ template_i + t``. There is no object model, so this is a *relative*
+    pose - "rotated 40 deg about this axis since tracking started" - not an absolute one.
+
+    ``source`` says where the pose came from, and matters to anything that reasons about it:
+    ``measured`` (fused cameras), ``measured_single_cam``, ``predicted`` (Kalman coast) or
+    ``fk`` (following the gripper while grasped and occluded). Only ``measured*`` poses are
+    evidence about the world; monitors must not treat a prediction as an observation.
+    """
+
+    R: np.ndarray
+    t: np.ndarray
+    source: str = "measured"
+    mode: str = "green"                   # green | yellow | red | black
+    rmse_m: Optional[float] = None
+    n_points: int = 0
+    velocity: Optional[np.ndarray] = None
+    angular_velocity: Optional[np.ndarray] = None
+
+    @property
+    def measured(self) -> bool:
+        return self.source.startswith("measured")
+
+    @property
+    def rotation_deg(self) -> float:
+        return float(np.degrees(rotation_angle(self.R)))
+
+    def apply(self, points):
+        pts = np.asarray(points, dtype=float).reshape(-1, 3)
+        return pts @ np.asarray(self.R).T + np.asarray(self.t)
+
+    def to_dict(self):
+        return {
+            "quat_xyzw": [round(float(v), 5) for v in quat_from_matrix(self.R)],
+            "t": _as_list(self.t),
+            "rotation_deg": round(self.rotation_deg, 3),
+            "source": self.source,
+            "mode": self.mode,
+            "rmse_m": None if self.rmse_m is None else round(float(self.rmse_m), 5),
+            "n_points": int(self.n_points),
+            "velocity": _as_list(self.velocity),
+            "angular_velocity": _as_list(self.angular_velocity),
+        }
+
+
+@dataclass
 class TrackedObjectState:
     """Fused, per-frame state of one tracked target."""
 
@@ -130,6 +187,9 @@ class TrackedObjectState:
     disagreement: Optional[float] = None     # metres between per-camera world points
     reseeds: List[ReseedEvent] = field(default_factory=list)
     lift_meta: dict = field(default_factory=dict)   # which 3D provider produced world_point
+    pose: Optional[ObjectPose] = None               # only providers that fit a pose set this
+    #: ``world_point`` is a prediction (Kalman coast / gripper FK), not a measurement.
+    predicted: bool = False
 
     @property
     def visible_cams(self) -> List[str]:
@@ -141,9 +201,11 @@ class TrackedObjectState:
             "world_point": _as_list(self.world_point),
             "confidence": round(float(self.confidence), 4),
             "lost": bool(self.lost),
+            "predicted": bool(self.predicted),
             "disagreement": None if self.disagreement is None else round(float(self.disagreement), 5),
             "cams": {c: t.to_dict() for c, t in self.cams.items()},
             "reseeds": [r.to_dict() for r in self.reseeds],
+            **({"pose": self.pose.to_dict()} if self.pose is not None else {}),
             **({"lift": self.lift_meta} if self.lift_meta else {}),
         }
 
@@ -204,6 +266,12 @@ class TrackFrameReport:
     gripper: GripperState = field(default_factory=GripperState)
     monitor: MonitorResult = field(default_factory=MonitorResult)
     rgb_paths: Dict[str, str] = field(default_factory=dict)
+    # Real-time pipeline (tracking/realtime.py); None on the legacy keyframe cadence.
+    sim_time: Optional[float] = None       # sim time the frame was exposed
+    camera_frame: Optional[int] = None     # camera-clock index of that frame
+    available_at: Optional[float] = None   # sim time the result became usable
+    latency_s: Optional[float] = None      # available_at - sim_time (queue wait + compute)
+    timing: Dict[str, Any] = field(default_factory=dict)
 
     def get(self, name: str) -> Optional[TrackedObjectState]:
         return self.objects.get(name)
@@ -229,7 +297,7 @@ class TrackFrameReport:
         return True if obj is None else bool(obj.lost)
 
     def to_dict(self):
-        return {
+        out = {
             "frame_idx": self.frame_idx,
             "trajectory_step": self.trajectory_step,
             "objects": {n: o.to_dict() for n, o in self.objects.items()},
@@ -237,3 +305,8 @@ class TrackFrameReport:
             "monitor": self.monitor.to_dict(),
             "rgb_paths": dict(self.rgb_paths),
         }
+        if self.sim_time is not None:
+            out.update({"sim_time": round(self.sim_time, 5), "camera_frame": self.camera_frame,
+                        "available_at": round(self.available_at, 5),
+                        "latency_s": round(self.latency_s, 5), "timing": dict(self.timing)})
+        return out

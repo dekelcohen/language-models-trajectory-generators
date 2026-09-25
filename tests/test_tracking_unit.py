@@ -378,6 +378,24 @@ class TestTrackerProviders(unittest.TestCase):
         result = tracker.update(frame)
         self.assertEqual(result.n_visible, 2)
 
+    def test_untrackable_seeds_keep_their_slot(self):
+        # One output row per seed, in seed order: an edge / featureless seed becomes a
+        # never-visible slot instead of being dropped (which would shift every later
+        # correspondence onto the wrong template point).
+        tracker = get_tracker("template", patch_half=6)
+        frame = synthetic_frame(size=128, square=(30, 30, 8))
+        frame[70:86, 70:86] = 200
+        frame[70:78, 70:78] = 90
+        frame[5:40, 95:125] = 50                            # flat: no NCC template
+        seeds = [[30, 30], [2, 2], [110, 20], [78, 78]]     # [1] off-edge, [2] featureless
+        tracker.init(frame, seeds)
+        self.assertEqual(tracker.n_points, 4)
+        for _ in range(3):
+            result = tracker.update(frame)
+            self.assertEqual(len(result.points), 4)
+            np.testing.assert_array_equal(result.visible, [True, False, False, True])
+        np.testing.assert_allclose(result.points[3], [78, 78], atol=1.0)
+
 
 class TestCSRTProvider(unittest.TestCase):
     def test_csrt_is_either_usable_or_explains_the_missing_package(self):

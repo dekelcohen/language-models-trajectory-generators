@@ -115,8 +115,12 @@ python main.py --task franka_kitchen:kettle --no-plan
 | Arg | Default | Purpose |
 |-----|---------|---------|
 | `--tracking / --no-tracking` | off | Enable per-frame 3D tracking of the gripper + affordance objects during trajectory execution. Off by default: the capture path is untouched when inactive, so goldens cannot drift. |
-| `--tracker-provider` | `template` | 2D point tracker: `template` (base-cv2 NCC, no extra deps) \| `csrt` (needs `opencv-contrib-python`) \| `cotracker` (CoTracker3 online; needs `torch`, downloads the model once into `TORCH_HOME`, defaults to `<repo>/cache/torch`) \| `remote` (stub). |
-| `--track-interval` | `1` | Track every Nth keyframe (`Robot.step_env_and_record`). |
+| `--tracker-provider` | `template` | 2D point tracker: `template` (base-cv2 NCC, no extra deps; the default after the real-time comparison in `docs/plans/3d_tracking.md` §12) \| `klt` (base-cv2 pyramidal Lucas-Kanade with a forward-backward check) \| `csrt` (needs `opencv-contrib-python`) \| `cotracker` (CoTracker3 online; needs `torch` and a CUDA GPU to be real-time, downloads the model once into `TORCH_HOME`, defaults to `<repo>/cache/torch`) \| `remote` (stub). |
+| `--tracker3d` | `depth_fusion` | 3D lift: `depth_fusion` (weighted per-camera average) \| `pose_tracker` (per-point lift + epipolar/depth-jump gates + Kabsch 6-DoF pose + Kalman filter; see `docs/plans/3d_tracking.md` §9) \| `triangulate` \| `weighted_triangulate` \| `rigid_refine`. |
+| `--track-cameras` | `head wrist` | Cameras to track in. Two cameras is the default and is enough for the grasp tasks; add the optional robot-base-mounted third camera with `--track-cameras head wrist shoulder`. It joins through the pose once 25 % of its projected points are depth-verified (`config.track_pose_join_min_frac`). |
+| `--track-camera-fps` | `30` | Simulated camera rate in **sim time**. The tracker samples the world on this clock on every physics step, whether or not the robot moves, and pays its compute as sim-time latency: a result is only visible to monitors (and can only abort) at `frame_time + latency` (`tracking/realtime.py`). Rendering costs ~43 ms per 256×256 camera frame in PyBullet, so 30 fps × 2 cameras ≈ 2.6 s wall per sim second. `0` = legacy cadence (motion-gated ≤5 fps keyframes). |
+| `--track-latency` | `measured` | Sim-time latency per tracked frame: `measured` (this machine's tracking wall time, rendering excluded), `zero` (lock-step: the world waits), or a profile in `config.track_latency_profiles` (e.g. `a1000_fp16`: CPU work measured, each CoTracker window flush charged at the A1000's 0.223 s). |
+| `--track-interval` | `1` | Legacy cadence only (`--track-camera-fps 0`): track every Nth keyframe (`Robot.step_env_and_record`). |
 | `--track-save-depth` | off | Also dump the metric depth array behind every decision (`<log-dir>/depth/<cam>_<frame>.npy`). |
 | `--track-log-dir` | `./outputs/tracking` | Where `track.jsonl` + `summary.json` are written. |
 
@@ -186,7 +190,7 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `segmentation_adapter.py` | Provider-agnostic 2D segmentation dispatch. |
 | `utils.py` | Point-cloud → bounding cube, 3D↔2D projection, intrinsics/extrinsics. |
 | `tracking/` | Rollout tracking (§13): `session.py` (orchestrator), `geometry.py` (project/deproject, occlusion test, fusion), `health.py` (per-camera health + re-seed policy), `monitor.py` (monitor contract), `monitors.py` (built-in invariants), `report.py` (JSONL + summary), `types.py`. |
-| `providers/trackers/` | Pluggable 2D point trackers: `base.py` (`PointTracker` ABC), `template_tracker.py` (default), `csrt_tracker.py`, `cotracker_tracker.py` (CoTracker3 online, sliding-window, reports `meta["stale_frames"]`), `remote_tracker.py` (stub), `factory.py`. |
+| `providers/trackers/` | Pluggable 2D point trackers: `base.py` (`PointTracker` ABC), `template_tracker.py` (default), `klt_tracker.py` (Lucas-Kanade + forward-backward check), `csrt_tracker.py`, `cotracker_tracker.py` (CoTracker3 online, sliding-window, reports `meta["stale_frames"]`), `remote_tracker.py` (stub), `factory.py`. |
 
 ---
 
@@ -1345,10 +1349,13 @@ body surviving the feedback path.
 attached to the gripper. A dropped pickup or a lost door handle was only discovered
 post-hoc by the VLM reviewer, after the whole subtask had run.
 
-**What it does.** With `--tracking`, every keyframe of every trajectory produces per-camera
-2D tracks, a fused 3D world point per object, the gripper's FK pose, and a monitor verdict.
-A monitor that returns `abort` stops the trajectory mid-flight and fails the subtask with a
-reason, feeding the existing retry path.
+**What it does.** With `--tracking`, a simulated camera clock (`--track-camera-fps`, 30 by
+default, in sim time) drives per-camera 2D tracks, a fused 3D world point per object, the
+gripper's FK pose, and a monitor verdict - on every camera frame, whether or not the robot is
+moving. The tracker's compute is charged as sim-time latency, so a result (and an abort) only
+takes effect when a real robot would have it (`tracking/realtime.py`). A monitor that returns
+`abort` stops the trajectory mid-flight and fails the subtask with a reason, feeding the
+existing retry path.
 
 ### Flow
 
@@ -1358,8 +1365,8 @@ subtask LLM:  detect_object(...)  →  track_objects(targets=[...], monitor=...)
                                           ▼
                           env.py  →  tracking.session.TrackingSession
                                           ▲
-Robot.step_env_and_record ──per keyframe──┘   (head + wrist capture_camera_view)
-      │
+Robot.step_env_and_record ──every physics step: session.tick(sim_time)──┘
+      │                      (camera clock -> capture_camera_view -> compute -> publish at t+latency)
       ├─ providers/trackers/*      2D points per camera
       ├─ tracking/geometry.py      deproject + weighted fuse → world point
       ├─ tracking/health.py        health score → cross-camera re-seed decision
@@ -1486,9 +1493,18 @@ visibility falls below threshold, or that leave the image, come back `visible=Fa
 score `0`. The first run downloads the checkpoint (~97 MB) into `TORCH_HOME` (default
 `<repo>/cache/torch`, git-ignored); afterwards set `TORCH_HOME` to that directory and the
 provider runs offline. Without network *and* without a cache the factory raises an
-actionable error naming `TORCH_HOME` instead of a hub traceback. Measured on an RTX A1000
-(4 GB, torch 2.0.1+cu117, 320×240 input): ~2 s per window flush (~6 s for the first, cuDNN
-warm-up), ~0 ms on the frames in between, sub-pixel accuracy on a fresh flush.
+actionable error naming `TORCH_HOME` instead of a hub traceback. The forward pass runs under
+fp16 autocast on CUDA (`config.tracker_cotracker_fp16`). Measured on an RTX A1000 (4 GB,
+torch 2.0.1+cu117, 320×240 input): 0.223 s per window flush in fp16 (0.376 s fp32; ~6 s for
+the first, cuDNN warm-up - not charged as latency), ~0 ms on the frames in between, sub-pixel
+accuracy on a fresh flush. In the real-time model it is a *queueing* tracker (it must see
+every frame): with 2 cameras at 30 fps the A1000 cannot keep up (results age to 1.5-2 s);
+at 10 fps it keeps up (age ≤ 0.6 s). See `docs/plans/3d_tracking.md` §12.
+
+**`klt`** (`providers/trackers/klt_tracker.py`) — pyramidal Lucas-Kanade
+(`cv2.calcOpticalFlowPyrLK`, `track_klt_win` 21, `track_klt_levels` 3) with a forward-backward
+check (`track_klt_fb_max_px` 1.0): a point is visible only if tracking it back returns within
+1 px. CPU, ~10 ms for 2 cameras × 20 points. Optional; `template` stays the default (§12).
 
 **IPC** — opcodes `START_TRACKING=23`, `STOP_TRACKING=24`, `GET_TRACKING_REPORT=25`.
 Because the agent and the simulator are separate processes, a monitor cannot cross the pipe
@@ -1505,7 +1521,9 @@ built-in name + kwargs, and `tracking/monitor.py` compiles it on the far side.
 `track_depth_min/max`, `track_point_conf_min`, `track_reseed_conf`, `track_health_min`,
 `track_reseed_patience`, `track_reseed_cooldown`, `track_disagree_m`, `track_max_jump_m`,
 `track_lost_patience`, `track_attach_max_dist`, `track_attach_grace_frames`,
-`tracker_cotracker_variant/_device/_torch_home/_vis_threshold/_stale_decay`.
+`tracker_cotracker_variant/_device/_torch_home/_vis_threshold/_stale_decay/_fp16`,
+`track_camera_fps`, `track_latency_mode`, `track_latency_profiles`, `track_period_s`,
+`track_buffering_providers`, `track_klt_win/_levels/_fb_max_px`, `track_kf_ref_hz`.
 
 </details>
 
@@ -1519,6 +1537,11 @@ built-in name + kwargs, and `tracking/monitor.py` compiles it on the far side.
   decay, visibility → lost, points leaving the frame, re-seed (online state restarts, weights
   are kept) and the `TORCH_HOME` error message. Skipped wholesale without torch. The real
   checkpoint test runs only with `COTRACKER_REAL_TEST=1` (~50 s on CPU, ~10 s on `cuda:0`).
+- `tests/test_realtime.py` (23, free) — the real-time model: latency modes/profiles, the
+  camera clock, drop vs queue policy, deferred publish and abort in the session, Kalman time
+  units, and the harness's real-time loop (lock-step equivalence at camera fps = motion rate).
+- `tests/test_klt_tracker.py` (5, free) — the KLT provider: translation accuracy, one row per
+  seed with dead slots, forward-backward rejection.
 - `tests/test_tracking_pybullet.py` (5) and `tests/test_tracking_genesis.py` (5) — **no LLM,
   no agent, no IPC**: a real `TrackingSession` against real head/wrist renders, with the
   object moved directly through `SimAdapter.set_base_pose` so every frame has an exact
@@ -1552,7 +1575,8 @@ has no `shapely` and nothing on the tracking path needs it.
   flag is read from `sys.argv` before `config` is imported so every module — including
   ones that do `from config import <path>` at import time — sees the override.
 
-- **Rollout tracking of the gripper + affordance objects** (§13): per-keyframe 2D tracks in
+- **Rollout tracking of the gripper + affordance objects** (§13): 2D tracks on a 30 fps
+  sim-time camera clock with sim-time latency (`tracking/realtime.py`) in
   both cameras, fused into 3D world coordinates, with an LLM-authored (or built-in)
   invariant that can abort a sub-task mid-trajectory instead of waiting for the post-hoc
   reviewer. Runs sim-side to avoid per-frame IPC; monitors therefore cross the pipe as

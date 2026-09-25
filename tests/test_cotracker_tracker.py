@@ -104,6 +104,18 @@ class TestCoTrackerConformance(unittest.TestCase):
         with self.assertRaises(ValueError):
             tracker.init(frame(), [[-5.0, -5.0], [WIDTH + 10.0, 10.0]])
 
+    def test_off_image_seed_keeps_its_slot_and_is_never_visible(self):
+        # Row j must stay seed point j: the 3D lift maps rows to template ids by position.
+        tracker, _ = make_tracker()
+        tracker.init(frame(), [[10.0, 10.0], [WIDTH + 10.0, 10.0], [20.0, 20.0]])
+        self.assertEqual(tracker.n_points, 3)
+        results = [tracker.update(frame(i)) for i in range(1, 2 * STEP + 2)]
+        for result in results:
+            self.assertEqual(len(result.points), 3)
+            self.assertFalse(result.visible[1])
+            self.assertEqual(result.scores[1], 0.0)
+        self.assertTrue(results[-1].visible[0] and results[-1].visible[2])
+
     def test_reset_clears_state(self):
         tracker, _ = make_tracker()
         tracker.init(frame(), [[10.0, 10.0]])

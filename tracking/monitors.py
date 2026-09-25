@@ -42,6 +42,13 @@ def attached_to_gripper(name, max_dist=None, grace_frames=None, status=STATUS_AB
     state = {"armed": False, "bad": 0, "min_dist": None}
 
     def monitor(frame):
+        obj = frame.get(name)
+        if obj is not None and getattr(obj, "predicted", False):
+            # A Kalman coast or gripper-FK follow is not an observation. FK in particular
+            # places the object *in the gripper by construction* - counting it as evidence
+            # of attachment would hide exactly the drop this monitor exists to catch. The
+            # counter is neither reset nor advanced; the next measured frame decides.
+            return {"status": STATUS_OK, "predicted": True}
         dist = frame.distance(name)
         if dist is None:
             # Handled by object_not_lost; missing measurement is not evidence of a drop.
@@ -82,7 +89,13 @@ def object_not_lost(name, patience=None, status=STATUS_RECORD):
         obj = frame.get(name)
         if obj is None:
             return {"status": STATUS_OK}
-        if not obj.lost:
+        pose_mode = getattr(getattr(obj, "pose", None), "mode", None)
+        if getattr(obj, "predicted", False) and pose_mode == "coast":
+            # Between two windowed-tracker flushes: no news, not bad news.
+            return {"status": STATUS_OK}
+        # A red/black Kalman (or FK) prediction keeps a position but nobody *sees* it.
+        unseen = obj.lost or getattr(obj, "predicted", False)
+        if not unseen:
             state["ever_seen"] = True
             state["bad"] = 0
             if obj.disagreement is not None and obj.disagreement > config.track_disagree_m:

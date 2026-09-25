@@ -1,16 +1,18 @@
 # 3D Tracking for Robotic Manipulation
 
-Status of this document: **the current pipeline is implemented but only partially tested;
-LAPA has been brought up and audited but not yet integrated.** Every claim below is marked
-as measured, source-verified, or untested. Nothing here is aspirational unless it sits
-under a "TODO" heading.
+Status of this document: **the `pose_tracker` pipeline (§9) is built and measured on the
+grasp and door scenes, in 2- and 3-camera configurations and under camera-visibility
+scenarios (§11). LAPA was brought up, audited and dropped (§10, D1).** Every claim below is
+marked as measured, source-verified, or untested. Nothing here is aspirational unless it
+sits under a "TODO" heading. §3-§5 and §7.3/§7.4 are kept as the record of the LAPA
+evaluation; they are no longer on the critical path.
 
 ---
 
 ## 0. Status board and how to resume
 
 This section exists so the work can be put down and picked up cold. §7 is the detailed TODO
-list; this is the orientation.
+list, §9 the pipeline as built, §10 the decision log; this is the orientation.
 
 ### 0.1 Where things stand
 
@@ -19,16 +21,23 @@ list; this is the orientation.
 | OpenGL<->OpenCV convention bridge | **done** | `tracking/camera_convert.py`, 24 tests |
 | 3D provider seam + `depth_fusion` + `triangulate` | **done** | `providers/tracker3d/`, 24 tests |
 | `rigid_refine` provider | **done** | `providers/tracker3d/rigid_refine.py`, 24 tests (§2.6) |
-| Ground-truth eval harness + baseline numbers | **done** | `tests/tracking_eval.py`, 25 tests (§2.5) |
-| CoTracker 2D provider | **done**, with a caveat | `providers/trackers/cotracker_tracker.py` (§7.2.1) |
+| **`pose_tracker` provider** (epipolar + jump gates, Kabsch, Kalman, green/yellow/red/black) | **done** | `providers/tracker3d/pose_tracker.py`, `tests/test_pose_tracker.py` (§9) |
+| Rigid-body Kalman filter | **done** | `tracking/kalman.py` (§9.6) |
+| Mask-grid seeding (affordance points first) | **done in the eval harness**; not yet wired into real rollouts | `tracking/seeding.py`, `tests/test_seeding.py` (§9.1) |
+| Robot-mounted 3rd `shoulder` camera | **done, optional** (default is 2 cameras; opt in with `--track-cameras head wrist shoulder`) | `tests/test_shoulder_camera_pybullet.py` (§10, D6, D19) |
+| Ground-truth eval harness + per-point / pose GT | **done** | `tests/tracking_eval.py` (§2.5, §11) |
+| Door scene tracking + baseline | **done** | `tests/test_tracking_door_pybullet.py`, `DoorSceneDriver` (§11.3) |
+| Camera-visibility scenarios (head-only, wrist-only, hand-over) | **done** | `tests/test_tracking_scenarios_pybullet.py` (§11.2) |
+| One-row-per-seed 2D tracker contract | **done** (bug fix) | `providers/trackers/base.py` (§10, D17) |
+| CoTracker 2D provider | **done, optional**; fp16 autocast on CUDA; 8-frame window is configurable (step 4 feasible). Not real-time on the A1000 with 2 cameras at 30 fps (§12) | `providers/trackers/cotracker_tracker.py` (§7.2.1, §12) |
+| **Real-time model** (sim-time camera clock + virtual latency, drop/queue policy) | **done** - rollouts (`--track-camera-fps 30`, `--track-latency measured` by default) and the eval CLI | `tracking/realtime.py`, `tests/test_realtime.py` (§12) |
+| KLT (Lucas-Kanade) 2D provider | **done, optional** (`--tracker-provider klt`); lost to `template` at 30 fps (§12) | `providers/trackers/klt_tracker.py`, `tests/test_klt_tracker.py` |
+| Kalman filter in sim-time units | **done** (bug fix found by the real-time runs, D22) | `tracking/kalman.py`, `track_kf_ref_hz` |
 | `tracking/motion.py` | **done** | 62 tests (§6) |
-| LAPA env, checkpoint, VRAM/latency | **done** | §3 |
-| LAPA constraint audit | **done** | §5 - found two disabling bugs |
-| LAPA DLT weight fix | **patch prepared, deliberately not applied** | §5.2.2, §7.4 item 1 |
-| LAPA adapter (`lapa_tracker3d.py`) | **not started** | §7.3 |
-| Door affordance scene | in flight | §7.1 |
-| Motion gates/outputs/monitors | in flight | §7.4 |
-| Remote WebSocket server | **not started** | §7.5 |
+| LAPA | **dropped** (kept selectable as `--tracker3d lapa`, not maintained) | §3-§5, §10 D1 |
+| Tracking video renderer | **done** | `tests/tools/render_tracking_video.py` (§0.4) |
+| Door recovery after a long occlusion | **open** | §11.3 |
+| Remote WebSocket server | **not started**, and no longer required (CoTracker runs locally) | §7.5 |
 
 ### 0.2 Environment (the part that is easy to lose)
 
@@ -69,17 +78,120 @@ $py = "C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_traj\python.exe"
 # the tracking-related suites (this is the set that must stay green)
 & $py -m pytest tests\test_tracking_pybullet.py tests\test_tracking_unit.py `
   tests\test_tracker3d.py tests\test_camera_convert.py tests\test_motion_unit.py `
-  tests\test_rigid_refine.py tests\test_tracking_eval.py -q
-# regenerate the eval table in section 2.5
-& $py tests\tools\run_tracking_eval.py --tracker3d depth_fusion triangulate
+  tests\test_rigid_refine.py tests\test_tracking_eval.py tests\test_tracking_door_pybullet.py `
+  tests\test_shoulder_camera_pybullet.py tests\test_pose_tracker.py tests\test_seeding.py `
+  tests\test_transforms.py tests\test_cotracker_tracker.py `
+  tests\test_tracking_scenarios_pybullet.py tests\test_realtime.py tests\test_klt_tracker.py -q
+# eval tables (§2.5, §11, §12). Every 2D x 3D combination given is run; JSON -> outputs\tracking_eval\
+# The CLI default is REAL TIME (30 fps camera, measured latency, motion 10 Hz; §12). Add
+# --camera-fps 0 for the historical lock-step numbers of §11.
+& $py tests\tools\run_tracking_eval.py --tracker3d depth_fusion pose_tracker --seeding grid
+& $py tests\tools\run_tracking_eval.py --scene door --seeding grid --tracker3d pose_tracker
+& $py tests\tools\run_tracking_eval.py --scenario handoff --seeding grid --tracker3d pose_tracker
+& $py tests\tools\run_tracking_eval.py --cameras head wrist shoulder --seeding grid --tracker3d pose_tracker
+& $py tests\tools\run_tracking_eval.py --provider template klt --seeding grid --tracker3d pose_tracker --camera-fps 0
+# annotated MP4 (per-camera tiles, tracked points, estimate vs GT) - legend in §0.5
+& $py tests\tools\render_tracking_video.py --scene door --seeding grid --tracker3d pose_tracker
 ```
 
-**Known-good counts:** the suites above pass (178+ passed, 1 skipped, growing as work lands).
+Both tools share one CLI (`tracking_eval.add_eval_args`), grouped as *scene*, *trackers*,
+*seeding*, *visibility* (`--occlusion`, `--scenario`, `--blind cam:start:end`), *timing*
+(`--camera-fps`, `--latency`, `--motion-rate`) and *output*. Occlusion/blind windows are in
+motion frames (10 per sim second by default) in both modes.
+CoTracker runs need the GPU env and `$env:TORCH_HOME="$PWD\cache\torch"`.
+
+**Known-good counts:** the suites above give **315 passed, 2 skipped** (measured on this
+branch after §10 D21-D24).
 
 **Pre-existing failures that are NOT caused by this work:** the *full* `tests/` suite has
 **25 failures + 7 errors** (metaworld server, side-approach reachability). This was verified
 by `git stash`-ing the tracking changes and re-running: identical counts before and after.
 Do not try to fix them as part of this effort.
+
+**Test-order pitfall:** the door env rewrites the robot pose (`config.base_start_*_franka`,
+`config.joint_start_positions_franka`) and the head camera (`config.camera_*`,
+`config.head_camera_*`) process-wide. The door test class restores them in
+`tearDownClass`; any new door-booting test class must do the same, or a grasp-scene test that
+runs later in the same pytest process boots with the door robot/camera (the wrist then sees
+nothing: `0/20 predicted points depth-verified`).
+
+### 0.5 Visualize / debug
+
+**Render a video** (same harness and CLI as `run_tracking_eval.py`, so the video and the JSON
+next to it come from one execution):
+
+```powershell
+& $py tests\tools\render_tracking_video.py --scenario handoff --seeding grid --tracker3d pose_tracker
+& $py tests\tools\render_tracking_video.py --scene door --cameras head wrist shoulder --seeding grid --tracker3d pose_tracker --tag 3cam
+# options: --fps N (default: the camera fps in real-time runs = real speed; 4 in lock-step)
+#          --scale 2 (pixel upscale)  --png (also per-frame PNGs)  --tag X  --out DIR
+#          --camera-fps 0 (lock-step)  --latency a1000_fp16  (see §12)
+```
+
+Output: `outputs/tracking_video/{scene}_{2D}_{3D}[_{tag}].mp4` + `.json` (+ `_png/`).
+Drawing code: `tracking/visualize.py` (`draw_camera_overlay`, `compose_frame`).
+
+**Legend** - one tile per camera, side by side, under a text banner:
+
+| Mark | Meaning |
+|---|---|
+| small **filled green dot** | a tracked 2D point (a seed) the 2D tracker reports **visible** this frame |
+| small **hollow orange ring** | a tracked point reported **not visible** (occluded, off-image, or a dead seed slot, D17) |
+| **cyan cross** (thick) | the **estimate**: the fused 3D object point (`state.world_point`) reprojected into this camera |
+| **red ring** (larger, thin) | **ground truth**: body pose + the seed centroid's body-frame offset, reprojected |
+| **magenta line** cross -> ring | the 3D error as seen in this view; its pixel length is the reprojected error |
+| **large dark disc** (not an overlay) | the synthetic occluder painted into the head camera's RGB (value 30) *and* depth (25 cm in front of the object), frames `--occlusion` [12, 19). It stands in for the arm crossing the line of sight (`tracking_scenario.paint_occluder`) |
+| **amber tile border + "OCCLUDED"** | occlusion window, on a camera whose track status is occluded/lost/rejected/low_confidence |
+| **fully black tile** | camera blinded by the `--scenario` / `--blind` schedule (black RGB, invalid depth) |
+
+Text on each tile: `<cam>: <status> conf=.. health=.. vis=<n visible>` and, when it happened,
+`reseed: <reason>`. Status values: `ok`, `unseeded` (never seeded - waiting to join via the
+pose, §9 step 0.5), `rejected` (its lift failed a gate this frame), `lost`, `occluded`,
+`low_confidence`.
+
+Banner: `frame NNN  tracking|LOST  err=<mm>  disagree=<mm between cameras>  OCCLUSION`, then
+`lift: ...` (the first 6 keys of the 3D provider's meta, e.g. `provider`, `dt`, `jump_gate_m`,
+`rejected_jump`, `epipolar_worst_px`, `n_fused`, `mode`), then `<scene> | 2D=.. 3D=..`, and in
+real-time runs `t=<sim s>  estimate from frame <k>  age=<ms>`: the markers are the latest
+*published* estimate (computed on camera frame k) drawn over the *current* frame, so any lag
+is visible as the cross trailing the red ring.
+The banner turns red when the object is lost.
+
+**How to read it:**
+
+* short or no magenta line = good. Green dots on the object while the cross slides away from
+  the red ring = the 3D stage is **coasting** on the Kalman prediction (red/black mode), not
+  measuring - check `mode` in the banner.
+* green dots sliding off the object while still green = 2D drift the gates did not catch
+  (the door handle, §11.3).
+* orange rings clustering = the tracker itself gave up on those points; if the whole camera
+  goes `rejected`, the depth-jump or epipolar gate threw its lift out.
+
+**Per-frame numbers without video** - every eval/video JSON has `frames[obj][i]` with
+`error_m` (centroid), `point_err_m`, `pose_err_m`, `cam_status`, `blind_cams`, `occluded`
+and `lift` (the full provider meta: `mode`, `pose_reseed` per camera with its reason such as
+`skip: 5/20 predicted points depth-verified`, `rejected_epipolar`, `rejected_jump`,
+`unmeasured_frames`). Quick dump:
+
+```powershell
+@'
+import json; d = json.load(open(r"outputs\tracking_eval\door_template_pose_tracker_scn5_3cam.json"))
+for i, f in enumerate(next(iter(d["frames"].values()))):
+    print(i, f["error_m"], f["pose_err_m"], f["lift"].get("mode"), f["cam_status"], f["lift"].get("pose_reseed"))
+'@ | & $py -
+```
+
+**Logs:** rollouts write `track.jsonl` + `summary.json` under `--track-log-dir`; add
+`--track-save-depth` to dump the depth array behind each decision. Eval logs use the
+`[eval]` / `[video]` prefixes; `pose_tracker` decisions are logged at DEBUG.
+
+**Debugging pitfalls seen so far:**
+
+* harness runs used to differ run-to-run (arm sag); fixed by D20 - if numbers drift between
+  identical runs again, check `restore_robot()` is still called in `reset()`;
+* the centroid error alone can look fine with wrong correspondences - always check
+  `point_err_m` / `pose_err_m` too (D15, D17);
+* formatting floats with `!s:.6` truncates scientific notation (`4.8393e-05` prints as `4.8393`).
 
 ---
 
@@ -172,9 +284,12 @@ providers/trackers/     PointTracker        (per camera, 2D)
 providers/tracker3d/    MultiCamTracker3D   (all views -> one world point)
                           depth_fusion   today's weighted average, the default
                           triangulate    multi-view DLT, no depth buffer
+                          weighted_triangulate  DLT with per-view confidence weights
                           rigid_refine   wraps any of the above, adds a rigid-body
                                          constraint (section 2.6)
-                          lapa           LAPA's learned view weighting  (TODO)
+                          pose_tracker   per-point lift + gates + Kabsch 6-DoF pose +
+                                         Kalman filter + occlusion hierarchy (section 9)
+                          lapa           evaluated and dropped (section 10, D1)
 ```
 
 `depth_fusion` reproduces the previous behaviour exactly, so the default path is unchanged
@@ -189,6 +304,14 @@ triangulate different points against each other and produce a confident, smooth,
 wrong 3D estimate. `_TargetTrackers.point_index[cam]` now records the seed index of each
 tracked point (`-1` = centroid fallback, no correspondence), and every triangulator keys on
 it.
+
+**The 2D trackers must not drop rows either** (found later, §10 D17). `template`, `csrt`
+and `cotracker` used to silently skip seeds they could not track (patch crossing the image
+border, featureless patch), so the tracker returned fewer rows than `point_index` had
+entries and `_indices_for` fell back to positional order - the same wrong-correspondence
+failure one layer down. The `PointTracker` contract is now **one output row per seed, in
+seed order**; an untrackable seed is a never-visible slot, and `_install_seed` refuses a
+tracker that breaks the contract.
 
 ---
 
@@ -548,7 +671,14 @@ LAPA's Gaussian is the worst choice even when it *is* applied: once the first so
 dragged off by the outlier, every view's residual is large, so the Gaussian crushes the
 *good* views too and cannot recover. Cauchy decays gently enough to keep them alive.
 
-### 5.2.1 Two cameras cannot detect a bad track at all
+### 5.2.1 Two cameras cannot detect a bad track *from the reprojection residual*
+
+> **Correction (later).** The original title of this section said "at all", which is wrong.
+> The DLT reprojection residual is blind at 2 views, but the **epipolar constraint** is not:
+> a drift *across* the epipolar line is directly measurable (1 dof per point) and is gated
+> in `pose_tracker` (§9.3). Only drift *along* the line is invisible - and the 47 px example
+> below was an along-line drift. The rigid-body fit (§9.5) and the depth jump gate (§9.4)
+> are the other two checks that work at 2 cameras.
 
 Independently of any bug: with exactly 2 views the DLT system is **exactly determined**
 (4 equations, 4 homogeneous unknowns). Any pair of pixels therefore triangulates to a point
@@ -556,9 +686,9 @@ that reprojects almost perfectly. Measured: drifting one view by 47 px moves the
 by >1 cm while the reprojection residual stays at **0.18 px**.
 
 So at 2 cameras the reprojection residual - the signal both LAPA's IRLS *and* its
-`view_weight_head` consume - carries **no information**, and no weighting scheme, learned or
-otherwise, can work. Robustness genuinely begins at 3 views. Both facts are pinned by
-`tests/test_tracker3d.py::TestTriangulateIrls`.
+`view_weight_head` consume - carries **no information**, and no *residual-based* weighting
+scheme, learned or otherwise, can work. Residual-based robustness begins at 3 views. Both
+facts are pinned by `tests/test_tracker3d.py::TestTriangulateIrls`.
 
 ### 5.2.2 `view_weight_head` is saturated - it emits no signal even if you fix the DLT
 
@@ -731,10 +861,23 @@ displacement and `disagreement` gates, sign-aligned EMA smoothing, and the monit
       `tests/test_tracking_eval.py`, including "a perfect tracker scores ~0".
 - [x] Record baseline numbers for `template` + `depth_fusion` on the grasp scene (§2.5:
       24.3 mm median, 52.6 mm p95, 0 % lost, 26.2 mm during occlusion, 5 frames to recover).
-- [ ] Same baseline on the door scene, once the door affordance scene test below exists.
-- [ ] Door affordance scene test: seed from `{"point": [x, y], "label": "door_handle"}`,
-      drive the hinge/latch joints, score against `door_handle_pos`.
-- [ ] Third `side` camera as a config change, to escape the `min_views=2` cliff.
+- [x] Same baseline on the door scene (§11.3).
+- [x] Door affordance scene test: `tests/test_tracking_door_pybullet.py` seeds from
+      `{"point": [x, y], "label": "door_handle"}`, drives the hinge/latch joints and scores
+      against the latch link pose; `DoorSceneDriver` runs it through the eval harness.
+- [x] Third camera: the robot-base-mounted `shoulder` camera (`--track-cameras head wrist
+      shoulder`, §10 D6).
+- [x] `pose_tracker` pipeline (§9), rigid-body Kalman filter, mask-grid seeding.
+- [x] Camera-visibility scenarios + per-point / pose ground truth (§11).
+- [x] One-row-per-seed tracker contract (§10 D17).
+- [ ] **Door recovery after a long occlusion** (§11.3): stays red, drifts ~4 mm/frame.
+- [ ] **Grid seeding in real rollouts**: `track_objects` still seeds from detection world
+      points; needs the segmentation mask plumbed through (and a Genesis segmentation
+      decoder - PyBullet encodes `uid + ((link + 1) << 24)`, Genesis is not handled).
+- [ ] Back-fill a CoTracker flush's whole window into the Kalman filter (today only the
+      newest frame of a flush is a measurement).
+- [ ] Template tracker scale drift at close range (wrist closing on the object, §11.2):
+      rescale templates by the depth ratio, or prefer CoTracker for the wrist.
 
 ### 7.2 CoTracker
 
@@ -746,6 +889,20 @@ displacement and `disagreement` gates, sign-aligned EMA smoothing, and the monit
 - [x] Validate `cotracker3_online`. **Done, and it found a problem - see §7.2.1.**
 
 ### 7.2.1 The `cotracker3_online` latency granularity problem
+
+> **Update (later measurements, supersedes the latency table below).** The 1.95 s/flush
+> figure was the first, unoptimised fp32 run. Measured since on the same RTX A1000 (4 GB,
+> torch 2.0.1+cu117): **0.223 s per flush in fp16** at the default window 16 / step 8, and
+> step 4 (window 8, a new estimate every 4 frames) was measured to be feasible. The provider
+> now runs fp16 autocast on CUDA (`config.tracker_cotracker_fp16`). The window
+> is a constructor argument (`step=`), not baked into the checkpoint. **Real-time behaviour
+> (2 cameras, one flush per camera per 8 frames) is measured in §12**: it does not keep up at
+> 30 fps on the A1000.
+> `stale_frames` **is now consumed**: `pose_tracker` enters `coast` mode on stale frames
+> (Kalman prediction, no new measurement, no false "jump") - option 3 below, done. The
+> sawtooth error profile described below is real and was observed in the rendered videos.
+> Measured CoTracker accuracy in our scenes is in §11 - on these textureless sim objects it
+> is *worse* than the template tracker, so it stays optional (§10, D2).
 
 This was flagged in the plan as the largest remaining unknown. It is now measured, and the
 result is worse than hoped.
@@ -797,6 +954,8 @@ drop-in replacement for the 244 ms/frame patch tracker at full rate. The eval mu
 CoTracker on wall-clock-comparable terms, not just per-fresh-flush error.
 
 ### 7.3 LAPA adapter
+
+> **Dropped (§10 D1).** Kept for the record; nothing below is planned.
 
 - [ ] `providers/tracker3d/lapa_tracker3d.py` + bridge module to the external clone.
 - [ ] Respect **`max_points = 64`** per call; chunk or subsample larger seed sets.
@@ -911,12 +1070,27 @@ manipulation failures this work exists to fix.
 
 ### 7.6 Docs
 
-- [ ] Update `document.md` §13 (Rollout tracking) once the seam and eval land.
+- [x] `document.md` §13 (Rollout tracking): `pose_tracker`, `--tracker3d`,
+      `--track-cameras`, seeding, the shoulder camera, eval/video tools.
+- [x] This plan: §9 pipeline as built, §10 decision log, §11 scenarios and results.
 - [ ] Changelog entry.
 
 ---
 
 ## 8. Risks and open questions
+
+**Current (after dropping LAPA, §10):**
+
+- **Door tracking** (§11.3): the handle's points slide ~1.7 mm/frame while still green, then
+  re-acquire after the occlusion fails (2 cameras) or locks in a wrong rotation (3 cameras).
+- **Template tracker scale drift at close range** (§11.2): the wrist is rejected from ~frame
+  24 in `handoff`; the KF coasts at ~1 cm. Multi-scale templates or CoTracker would help.
+- **2-camera blind spot** (§5.2.1, §9.3-9.5): drift *along* the epipolar line that stays
+  consistent in depth and rigid is not detected. The optional 3rd camera (D6) closes it.
+- **Rollouts still seed from detection points**; grid seeding is harness-only (§7.1).
+- **CoTracker numbers are pre-D17** and need re-measuring on the GPU env.
+
+**Historical (LAPA era, kept for context):**
 
 - **The headline risk is no longer "does LAPA beat triangulation".** Per §4.1 and §5, LAPA
   *is* unweighted triangulation plus an <=8 mm residual, because its weighting is disabled
@@ -936,3 +1110,275 @@ manipulation failures this work exists to fix.
   Pin `TORCH_HOME`/`HF_HOME`, then set `HF_HUB_OFFLINE=1`.
 - **Determinism**: tracking stays opt-in and the capture path is untouched when inactive, so
   `tests/golden/**` remain valid. GPU tests must `skipUnless` CUDA + clone + checkpoint.
+- **Frame-counted session counters (open, §12.5).** The Kalman filter and pose modes are in
+  sim time (D22), but `track_pose_reseed_cooldown`, the session's re-seed/lost patience and
+  monitor patience still count *frames*, so at 30 fps they fire 3× sooner in seconds than at
+  the 10 Hz they were tuned at. Convert them to seconds if real-time runs show early re-seeds.
+- **Door handle drift (open).** Every local 2D tracker (template, KLT, CoTracker) slides on
+  the thin, textureless, rotating handle; real time does not change this (§11, §12.3).
+
+---
+
+## 9. `pose_tracker`: the point-tracking pipeline as built
+
+`--tracker3d pose_tracker` (`providers/tracker3d/pose_tracker.py`) implements the
+"CoTracker3-style joint-point tracking + SVD pose + Kalman" design step by step. The 2D stage
+is any `PointTracker` (`template` by default, `cotracker` optional); everything below is 3D.
+All thresholds live in `config.py` (`track_pose_*`, `track_kf_*`, `track_seed*`).
+
+| Design step | Implemented as | Status |
+|---|---|---|
+| 0.1 detect + N points + lift (PC_1) | `tracking/seeding.mask_grid_seed`: farthest-point grid over the eroded instance mask, affordance points first, lifted through the seeding camera's depth | **done in the eval harness**; rollouts still seed from detection points (§7.1) |
+| 0.2 project PC_1 into cam 2 | `TrackingSession._reseed_from_pose` projects the template through the current pose | **done** |
+| 0.3 visibility + depth check | `geometry.is_visible` per point (in frustum, depth agrees) | **done** |
+| 0.4 cross-camera appearance check | - | **not done** (the depth check has sufficed in sim; revisit for real cameras) |
+| 0.5 "repeat until cam 2 verifies" | `health.decide_reseeds` retries every frame for an `unseeded` camera, with a cooldown; it joins once >= `join_min_frac` (25 %) of the projected template is depth-verified (D19) | **done**, tested by the `handoff` scenario (§11.2) |
+| 0.6 template + KF init | template = the seed-time world points of **one** camera (no PC_1/PC_2 averaging; see D9); KF initialised on the first fit | **done** |
+| 1.1 2D tracking with visibility | `PointTracker.update` -> points, visible, scores; one row per seed (D17) | **done** |
+| 1.2 epipolar gate | `epipolar_distance`, reject > `track_pose_epipolar_px` (3 px) | **done** (catches across-line drift only, §5.2.1) |
+| 2 per-point lift + depth-jump gate | per-camera deprojection; reject a point > `jump_m` (5 cm) + KF uncertainty (cap 25 cm) from its predicted position | **done** |
+| 3 point fusion by seed index | weighted `confidence / z^2`; on disagreement > `fuse_tol_m` keep the reading nearer the prediction; single-camera points pass through | **done** |
+| 4 SVD pose (Umeyama) | Kabsch **without scale** (`motion.fit_rigid_motion`) vs the template, iterative threshold trimming (`inlier_m`, `inlier_median_k`) | **done** |
+| 5 green | fit RMSE < `green_rmse_m` (1.5 cm), inliers >= 50 % -> KF update, measured pose | **done** |
+| 5 yellow | per-camera fits; the good camera's pose updates the KF and the other cameras are re-seeded from it (`meta['correct_cams']`) | **done** |
+| 5 red | KF prediction (`predicted=True`); re-acquire = re-seed every camera where >= 50 % of the predicted points are depth-verified | **done** |
+| 5 black | red for > `black_after` (8) frames; if the object was grasped the pose follows gripper FK (`source="fk"`) | **done** |
+
+### 9.1 Seeding
+
+`--seeding affordance` (historical) puts 5 points at one pixel cross; the pose is then
+translation-only because rotation is unobservable from a 4 px cluster. `--seeding grid`
+spreads `track_seed_points` (20) over the eroded instance mask by farthest-point sampling,
+starting from the affordance points so they are always tracked. A rotation is fitted only
+when the points span >= `min_rot_extent_m` (2 cm) and are not collinear
+(`meta['rotation_observable']`).
+
+### 9.2 Pose convention
+
+The pose is **relative to seed time**: `current_i = R @ seed_i + t`. There is no object model,
+so "identity" means "as it was when detection ran". Absolute orientation needs an object frame
+from detection/CAD - out of scope.
+
+### 9.3-9.5 Gates and fit
+
+See the table; the reasoning for each threshold is in `config.py` next to it. The three
+checks that work at **2 cameras** are the epipolar gate (across-line drift), the depth jump
+gate (occluder in front of one point) and the rigid fit (a point that does not move with the
+others). None of them sees drift *along* an epipolar line that is also consistent in depth
+and rigidly plausible - that is the residual risk at 2 cameras.
+
+### 9.6 Kalman filter
+
+`tracking/kalman.py`, one filter per object: constant velocity in position and rotation,
+12-D error state `[p, v, theta, omega]` with the rotation folded into a reference matrix after
+every update (no Euler wrap). Mahalanobis gate at chi^2(6) 99.9 %, but `reset_after` (2)
+consecutive agreeing rejections re-initialise it, so a real abrupt change (a dropped object)
+is followed instead of rejected forever. `max_coast` (30) predictions without an update and it
+gives up.
+
+### 9.7 CoTracker staleness
+
+A CoTracker frame without a fresh flush (`meta['stale_frames'] > 0`) puts the provider in
+`coast` mode: KF prediction, no measurement, no jump/re-seed decision on frozen pixels.
+
+### 9.8 What reaches the monitors
+
+Monitors ignore any pose that is `predicted` (red/black/coast) or `source="fk"`. A coasting
+or FK-following pose must never be read as evidence that the object is in the gripper.
+
+---
+
+## 10. Decision log
+
+| # | Decision | Why (evidence) |
+|---|---|---|
+| D1 | **Drop LAPA.** Kept selectable, not maintained. | Its 3D output is unweighted DLT + <=8 mm (§4-§5); the learned view weighting is saturated (+6.91 logit for every view); fixing the DLT alone makes it worse; DINOv2 is 99 % of its compute and needs a GPU. No measured gain over our own triangulation/pose pipeline. |
+| D2 | **CoTracker3 stays an optional 2D provider**, not the default. | Runs on the A1000 4 GB (0.223 s/flush fp16), 3070 8 GB and a Kaggle T4. On our textureless sim objects it is *worse* than the template tracker (grasp 0.048 vs 0.003 m median with `pose_tracker`); expected to matter more on real, textured scenes. Window step is configurable (8 default, 4 measured feasible). |
+| D3 | **Real cameras are RGB-D**, so the 3D stage lifts through depth per point; triangulation is a cross-check, not the primary lift. | Depth gives a 3D point per camera per point, which makes single-camera tracking and the depth jump gate possible. |
+| D4 | **Seeding = mask grid, affordance points first** (§9.1). | 5 points at one pixel make rotation unobservable; 20 spread points make the rigid fit meaningful and survive partial occlusion. |
+| D5 | **Kabsch without scale, not ICP.** | Correspondence is known by seed index, so the closed-form fit is exact and deterministic; the object does not change size, so a free scale would only absorb error. |
+| D6 | **A robot-mounted `shoulder` camera as an *optional* 3rd view.** The default stays 2 cameras (`config.tracking_cameras = ("head", "wrist")`); opt in with `--track-cameras head wrist shoulder` (rollouts) or `--cameras head wrist shoulder` (eval). Nothing in the pipeline assumes 3 cameras - `pose_tracker` runs on any subset down to one (the `head_only`/`wrist_only` scenarios). | A 3rd view makes residual-based checks possible (§5.2.1) and gives a view the arm rarely blocks. Measured after D17/D19 (template): grasp 0.004 / 0.011 -> 0.003 / 0.004 m (2 cameras already enough). Door centroid 0.047 / 0.137 -> 0.029 / 0.122 m, **but the door pose error gets worse** (0.049 -> 0.083 m): the shoulder re-acquires the position after the occlusion with a wrong rotation (§11.3). With CoTracker (pre-D17) mixed. |
+| D7 | **Rotation only with extent >= 2 cm and non-collinear points.** | Below that the rotation is fitted noise and corrupts the pose. |
+| D8 | **Never trust a fit on fewer than `min_points` (3).** | A 1-point fit is trivially perfect (RMSE 0) and was reported green. |
+| D9 | **Template from one camera; no PC_1/PC_2 averaging at t=0.** | The second camera usually cannot verify all points at t=0; waiting would delay tracking. A camera that joins later is seeded *from the template through the pose*, so its points are the same physical points by construction. |
+| D10 | **Threshold trimming inside the fit** (`fit_rigid_motion(trim_m, trim_median_k)`). | One slid point otherwise drags the whole pose; trimming at max(`inlier_m`, k x median residual) removes it. |
+| D11 | **"Degraded yellow" tried and reverted.** | Accepting a weak single-camera fit as yellow made the door worse (2.4 -> 5.6 cm median). |
+| D12 | **Coast mode for stale CoTracker frames** (§9.7). | Frozen pixels are not a measurement; treating them as one caused false jumps and sawtooth error. |
+| D13 | **Monitors ignore predicted and FK poses** (§9.8). | Otherwise a coasting estimate would "prove" the object is still attached after a drop. |
+| D14 | **FK coasting in black when grasped.** | During a grasp the arm occludes everything; the object moves with the gripper, so FK is the best predictor - flagged, never trusted as a measurement. |
+| D15 | **Ground truth = body pose + the body-frame offset of each seed point.** Adds per-point and pose error next to the centroid error (§11.1). | The centroid metric alone rewarded wrong correspondences by luck (D17). |
+| D16 | **Visibility scenarios are blackout schedules** (`tracking_eval.blind_schedule`). | Head-only, wrist-only and hand-over need no new scenes - a blind camera renders black RGB and invalid depth. |
+| D17 | **2D trackers keep one output row per seed** (`PointTracker` contract); stateful 3D providers re-seed through the pose (`_reseed_from_pose`), not through surface snapping. | Found by the hand-over scenario: the wrist was seeded with 18 points, the template tracker silently kept 13, and the lift matched them to template ids 0-12. The rigid fit then sat at 2-5 cm RMSE (red/black). Snapped re-seed points are also not the template's physical points (point error 7 cm). After the fix: hand-over p95 0.10 -> 0.014 m, wrist-only 0.35 -> 0.046 m. |
+| D18 | **Configs centralised in `config.py`; rotation helpers in `sim_adapter/transforms.py`; one tracking CLI** (`tracking.session.add_tracking_args`, used by `main.py` and the Genesis env) with the new `--tracker3d` and `--track-cameras`. | Duplicated defaults had already drifted (the `pose_tracker` read keys that did not exist in `config.py`). |
+| D19 | **A never-seeded camera joins with a lower bar** (`track_pose_join_min_frac` 0.25) than re-acquire (`track_pose_reseed_min_frac` 0.5); both floored at `track_pose_min_points`. Every installed point is still individually depth-verified. | After D17 the shoulder camera never joined on the door (it verifies 5-8 of 20 handle points; 50 % needs 10), so 3-camera door = 2-camera door exactly. With 0.25: 3-camera door centroid 0.043 / 0.133 -> 0.029 / 0.122 m (pose error 0.058 -> 0.083 m, see §11.3); grasp scenarios unchanged. Re-acquire keeps 0.5 because the occluder may still be in front. |
+| D20 | **The eval harness restores the robot joints on `reset()`** (`SimSceneDriver.restore_robot`). | The arm sagged ~0.1 mm per run, so repeated runs in one process gave 3-7 mm medians for the same config; now bit-identical. All §11 numbers are from after this fix. |
+| D21 | **Real-time model: a sim-time camera clock plus virtual latency** (`tracking/realtime.py`), used by rollouts and the eval CLI. A result is published at `frame_time + latency`; per-frame trackers *drop* frames while busy, CoTracker *queues* them. Latency = measured tracking wall time (rendering excluded), `zero`, or a device profile. | The sim used to pause the world while the tracker computed, and rollouts only tracked on motion-gated VLM keyframes (≤5 fps, nothing while the arm is still) - so a ball dropped while holding still was never seen, and any tracker looked instant. Alternatives rejected: a threaded tracker racing a wall-clock sim (non-deterministic, depends on host load) and a fixed track period (hides the device's real cost). |
+| D22 | **The Kalman filter steps in sim time**: `dt = elapsed × track_kf_ref_hz` (10 Hz, the rate its noise was tuned at); coast budget, reset patience and `black_after` are in the same units. | Found by D21: stepping `dt = 1` per frame at 30 fps tripled the modelled acceleration per second; good measurements fell outside the gate and the pose coasted off (grasp wrist-only p95 0.09-0.39 m, hand-over 10 % lost). With time units: 0.009 / 0.020 m, 0 % lost. Lock-step (no clock) is bit-identical. |
+| D23 | **`template` stays the default 2D tracker; `klt` and `cotracker` are options.** CoTracker runs fp16 on CUDA. | At 30 fps real time (§12.3) template beats KLT on every grasp scenario and the 2-camera door (KLT drifts more with 3× more updates; it only wins the 3-camera door). CoTracker on the A1000 cannot keep up with 2 cameras at 30 fps (results age to 1.5-2 s); at 10 fps it keeps up but is less accurate than template here. Its advantages (learned features, joint tracking, re-finding points after occlusion, robustness on real textures) are real but do not show on these flat-shaded sim objects at this GPU budget. |
+| D24 | **The eval library default stays lock-step; the eval CLI default is real time.** | Every existing test and §11 number keeps its meaning (`run_eval` with no timing kwargs = the historical loop, and camera fps = motion rate with zero latency reproduces it exactly, `test_realtime.py`), while ad-hoc runs show what a robot would see. |
+
+---
+
+## 11. Evaluation scenarios, ground truth and results
+
+### 11.1 What is scored
+
+`tests/tracking_eval.py` scores three errors per frame against simulator ground truth:
+
+* **centroid** (`median_l2_m`, `p95_l2_m`) - the fused world point vs the body pose plus
+  the seed centroid's body-frame offset (constant in the *body* frame, so rotation does
+  not fake error);
+* **per point** (`median_point_err_m`) - every tracked point's own depth lift vs its own
+  seed point `GT_i = R_gt @ local_i + p_gt`. This is the one that exposes wrong
+  correspondence;
+* **pose** (`median_pose_err_m`) - the mean distance between the template moved by the
+  estimated pose and the true points.
+
+A lost frame is penalised (1 m), not dropped.
+
+### 11.2 Camera-visibility scenarios (grasp scene, 30 frames, disc occluder on the head for frames 12-19)
+
+`template` 2D, grid seeding (20 points), head + wrist (2 cameras). Measured after D17/D19/D20:
+
+| Scenario | `depth_fusion` median / p95 / lost | `pose_tracker` median / p95 / lost |
+|---|---|---|
+| `occlusion` (both cameras) | 0.033 / 0.057 / 0 % | 0.004 / 0.011 / 0 % |
+| `head_only` | 0.042 / 0.266 / 0 % | **0.003 / 0.006** / 0 % |
+| `wrist_only` | 0.057 / 1.0 / 10 % | **0.011 / 0.044** / 0 % |
+| `handoff` (wrist seeded from the head at frame 10, head blind from 15) | 0.038 / 1.0 / 10 % | **0.009 / 0.013** / 0 % |
+
+Pinned by `tests/test_tracking_scenarios_pybullet.py`. Known limit: at close range the
+wrist's fixed-size NCC templates drift under the scale change (from ~frame 24 in `handoff`),
+the jump gate rejects the wrist, and the pose coasts on the Kalman filter - still ~1 cm, not
+lost. Fix candidates in §7.1.
+
+### 11.3 Grasp and door, provider comparison (median / p95, m)
+
+`grid` seeding, disc occluder on. Rows marked **current** are measured after D17, D19 and D20
+(the code as it is now); the other rows are historical (before D17) and kept for comparison.
+
+| Config | Grasp | Door |
+|---|---|---|
+| template + depth_fusion, **current** | 0.033 / 0.057 | 0.037 / 0.065 |
+| template + pose_tracker, **current** (2 cameras, the default) | 0.004 / 0.011 | 0.047 / 0.137 |
+| template + pose_tracker, 3 cameras, **current** | 0.003 / 0.004 | 0.029 / 0.122 |
+| template + pose_tracker (before D17) | 0.003 / 0.050 | 0.024 / 0.088 |
+| template + pose_tracker, 3 cameras (before D17) | 0.004 / 0.005 | 0.033 / 0.051 |
+| cotracker + depth_fusion (before D17) | - | 0.052 / 0.180 |
+| cotracker + pose_tracker (before D17) | 0.048 / 0.124 | 0.047 / 0.176 |
+| cotracker + pose_tracker, 3 cameras (before D17) | 0.030 / 0.104 | 0.091 / 0.137 |
+
+CoTracker rows have not been re-measured after D17 (needs the GPU env); do that before
+drawing CoTracker conclusions.
+
+**2 vs 3 cameras.** The 3rd camera is optional (D6). On the grasp 2 cameras are already at
+~4 mm median; the 3rd view mainly tightens p95. On the door the 3rd view improves the
+*centroid* (median 0.047 -> 0.029 m) but not the *pose* (0.049 -> 0.083 m): after the
+occlusion it re-acquires with the right position and a wrong rotation (frame 21: centroid
+0.018 m, pose 0.088 m, then growing). More cameras do not fix the door.
+
+**The door already drifts before the occlusion.** In both rigs the error grows ~1.7 mm/frame
+from frame 0 while the mode is still green (0.016 m at frame 9): the fit tolerances
+(`green_rmse_m` 1.5 cm) absorb a steady slide of the template-tracked points on the rotating,
+foreshortening handle. That, not only the re-acquire bar, is the root of the door problem.
+
+**Door after D17.** The centroid median moved 0.024 -> 0.043 m, while the pose error improved
+(0.082 -> 0.058 m): the old code had the right position with the wrong correspondences and a
+wrong rotation. Both versions fail the same way after the occlusion (frame 19 onwards): the
+head's points slid during the occlusion, fits sit at 2-5 cm RMSE (red), and re-acquire needs
+>= 50 % of the predicted points depth-verified, which the thin handle never reaches - so the
+pose coasts and drifts ~4 mm/frame. This is the main open item (§7.1).
+
+---
+
+## 12. Real-time model (D21-D24)
+
+### 12.1 Why
+
+Before D21 the simulator stopped while the tracker ran, and rollouts tracked only on the
+motion-gated VLM keyframes (at most ~5 fps, none while the arm holds still). Every tracker
+therefore looked instant, and an object that fell while the arm was still was never observed.
+A real robot's camera keeps running and the world keeps moving while the tracker computes.
+
+### 12.2 Design (`tracking/realtime.py`)
+
+- **Camera clock in sim time.** A frame is captured every `1 / track_camera_fps` sim seconds
+  (default 30), starting at the first poll. Rollouts poll every physics step
+  (`robot._tick_tracking`); the harness polls at the camera rate while the scene moves at
+  `--motion-rate` (10 Hz, so occlusion/blind windows keep their meaning).
+- **Virtual latency.** A result computed on the frame at time `t` is *published* at
+  `t + latency`; until then the robot, monitors and scores see the previous estimate.
+  `track_latency_mode`: `measured` (the tracker's own wall time on this machine, render time
+  excluded; CoTracker's first model warm-up flush is not charged), `zero`, or a profile name
+  from `track_latency_profiles` (e.g. `a1000_fp16` = 0.223 s per CoTracker flush, `cpu`).
+- **Busy policy.** Per-frame trackers (template, KLT) *drop* frames that arrive while a
+  result is still pending. Window trackers (`track_buffering_providers`, i.e. CoTracker)
+  *queue* them, because every frame is part of the next window.
+- **Deferred commit.** `TrackingSession.tick()` computes immediately but commits (updates
+  `state`, runs the monitor, may abort) at publish time; `drain()` flushes at the end.
+  Reports carry `sim_time`, `camera_frame`, `available_at`, `latency_s` and timing.
+- **Metrics.** The harness scores the latest published estimate against the ground truth at
+  the *current* time: `age_s` (median/p95/max) and `s_to_recover` are new columns. Frames
+  before the first publish are warm-up and are not scored.
+- **Render cost** (not charged as latency, but it is real on a robot's host): ~43 ms per
+  camera frame in PyBullet, so a 30 fps, 2-camera run takes ~2.6 s of wall time per sim second
+  (3 cameras ~3.9 s).
+
+### 12.3 Results
+
+pose_tracker, grid seeding, 2 cameras (door 3-cam where noted), occlusion frames 12-19,
+median / p95 pose error in metres. Real time = 30 fps camera, measured latency.
+
+| Scenario | template lock-step | template 30 fps | KLT lock-step | KLT 30 fps |
+|---|---|---|---|---|
+| grasp occlusion | 0.0042 / 0.0114 | 0.0056 / 0.0088 | 0.0048 / 0.0100 | 0.0152 / 0.0226 |
+| grasp wrist-only | 0.0114 / 0.0436 | 0.0045 / 0.0090 | 0.0008 / 0.0116 | 0.0052 / 0.0186 |
+| grasp hand-over | 0.0087 / 0.0128 | 0.0077 / 0.0200 | 0.0051 / 0.0110 | 0.0155 / 0.0210 |
+| door | 0.047 / 0.137 | 0.0371 / 0.0702 | 0.041 / 0.084 | 0.0620 / 0.1581 |
+| door, 3 cameras | - | 0.0575 / 0.1496 | - | 0.0495 / 0.0894 |
+
+Template/KLT latency is 7-19 ms per frame on the CPU: no frames dropped and the estimate age
+is one camera period (33 ms). KLT (door kwargs: window 11, forward-backward 0.5 px) wins in
+lock-step but drifts more at 30 fps, where it takes 3× more incremental steps.
+
+CoTracker3 on the RTX A1000 (fp16, measured latency, same scenes; door without occlusion):
+
+| Camera fps | grasp | door | estimate age |
+|---|---|---|---|
+| 30 | 0.082 / 0.139 | 0.107 / 0.20 | up to 1.5-2.1 s (queue grows 3-4 s) |
+| 10 | 0.030 / 0.110 | 0.064 / 0.092 | max 0.5-0.6 s |
+| lock-step (no latency) | - | 0.0215 / 0.041 | - |
+
+fp32 was worse (grasp 0.126 at 30 fps). Two cameras cost two flushes per 8 frames
+(~0.45 s of GPU per 0.27 s of video), so the queue never drains at 30 fps.
+
+### 12.4 Findings
+
+- **The Kalman filter was tuned in frames, not seconds** (fixed, D22). At 30 fps the first
+  runs were *worse* than lock-step (hand-over 9 % lost, KLT wrist-only p95 0.37 m) because
+  the motion model tripled its acceleration per second and rejected good measurements. With
+  sim-time units, 10 fps real time is bit-identical to lock-step and 30 fps is as good as or
+  better.
+- **CPU is enough in sim.** Template at 30 fps on the CPU has ~33 ms age, so "the ball is
+  away from the gripper" is visible within a couple of frames, far inside the 0.5 s budget.
+- **Why CoTracker3 at all.** Template and KLT are local appearance matchers: they drift under
+  scale, rotation and foreshortening and cannot re-find a point after it was hidden.
+  CoTracker3 tracks all points jointly with learned features over a temporal window, predicts
+  visibility and re-finds points after occlusion, and is far more robust on real textured
+  scenes. Here the objects are flat-shaded and the A1000 is too small for 2 cameras at
+  30 fps, so the advantage does not show. It stays an option for the real robot, with one of:
+  a stronger GPU, batching both cameras in one forward pass, window 8 / step 4 (needs a
+  state-dict adjustment, not implemented), or a <= 10 fps feed.
+
+### 12.5 Open items
+
+- Session re-seed cooldown / lost patience / monitor patience are still in frames (§8).
+- CoTracker: batch the cameras in one forward pass; window 8 / step 4.
+- Grid seeding is used by the harness but not wired into rollouts.
+- Door handle drift (§8, §11).
+
+### 12.6 Videos
+
+`tests\tools\render_tracking_video.py` plays real-time runs at real speed (playback fps =
+camera fps) with a `t / estimate from frame / age` line (§0.5). Rendered with tags
+`rt30_*` (template, KLT) and `rt10_gpu` / `rt30_gpu` (CoTracker) in `outputs\tracking_video\`.

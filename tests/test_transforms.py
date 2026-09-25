@@ -150,5 +150,32 @@ class TestNumericalEdges(unittest.TestCase):
                 )
 
 
+class TestNumpyRotationHelpers(unittest.TestCase):
+    """3x3 helpers used by tracking (Kalman filter, pose tracker, evaluation GT)."""
+
+    def test_exp_log_roundtrip(self):
+        for w in ([0.3, -0.2, 0.5], [0.0, 0.0, 1e-13], [0.0, math.pi - 1e-8, 0.0]):
+            with self.subTest(w=w):
+                np.testing.assert_allclose(transforms.log_so3(transforms.exp_so3(w)), w,
+                                           atol=1e-6)
+
+    def test_quat_matrix_roundtrip(self):
+        for euler in EULERS:
+            R = transforms.rotation_matrix(transforms.quat_from_euler(euler))
+            with self.subTest(euler=euler):
+                np.testing.assert_allclose(
+                    transforms.rotation_matrix(transforms.quat_from_matrix(R)), R, atol=1e-9)
+
+    def test_rotation_matrix_matches_flat_and_none(self):
+        q = transforms.quat_from_euler([0.4, -0.2, 1.1])
+        np.testing.assert_allclose(transforms.rotation_matrix(q).reshape(-1),
+                                   transforms.matrix_from_quat(q), atol=0)
+        np.testing.assert_array_equal(transforms.rotation_matrix(None), np.eye(3))
+
+    def test_rotation_angle(self):
+        R = transforms.exp_so3([0.0, 0.0, 0.7])
+        self.assertAlmostEqual(transforms.rotation_angle(R), 0.7, places=9)
+
+
 if __name__ == "__main__":
     unittest.main()

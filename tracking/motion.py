@@ -588,13 +588,18 @@ def _kabsch(P0, P1, weights=None):
 
 
 def fit_rigid_motion(P0, P1, weights=None, thresholds=None, max_iter=4, min_points=3,
-                     logger=None):
+                     logger=None, trim_m=None, trim_median_k=2.5):
     """Robust Kabsch/Umeyama fit: ``R, t, rmse`` mapping ``P0`` onto ``P1``.
 
     Iteratively fits, measures per-point residuals, drops the single worst point when it
     exceeds a robust (median + ``sigma`` * 1.4826 * MAD, floored) threshold, and refits.
     One bad correspondence is enough to rotate the whole estimate, and a plain mean
     residual cannot see it - the median/MAD can.
+
+    ``trim_m`` (opt-in) adds threshold trimming on top: every point with residual above
+    ``max(trim_m, trim_median_k * median residual)`` is dropped at once and the fit repeated
+    until the inlier set is stable. One-at-a-time MAD rejection is too slow when several of
+    a 20-point grid drift together (a template sliding, points spilling off an edge).
     """
     th = thresholds or DEFAULT_THRESHOLDS
     A = np.asarray(P0, dtype=float).reshape(-1, 3)
@@ -606,12 +611,12 @@ def fit_rigid_motion(P0, P1, weights=None, thresholds=None, max_iter=4, min_poin
     keep = np.isfinite(A).all(axis=1) & np.isfinite(B).all(axis=1)
     if int(keep.sum()) < min_points:
         return RigidFit(np.eye(3), np.zeros(3), float("inf"), keep, int(keep.sum()))
+    all_w = None if weights is None else np.asarray(weights, dtype=float).reshape(-1)
 
     R, t = np.eye(3), np.zeros(3)
     rmse = float("inf")
     for _ in range(max(1, int(max_iter))):
-        w = None if weights is None else np.asarray(weights, dtype=float).reshape(-1)[keep]
-        R, t = _kabsch(A[keep], B[keep], w)
+        R, t = _kabsch(A[keep], B[keep], None if all_w is None else all_w[keep])
         resid = np.linalg.norm(A[keep] @ R.T + t - B[keep], axis=1)
         rmse = float(np.sqrt(np.mean(resid ** 2)))
         if int(keep.sum()) <= min_points:
@@ -624,6 +629,18 @@ def fit_rigid_motion(P0, P1, weights=None, thresholds=None, max_iter=4, min_poin
             break
         idx = np.nonzero(keep)[0][worst]
         keep[idx] = False
+
+    if trim_m is not None:
+        for _ in range(max(1, int(max_iter))):
+            with np.errstate(invalid="ignore"):
+                resid = np.linalg.norm(A @ R.T + t - B, axis=1)
+                limit = max(float(trim_m), float(trim_median_k) * float(np.median(resid[keep])))
+                new_keep = resid <= limit           # NaN rows compare False
+            if int(new_keep.sum()) < min_points or np.array_equal(new_keep, keep):
+                break
+            keep = new_keep
+            R, t = _kabsch(A[keep], B[keep], None if all_w is None else all_w[keep])
+        rmse = float(np.sqrt(np.mean(np.sum((A[keep] @ R.T + t - B[keep]) ** 2, axis=1))))
 
     n_used = int(keep.sum())
     if n_used < n and logger is not None:

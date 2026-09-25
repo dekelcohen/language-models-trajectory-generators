@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 from debug.dbg_utils import init_loguru_logger
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
 from agent_runner import init_agent, teardown_agent, run_plan, execute_blocks_from_log, query_sim_objects_state
-from providers.trackers.factory import SUPPORTED as tracker_providers
+from tracking import session as tracking_session
 
 print = functools.partial(print, flush=True)
 
@@ -50,70 +50,77 @@ def _pybullet_task_help():
 
 def build_arg_parser():
     parser = argparse.ArgumentParser(description="Main Program.")
-    parser.add_argument("-lm", "--language_model", default="azure-gpt-5", help="select language model (e.g. azure-gpt-5, gpt-4o, or-google/gemini-2.5-flash, copilot-claude-opus-5 via the local `copilot` CLI)")
-    parser.add_argument("--lm-images", action=argparse.BooleanOptionalAction, default=True, help="pass images to LLM prompts (default: True, use --no-lm-images to disable)")
-    parser.add_argument("--max-tokens", type=int, default=60000, help="max completion tokens for LLM responses")
-    parser.add_argument("--reasoning-effort", type=str, default=None, choices=["xhigh", "high", "medium", "low", "minimal", "none"], help="reasoning effort for reasoning models (OpenRouter, Gemini)")
-    parser.add_argument("--llm-cache", dest="llm_cache_enabled", action=argparse.BooleanOptionalAction, default=True, help="cache LLM responses on disk (default: True, use --no-llm-cache to disable)")
-    parser.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")
-    parser.add_argument("-m", "--mode", choices=["default", "debug"], default="default", help="select mode to run")
-    parser.add_argument("-s", "--sim", choices=["pybullet", "genesis", "metaworld"], default="pybullet", help="select simulator backend (genesis runs in its own conda env; see GENESIS_PYTHON / GENESIS_CONDA_ENV)")
-    parser.add_argument("--transport", choices=["auto", "pipe", "ws"], default="auto", help="connection transport override; auto: pipe for pybullet, ws for metaworld")
-    parser.add_argument("--task", type=str, default="sawyer_door_v3",
+
+    lm = parser.add_argument_group("language model")
+    lm.add_argument("-lm", "--language_model", default="azure-gpt-5", help="select language model (e.g. azure-gpt-5, gpt-4o, or-google/gemini-2.5-flash, copilot-claude-opus-5 via the local `copilot` CLI)")
+    lm.add_argument("--lm-images", action=argparse.BooleanOptionalAction, default=True, help="pass images to LLM prompts (default: True, use --no-lm-images to disable)")
+    lm.add_argument("--max-tokens", type=int, default=60000, help="max completion tokens for LLM responses")
+    lm.add_argument("--reasoning-effort", type=str, default=None, choices=["xhigh", "high", "medium", "low", "minimal", "none"], help="reasoning effort for reasoning models (OpenRouter, Gemini)")
+    lm.add_argument("--llm-cache", dest="llm_cache_enabled", action=argparse.BooleanOptionalAction, default=True, help="cache LLM responses on disk (default: True, use --no-llm-cache to disable)")
+    lm.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="gemini-3.8-flash", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
+    lm.add_argument("--review-provider", default="vlm", help="review provider for success verification: 'vlm' (uses main model), 'vlm:<model>' (e.g. vlm:or-openai/gpt-5.5), or 'xmem'")
+
+    simg = parser.add_argument_group("simulator, robot & task")
+    simg.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")
+    simg.add_argument("-s", "--sim", choices=["pybullet", "genesis", "metaworld"], default="pybullet", help="select simulator backend (genesis runs in its own conda env; see GENESIS_PYTHON / GENESIS_CONDA_ENV)")
+    simg.add_argument("--transport", choices=["auto", "pipe", "ws"], default="auto", help="connection transport override; auto: pipe for pybullet, ws for metaworld")
+    simg.add_argument("--task", type=str, default="sawyer_door_v3",
                         help="task/environment name. Metaworld (-s metaworld): the Metaworld env id. "
                              f"PyBullet: a sim-env task id, one of: {_pybullet_task_help()} "
                              "('sawyer_door_v3'/'franka_door' are aliases of 'door'). "
                              "franka_kitchen:* tasks force -r franka. See --list-tasks.")
-    parser.add_argument("--list-tasks", action="store_true",
+    simg.add_argument("--list-tasks", action="store_true",
                         help="print every available PyBullet sim-env task id (--task values) and exit")
-    parser.add_argument("--seg-provider", choices=["langsam", "sam3", "moondream"], default="moondream", help="select segmentation provider (LangSAM, RoboFlow SAM3, or Moondream)")
-    parser.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
-    parser.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
-    parser.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
-    parser.add_argument("--images-root", type=str, default=None, metavar="DIR",
-                        help="root folder for images/videos/trajectory output (default: ./images, or $IMAGES_ROOT). "
-                             "Set this to run 2+ concurrent experiments on the same checkout without overwriting ")
-    parser.add_argument("--review-provider", default="vlm", help="review provider for success verification: 'vlm' (uses main model), 'vlm:<model>' (e.g. vlm:or-openai/gpt-5.5), or 'xmem'")
-    # --- Rollout tracking (tracking/, providers/trackers/) ---
-    parser.add_argument("--tracking", action=argparse.BooleanOptionalAction, default=config.tracking_enabled_default,
-                        help="track the affordance object and gripper in 3D during trajectory execution; exposes the track_objects tool to the model and lets a monitor abort a sub-task mid-rollout (default: off)")
-    parser.add_argument("--tracker-provider", dest="tracker_provider", choices=list(tracker_providers), default=config.tracker_provider_default,
-                        help="2D point tracker used by --tracking: 'template' (default, base opencv), 'csrt' (needs opencv-contrib-python), 'cotracker' (CoTracker3 online, needs torch + a one-off torch.hub download into TORCH_HOME), 'remote' (stub)")
-    parser.add_argument("--track-interval", dest="track_interval", type=int, default=config.track_interval,
-                        help="run the tracker every Nth recorded keyframe (1 = every keyframe)")
-    parser.add_argument("--track-save-depth", dest="track_save_depth", action="store_true",
-                        help="also dump the per-frame metric depth arrays used by tracking (debugging; large)")
-    parser.add_argument("--track-log-dir", dest="track_log_dir", default=config.tracking_output_dir,
-                        help="root folder for tracking JSONL logs and summaries")
-    parser.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="gemini-3.8-flash", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
-    parser.add_argument("--affordance-points", dest="affordance_points", action=argparse.BooleanOptionalAction, default=True, help="ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis (default: True, use --no-affordance-points to disable)")
-    parser.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")
-    parser.add_argument("--ovr-obj",  type=str, default=None, help=(
+    simg.add_argument("-m", "--mode", choices=["default", "debug"], default="default", help="select mode to run")
+    simg.add_argument("--timeout", type=float, default=15.0, help="Timeout seconds; <=0 disables timeouts")
+
+    perc = parser.add_argument_group("perception (segmentation, depth, affordances)")
+    perc.add_argument("--seg-provider", choices=["langsam", "sam3", "moondream"], default="moondream", help="select segmentation provider (LangSAM, RoboFlow SAM3, or Moondream)")
+    perc.add_argument("--depth-format", choices=["norm_1m", "norm_zfar", "raw"], default="norm_1m", help="depth handling for reconstruction")
+    perc.add_argument("--affordance-points", dest="affordance_points", action=argparse.BooleanOptionalAction, default=True, help="ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis (default: True, use --no-affordance-points to disable)")
+    perc.add_argument("--ovr-bbox", type=str, default=None, help="override segmentation bbox as \"x1,y1,x2,y2\" in pixels")
+    perc.add_argument("--ovr-obj",  type=str, default=None, help=(
             "Apply --ovr-bbox only to predictions whose text label (provider 'class') matches this regex. "
             "If omitted, the override applies to all predictions (legacy behavior). "
             "Examples: door.*?(handle|knob|lever) ; (?i)^door\\s+lever$ . "
         ),
     )
-    # Accept both --viz-point (original) and --vis-point (alias)
-    parser.add_argument("--viz-point", "--vis-point", dest="viz_point", type=str, default=None,
-                        help="Add permanent 3D world visualization point(s) as JSON: \"[x,y,z]\" or \"[[x1,y1,z1],[x2,y2,z2],…]\"")
-    parser.add_argument("--prepend-prompt", type=str, default=None, help="Path to a text file whose contents are prepended to the initial command (first MAIN_PROMPT only).",
+
+    plan = parser.add_argument_group("planner & execution")
+    plan.add_argument("--attempts", type=int, default=2, help="total number of task attempts (default: 2 = first attempt + 1 retry after VLM review). Values > 2 allow additional retries with VLM review between each.")
+    plan.add_argument("--max-planner-iter", type=int, default=4, help="max planner LLM iterations (subtask dispatch/replan turns) per user command before the loop stops without a terminal decision (default: 4).")
+    plan.add_argument("--no-plan", dest="no_plan", action="store_true", default=False, help="bypass the LLM planner and run the raw command as a single task.")
+    plan.add_argument("--reset-eef", dest="reset_eef", action="store_true", default=False, help="re-home the arm (RESET_EEF) at the start of every subtask; re-homes the arm only and does NOT reset object/world state. Default off (real-world behavior: arm starts wherever the previous subtask left it).")
+    plan.add_argument("--prepend-prompt", type=str, default=None, help="Path to a text file whose contents are prepended to the initial command (first MAIN_PROMPT only).",
     )
-    parser.add_argument("--attempts", type=int, default=2, help="total number of task attempts (default: 2 = first attempt + 1 retry after VLM review). Values > 2 allow additional retries with VLM review between each.")
-    parser.add_argument("--max-planner-iter", type=int, default=4, help="max planner LLM iterations (subtask dispatch/replan turns) per user command before the loop stops without a terminal decision (default: 4).")
-    parser.add_argument("--no-plan", dest="no_plan", action="store_true", default=False, help="bypass the LLM planner and run the raw command as a single task.")
-    parser.add_argument("--reset-eef", dest="reset_eef", action="store_true", default=False, help="re-home the arm (RESET_EEF) at the start of every subtask; re-homes the arm only and does NOT reset object/world state. Default off (real-world behavior: arm starts wherever the previous subtask left it).")
-    parser.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
-    parser.add_argument("--vis-grasp", action="store_true", help="visualize grasp poses in the 3D sim environment (gripper marker: RGB axes + fingers, visible in images/video). Also tells the sub-task agent to call visualize_grasp_pose(pose) for the pose where it actually grasps/pushes/pulls the object. Markers are cleared between attempts.")
-    parser.add_argument("--vis-box", type=str, default=None, help="Visualize 3D bounding box in sim for objects whose label matches this regex (e.g. 'handle|knob'). Uses cylinder markers visible in camera captures.")
-    parser.add_argument("--save-grasp-inputs", action="store_true", help="save binary segmentation mask (masks[0]) as .npy and projection/view matrices as .npy under images_folder after each detect_object call")
-    parser.add_argument("-c", "--command", action="append", default=None, metavar="TEXT", help="run this command non-interactively instead of prompting (repeatable; commands run in order, then the agent exits)")
-    parser.add_argument("--replay-log", type=str, default=None, help="Path to a log file of conversation with ```python blocks to execute. LLM-less execution")
-    parser.add_argument("--replay-vlm-review", action="store_true", default=False, help="When replaying a log, also execute VLM-review code blocks between attempts (default: False, skip VLM review)")
-    parser.add_argument("--learn-from-trajs", type=str, default=None, help="Path to a text file of past trajectories to learn from. Generates an improved in-context example via LLM and exits.")
-    parser.add_argument("--skills", dest="skills", action=argparse.BooleanOptionalAction, default=True, help="enable lazily-loaded agent skills (SKILL.md files); the planner/subtask prompts list matching skill names+descriptions and the LLM pulls a full skill in with load_skill(...) (default: True, use --no-skills to disable)")
-    parser.add_argument("--skills-dir", dest="skills_dir", type=str, default=None, help="root directory of the SKILL.md tree (default: ./prompts/skills)")
-    parser.add_argument("--list-skills", action="store_true", help="print every discovered skill (name, scope, description) and exit")
+    plan.add_argument("-c", "--command", action="append", default=None, metavar="TEXT", help="run this command non-interactively instead of prompting (repeatable; commands run in order, then the agent exits)")
+
+    tracking_session.add_tracking_args(parser)
+
+    skills = parser.add_argument_group("agent skills")
+    skills.add_argument("--skills", dest="skills", action=argparse.BooleanOptionalAction, default=True, help="enable lazily-loaded agent skills (SKILL.md files); the planner/subtask prompts list matching skill names+descriptions and the LLM pulls a full skill in with load_skill(...) (default: True, use --no-skills to disable)")
+    skills.add_argument("--skills-dir", dest="skills_dir", type=str, default=None, help="root directory of the SKILL.md tree (default: ./prompts/skills)")
+    skills.add_argument("--list-skills", action="store_true", help="print every discovered skill (name, scope, description) and exit")
+
+    vis = parser.add_argument_group("visualization & debugging")
+    # Accept both --viz-point (original) and --vis-point (alias)
+    vis.add_argument("--viz-point", "--vis-point", dest="viz_point", type=str, default=None,
+                        help="Add permanent 3D world visualization point(s) as JSON: \"[x,y,z]\" or \"[[x1,y1,z1],[x2,y2,z2],…]\"")
+    vis.add_argument("--vis-traj", action="store_true", help="visualize trajectory points in the sim environment (3d sphere markers)")
+    vis.add_argument("--vis-grasp", action="store_true", help="visualize grasp poses in the 3D sim environment (gripper marker: RGB axes + fingers, visible in images/video). Also tells the sub-task agent to call visualize_grasp_pose(pose) for the pose where it actually grasps/pushes/pulls the object. Markers are cleared between attempts.")
+    vis.add_argument("--vis-box", type=str, default=None, help="Visualize 3D bounding box in sim for objects whose label matches this regex (e.g. 'handle|knob'). Uses cylinder markers visible in camera captures.")
+    vis.add_argument("--save-grasp-inputs", action="store_true", help="save binary segmentation mask (masks[0]) as .npy and projection/view matrices as .npy under images_folder after each detect_object call")
+
+    replay = parser.add_argument_group("replay & offline learning")
+    replay.add_argument("--replay-log", type=str, default=None, help="Path to a log file of conversation with ```python blocks to execute. LLM-less execution")
+    replay.add_argument("--replay-vlm-review", action="store_true", default=False, help="When replaying a log, also execute VLM-review code blocks between attempts (default: False, skip VLM review)")
+    replay.add_argument("--learn-from-trajs", type=str, default=None, help="Path to a text file of past trajectories to learn from. Generates an improved in-context example via LLM and exits.")
+
+    io = parser.add_argument_group("output folders")
+    io.add_argument("--images-root", type=str, default=None, metavar="DIR",
+                        help="root folder for images/videos/trajectory output (default: ./images, or $IMAGES_ROOT). "
+                             "Set this to run 2+ concurrent experiments on the same checkout without overwriting ")
+    io.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
     return parser
 
 

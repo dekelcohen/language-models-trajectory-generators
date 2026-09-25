@@ -34,6 +34,10 @@ class Lift3DResult:
     per_point_index: Optional[np.ndarray] = None        # (K,) seed index of each row
     weights: Dict[str, float] = field(default_factory=dict)
     meta: dict = field(default_factory=dict)
+    #: 6-DoF relative pose (:class:`tracking.types.ObjectPose`), for providers that fit one.
+    pose: Optional[object] = None
+    #: ``world_point`` is a motion-model prediction, not a measurement.
+    predicted: bool = False
 
     @property
     def ok(self) -> bool:

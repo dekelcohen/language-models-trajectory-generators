@@ -161,7 +161,7 @@ class CoTrackerTracker(PointTracker):
     name = "cotracker"
 
     def __init__(self, device=None, variant=None, torch_home=None, model=None, step=None,
-                 vis_threshold=None, stale_decay=None, warm_start=True, **kwargs):
+                 vis_threshold=None, stale_decay=None, warm_start=True, fp16=None, **kwargs):
         super().__init__(**kwargs)
         self.torch = _import_torch()
         self.vis_threshold = float(vis_threshold if vis_threshold is not None
@@ -178,6 +178,10 @@ class CoTrackerTracker(PointTracker):
             self.device = resolve_device(device) if device is not None else "cpu"
         self.step = int(step if step is not None else getattr(self._model, "step", 8) or 8)
         self.window = 2 * self.step
+        # fp16 autocast on CUDA: 0.223 s vs 0.376 s per flush on an A1000 at unchanged
+        # accuracy (files/bench_cotracker_flush.py). Never on CPU (no speed-up, and slower).
+        want_fp16 = bool(getattr(config, "tracker_cotracker_fp16", True) if fp16 is None else fp16)
+        self.fp16 = want_fp16 and str(self.device).startswith("cuda") and hasattr(self.torch, "autocast")
 
         self._buffer = []
         self._queries = None
@@ -190,6 +194,7 @@ class CoTrackerTracker(PointTracker):
         self._last_points = None
         self._last_visible = None
         self._last_scores = None
+        self._dead = None
         self._obj_id = None
 
     # -- lifecycle ---------------------------------------------------------
@@ -197,10 +202,14 @@ class CoTrackerTracker(PointTracker):
         rgb = self._as_rgb(frame)
         h, w = rgb.shape[:2]
         pts = self._as_points(points)
-        keep = [p for p in pts if 0.0 <= float(p[0]) <= w - 1 and 0.0 <= float(p[1]) <= h - 1]
-        if not keep:
+        inside = ((pts[:, 0] >= 0.0) & (pts[:, 0] <= w - 1)
+                  & (pts[:, 1] >= 0.0) & (pts[:, 1] <= h - 1))
+        if not np.any(inside):
             raise ValueError("CoTrackerTracker.init: no point lies inside the image")
-        seed = np.asarray(keep, dtype=float)
+        # One slot per requested point (output row j is seed point j, see PointTracker):
+        # an off-image seed is queried at the clamped pixel but reported lost forever.
+        seed = np.clip(pts, 0.0, [w - 1, h - 1]).astype(float)
+        self._dead = ~inside
 
         reseed = self.initialised
         self._reset_stream()
@@ -214,8 +223,8 @@ class CoTrackerTracker(PointTracker):
         self._queries = self.torch.as_tensor(queries, dtype=self.torch.float32,
                                              device=self.device)[None]
         self._last_points = np.array(seed, dtype=float, copy=True)
-        self._last_visible = np.ones(len(seed), dtype=bool)
-        self._last_scores = np.ones(len(seed), dtype=float)
+        self._last_visible = ~self._dead
+        self._last_scores = (~self._dead).astype(float)
 
         # With warm_start the sliding window is pre-filled with the seed frame, so the
         # next update already has a full window and returns a fresh prediction.
@@ -281,10 +290,15 @@ class CoTrackerTracker(PointTracker):
     # -- internals ---------------------------------------------------------
     def _flush(self):
         """Run the model on the newest ``window`` frames. Returns True on a prediction."""
+        import contextlib
+
         chunk = self._chunk_tensor()
         no_grad = getattr(self.torch, "no_grad", None)
-        context = no_grad() if callable(no_grad) else _NullContext()
-        with context:
+        with contextlib.ExitStack() as stack:
+            if callable(no_grad):
+                stack.enter_context(no_grad())
+            if self.fp16:
+                stack.enter_context(self.torch.autocast("cuda", dtype=self.torch.float16))
             if not self._started:
                 self._model(video_chunk=chunk, is_first_step=True, queries=self._queries,
                             grid_size=0)
@@ -333,6 +347,8 @@ class CoTrackerTracker(PointTracker):
                   & (points[:, 1] >= 0) & (points[:, 1] <= h - 1))
         # A point that left the frame is lost, whatever the model says about visibility.
         visible = visible & inside
+        if self._dead is not None and len(self._dead) == n:
+            visible = visible & ~self._dead
         scores = np.where(visible, scores, 0.0)
         points = np.where(np.isfinite(points), points,
                           self._last_points if self._last_points is not None else np.nan)

@@ -664,7 +664,9 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
 
                 # payload: {"targets": [{"name":..., "world_points": [[x,y,z], ...]}],
                 #           "monitor": <source text | {"builtin":...} | None>,
-                #           "track_gripper": bool, "provider": str|None, "interval": int|None}
+                #           "track_gripper": bool, "provider": str|None, "interval": int|None,
+                #           "tracker3d": str|None, "cameras": [str]|None,
+                #           "camera_fps": float|None (0 = legacy keyframes), "latency": str|None}
                 spec = env_connection_received[1] or {}
                 try:
                     from tracking.session import TrackingSession
@@ -674,7 +676,9 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                         old.stop()
                     session = TrackingSession(
                         robot=robot, env=env,
+                        cameras=spec.get("cameras") or getattr(args, "track_cameras", None),
                         provider=spec.get("provider") or args.tracker_provider,
+                        tracker3d=spec.get("tracker3d") or getattr(args, "tracker3d", None),
                         monitor=spec.get("monitor"),
                         track_gripper=bool(spec.get("track_gripper", True)),
                         interval=spec.get("interval", args.track_interval),
@@ -682,6 +686,9 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                         write_jsonl=bool(spec.get("write_jsonl", True)),
                         output_dir=spec.get("output_dir") or args.track_log_dir,
                         save_depth=bool(spec.get("save_depth", args.track_save_depth)),
+                        camera_fps=(spec["camera_fps"] if spec.get("camera_fps") is not None
+                                    else getattr(args, "track_camera_fps", config.track_camera_fps)),
+                        latency=spec.get("latency") or getattr(args, "track_latency", None),
                     )
                     session.add_targets(spec.get("targets"))
                     robot.tracking_session = session

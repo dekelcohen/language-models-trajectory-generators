@@ -296,6 +296,8 @@ class PyBulletAdapter(SimAdapter):
             viewMatrix=view_matrix,
             projectionMatrix=projection_matrix,
             renderer=p.ER_BULLET_HARDWARE_OPENGL,
+            # Link-level instance ids (uid + ((link + 1) << 24)); RGB/depth are unaffected.
+            flags=p.ER_SEGMENTATION_MASK_OBJECT_AND_LINKINDEX,
         )
         img_w, img_h = image[0], image[1]
         rgb_buffer = image[2]

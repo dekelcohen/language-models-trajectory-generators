@@ -103,6 +103,21 @@ class SimEnvBase:
             "lateral_shift": config.wrist_camera_lateral_shift,
         }
 
+    def get_shoulder_camera_params(self):
+        """Return base-frame eye/target offsets for the shoulder camera.
+
+        Defaults mount the camera on a torso-like mast, 0.60 m above the robot
+        base and 0.35 m to the robot's local -Y side.  In the default grasp pose
+        that becomes a +X side view of the cube while the head camera looks from
+        +Y, producing a large triangulation baseline without making the shoulder
+        another end-effector-correlated wrist camera.  Scenes may override the
+        target offset while preserving the rigid base-mounted eye.
+        """
+        return {
+            "base_offset": config.shoulder_camera_base_offset,
+            "target_offset": config.shoulder_camera_target_offset,
+        }
+
     def move_to_start_pos(self):
         """
         Return True to move the robot to start ee position + orientation

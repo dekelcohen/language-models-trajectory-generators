@@ -7,7 +7,8 @@ never cost anything unless it is actually selected.
 
 import config
 
-SUPPORTED = ("depth_fusion", "triangulate", "weighted_triangulate", "lapa", "rigid_refine")
+SUPPORTED = ("depth_fusion", "triangulate", "weighted_triangulate", "lapa", "rigid_refine",
+             "pose_tracker")
 
 
 def get_tracker3d(name=None, **kwargs):
@@ -35,4 +36,7 @@ def get_tracker3d(name=None, **kwargs):
         # ``triangulate``, so ``rigid_refine`` alone is "triangulation + shape constraint".
         from providers.tracker3d.rigid_refine import RigidRefineTracker3D
         return RigidRefineTracker3D(**kwargs)
+    if name == "pose_tracker":
+        from providers.tracker3d.pose_tracker import PoseTracker3D
+        return PoseTracker3D(**kwargs)
     raise ValueError(f"Unknown 3D tracker provider {name!r}. Supported: {SUPPORTED}")

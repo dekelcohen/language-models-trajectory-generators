@@ -28,6 +28,7 @@ Run with::
     python -m pytest tests/test_tracking_door_pybullet.py -q
 """
 
+import copy
 import os
 import sys
 import unittest
@@ -51,6 +52,16 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOOR_URDF = os.path.join(REPO_ROOT, "my_assets", "adroit_door", "adroit_door.urdf")
 
 OBJECT = "door_handle"
+
+#: ``DoorEnv`` rewrites these process-wide (robot pose in ``configure_robot_pose``, head camera
+#: in its constructor); restored in ``tearDownClass`` so a grasp-scene test running later in
+#: the same pytest process gets the grasp robot and head camera.
+_ROBOT_CONFIG_KEYS = ("base_start_position_franka", "base_start_orientation_e_franka",
+                      "joint_start_positions_franka", "camera_distance", "camera_yaw",
+                      "camera_pitch", "camera_target_position", "head_camera_position",
+                      "head_camera_orientation_e", "head_camera_use_debug_view",
+                      "head_camera_use_spherical_view")
+_PRISTINE_ROBOT_CONFIG = {k: copy.deepcopy(getattr(config, k)) for k in _ROBOT_CONFIG_KEYS}
 #: The affordance point a pointing VLM would emit. Only the ``point`` is ever consumed; it is
 #: filled in per run by projecting the true handle pose into the head camera, so the test
 #: follows the render resolution (``config.image_width``) instead of hard-coding pixels.
@@ -207,6 +218,8 @@ class TestTrackingDoorPyBullet(unittest.TestCase):
     def tearDownClass(cls):
         if p is not None and p.isConnected():
             p.disconnect()
+        for key, value in _PRISTINE_ROBOT_CONFIG.items():
+            setattr(config, key, copy.deepcopy(value))
 
     # -- scene helpers -----------------------------------------------------
     def setUp(self):
@@ -538,6 +551,34 @@ class TestTrackingDoorPyBullet(unittest.TestCase):
         # Whatever the mix, the object must survive: the fallback exists so an experimental
         # provider can never lose the object.
         self.assertGreaterEqual(len(run["errors"]), int(0.8 * len(run["lift_meta"])))
+
+    def test_optional_shoulder_camera_joins_through_the_pose(self):
+        """3 cameras is opt-in (default 2); when the shoulder camera is asked for, it must join.
+
+        It is never seeded at t=0 - the head seeds - so it joins through the pose (design
+        Step 0.5). From the shoulder the thin handle depth-verifies only 5-8 of the 20 grid
+        points, so the join bar is ``track_pose_join_min_frac`` (0.25), not the stricter
+        re-acquire bar (0.5, under which it never joined: 3 cameras == 2 cameras exactly).
+        Measured: joins at frame 0-1; centroid median 0.023-0.029 m vs 0.047 m with head +
+        wrist (the door *pose* error is not better - see docs/plans/3d_tracking.md §11.3).
+        """
+        import tracking_eval as te
+
+        self.assertEqual(tuple(config.tracking_cameras), ("head", "wrist"),
+                         "the default rig must stay 2 cameras")
+        scene = te.DoorSceneDriver(self.sim, self.env, self.robot, occlusion=(12, 19),
+                                   seeding="grid")
+        payload = te.run_eval(scene, tracker_provider="template", tracker3d="pose_tracker",
+                              cameras=("head", "wrist", "shoulder"), keep_frames=True,
+                              tracker_kwargs=dict(TRACKER_KWARGS))
+        frames = payload["frames"][OBJECT]
+        seeded = [i for i, f in enumerate(frames) if f["cam_status"]["shoulder"] != "unseeded"]
+        print(f"[door-track] 3-cam: shoulder seeded from frame {seeded[:1]}; "
+              f"{payload['aggregate']}")
+        self.assertTrue(seeded, "the shoulder camera never joined")
+        self.assertLess(seeded[0], 5)
+        self.assertEqual(payload["aggregate"]["pct_lost"], 0.0)
+        self.assertLess(payload["aggregate"]["median_l2_m"], 0.040)
 
 
 if __name__ == "__main__":

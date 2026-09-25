@@ -149,6 +149,7 @@ class Robot:
             self.last_record_gripper_pos = None
 
         self.sim_step_counter += 1
+        self._tick_tracking(env)
 
         # Rate limiter: max 5 FPS (48 steps at 240Hz). Ignore if we are forcing a keyframe.
         steps_per_frame = int(1.0 / (config.control_dt * 5.0))
@@ -193,15 +194,38 @@ class Robot:
 
             self._run_tracking(env, eef_pos, eef_ori_q, gripper_pos)
 
+    def _tick_tracking(self, env):
+        """Real-time tracking (``--track-camera-fps`` > 0): drive the session's camera clock
+        with the sim clock on *every* physics step, so the tracker samples the world at a
+        fixed rate whether or not the robot is moving (an object dropped while the arm holds
+        still is seen), and its results arrive after their sim-time latency. Inert when
+        tracking is off or on the legacy keyframe cadence."""
+        session = getattr(self, "tracking_session", None)
+        if (session is None or getattr(session, "pipeline", None) is None
+                or not session.active or session.aborted):
+            return
+        session.tick(self.sim_step_counter * config.control_dt,
+                     gripper_pose=self._tracking_gripper_pose,
+                     trajectory_step=getattr(self, "trajectory_step", 0))
+
+    def _tracking_gripper_pose(self):
+        eef_pos, eef_ori_q = self.sim.get_link_pose(self.id, self.ee_index)
+        if self.robot == "sawyer":
+            opening = self.sim.get_joint_state(self.gripper_id, self.gripper_motor).position
+        else:
+            opening = self.sim.get_joint_state(self.id, self.gripper_state_joint).position
+        return {"position": eef_pos, "orientation_q": eef_ori_q, "opening": opening}
+
     def _run_tracking(self, env, eef_pos, eef_ori_q, gripper_pos):
         """Advance the rollout tracker on this keyframe, if one is active.
 
-        Piggy-backs on the existing keyframe cadence (motion-gated, <=5 FPS) so tracking
-        costs nothing when the robot is settling, and stays in step with the frames the
-        reviewer VLM will see. Entirely inert - and free - when tracking is disabled.
+        Legacy cadence only (``--track-camera-fps 0``): piggy-backs on the motion-gated,
+        <=5 FPS keyframes, so tracking costs nothing when the robot is settling - and sees
+        nothing then either. The default real-time mode ticks from :meth:`_tick_tracking`.
         """
         session = getattr(self, "tracking_session", None)
-        if session is None or not session.active or session.aborted:
+        if (session is None or not session.active or session.aborted
+                or getattr(session, "pipeline", None) is not None):
             return
         session.on_frame(
             gripper_pose={"position": eef_pos, "orientation_q": eef_ori_q, "opening": gripper_pos},
@@ -363,6 +387,48 @@ class Robot:
         # Guarantee a frame exactly at the end of the movement
         self.step_env_and_record(env, force_record=True)
 
+    def _shoulder_camera_pose(self, env):
+        """Return the base-mounted shoulder camera pose.
+
+        The default eye offset is [0.35, -0.35, 0.60] in the robot base frame:
+        a torso/shoulder-height mast (0.60 m above the base) on the local -Y side.
+        In the default grasp scene that transforms to a +X side view, while the
+        head camera views from +Y; the target offset [0.40, 0.20, 0.05] aims at the
+        cube workspace and gives a measured head/shoulder ray separation above 45
+        degrees.  Door overrides only the target offset to aim at the latch while
+        preserving the same rigid base-mounted eye.
+        """
+        params = {
+            "base_offset": config.shoulder_camera_base_offset,
+            "target_offset": config.shoulder_camera_target_offset,
+        }
+        simenv = getattr(env, "simenv", None)
+        if simenv is not None:
+            hook = getattr(simenv, "get_shoulder_camera_params", None)
+            if callable(hook):
+                params.update(hook() or {})
+
+        base_offset = np.asarray(params["base_offset"], dtype=float)
+        target_offset = np.asarray(params["target_offset"], dtype=float)
+        base_position, base_orientation_q = self.sim.get_base_pose(self.id)
+        base_position = np.asarray(base_position, dtype=float)
+        base_rotation = np.asarray(self.sim.matrix_from_quat(base_orientation_q), dtype=float).reshape(3, 3)
+
+        camera_position = base_position + base_rotation.dot(base_offset)
+        target_position = base_position + base_rotation.dot(target_offset)
+        if not getattr(self, "_shoulder_camera_logged", False):
+            self.logger.info(
+                PROGRESS
+                + "[Robot] shoulder_camera "
+                + f"base_offset={np.round(base_offset, 4).tolist()} "
+                + f"target_offset={np.round(target_offset, 4).tolist()} "
+                + f"eye={np.round(camera_position, 4).tolist()} "
+                + f"target={np.round(target_position, 4).tolist()}"
+                + ENDC
+            )
+            self._shoulder_camera_logged = True
+        return camera_position.tolist(), target_position.tolist(), base_orientation_q
+
 
     @trace_utils.traced("Robot.get_camera_image")
     def get_camera_image(self, camera, env, save_camera_image, rgb_image_path, depth_image_path):
@@ -377,6 +443,8 @@ class Robot:
         elif camera == "head":
             camera_position = config.head_camera_position
             camera_orientation_q = self.sim.quat_from_euler(config.head_camera_orientation_e)
+        elif camera == "shoulder":
+            camera_position, target_position, camera_orientation_q = self._shoulder_camera_pose(env)
 
         projection_matrix = self.sim.compute_projection_matrix(fov, aspect, near_plane, far_plane)
         # print(PROGRESS + f"get_camera_image projection_matrix.type: {type(projection_matrix)} projection_matrix {projection_matrix}"+ ENDC)
@@ -439,6 +507,9 @@ class Robot:
                 # Force the camera's image to stay perfectly level with the room
                 up_vector =[0, 0, 1]
                 
+            elif camera == "shoulder":
+                up_vector = [0, 0, 1]
+
             elif camera == "head":
                 init_camera_vector =[0, 0, 1]
                 init_up_vector = [-1, 0, 0]
@@ -507,6 +578,12 @@ class Robot:
         frame = self._last_camera_frame
         depth_metric = camera_math.depth_to_metric(
             frame.depth, self.sim.depth_encoding, config.near_plane, config.far_plane)
+        seg = getattr(frame, "segmentation", None)
+        if seg is not None:
+            try:
+                seg = np.asarray(seg).reshape(np.asarray(depth_metric).shape)
+            except (ValueError, TypeError):
+                seg = None
         return CameraView(
             name=camera,
             rgb=np.asarray(frame.rgb),
@@ -517,6 +594,7 @@ class Robot:
             far=float(config.far_plane),
             position=camera_position,
             orientation_q=camera_orientation_q,
+            segmentation=seg,
         )
 
     def _debug_view_matrices_and_pos(self):
@@ -570,6 +648,5 @@ class Robot:
         )
         camera_position, _ = spherical_camera_pose(target, distance, yaw_deg, pitch_deg)
         return view_matrix, camera_position
-
 
 

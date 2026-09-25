@@ -6,7 +6,7 @@ lookup, lazy import so an optional dependency never breaks startup).
 
 import config
 
-SUPPORTED = ("template", "csrt", "cotracker", "remote")
+SUPPORTED = ("template", "klt", "csrt", "cotracker", "remote")
 
 
 def get_tracker(name=None, **kwargs):
@@ -19,6 +19,9 @@ def get_tracker(name=None, **kwargs):
     if name == "template":
         from providers.trackers.template_tracker import TemplateTracker
         return TemplateTracker(**kwargs)
+    if name == "klt":
+        from providers.trackers.klt_tracker import KLTTracker
+        return KLTTracker(**kwargs)
     if name == "csrt":
         from providers.trackers.csrt_tracker import CSRTTracker
         return CSRTTracker(**kwargs)

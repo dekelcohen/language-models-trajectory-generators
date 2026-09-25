@@ -37,6 +37,20 @@ class SimEnvGrasp(SimEnvBase):
     def get_3d_coordinates_prompt_section(self):
         return config.three_d_coordinates_prompt_section
 
+    def get_shoulder_camera_params(self):
+        """Base-mounted shoulder view tuned for the grasp cube.
+
+        The eye offset [0.35, -0.35, 0.60] is a high side mast on the robot base;
+        with the default grasp base yaw it lands on the workspace +X side, opposite
+        the head camera's +Y studio view.  The target offset [0.40, 0.20, 0.05]
+        points at the settled cube centre, keeping the optical axis side-on rather
+        than another over-the-shoulder/wrist-correlated view.
+        """
+        return {
+            "base_offset": config.shoulder_camera_base_offset,
+            "target_offset": config.shoulder_camera_target_offset,
+        }
+
     def get_state(self):
         """Return pos + dims of the grasp object (self.object_id)."""
         state = {"object_id": self.object_id, "object_pos": None, "object_dims": None}

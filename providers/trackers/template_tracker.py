@@ -44,19 +44,14 @@ class TemplateTracker(PointTracker):
             raise RuntimeError("opencv (cv2) is required by TemplateTracker")
         gray = self._to_gray(frame)
         pts = self._as_points(points)
-        self._templates = []
-        keep_pts = []
-        for pt in pts:
-            patch = self._crop(gray, pt, self.patch_half)
-            if patch is None:
-                continue
-            self._templates.append(patch)
-            keep_pts.append(pt)
-        if not keep_pts:
+        # One slot per requested point, even an untrackable one (patch off-image or
+        # featureless): callers map output row j to seed point j (see PointTracker).
+        self._templates = [self._crop(gray, pt, self.patch_half) for pt in pts]
+        self._alive = np.array([t is not None for t in self._templates], dtype=bool)
+        if not np.any(self._alive):
             raise ValueError("TemplateTracker.init: no point had a full patch inside the image")
-        self._points = np.asarray(keep_pts, dtype=float)
-        self._alive = np.ones(len(keep_pts), dtype=bool)
-        self.n_points = len(keep_pts)
+        self._points = np.array(pts, dtype=float, copy=True)
+        self.n_points = len(pts)
         self.initialised = True
 
     def reset(self):
