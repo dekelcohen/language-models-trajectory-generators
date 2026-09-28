@@ -454,13 +454,14 @@ class SimSceneDriver(SceneDriver):
     """
 
     def __init__(self, sim, env, robot, n_frames, occlusion=None, occluder_cam="head",
-                 seeding=None, n_seed_points=None, blind=None):
+                 seeding=None, n_seed_points=None, blind=None, occluder_radius=40):
         self.sim = sim
         self.env = env
         self.robot = robot
         self.n_frames = int(n_frames)
         self.occlusion = (int(occlusion[0]), int(occlusion[1])) if occlusion else None
         self.occluder_cam = occluder_cam
+        self.occluder_radius = int(occluder_radius)
         self.seeding = seeding or config.track_seeding_default
         self.n_seed_points = int(config.track_seed_points if n_seed_points is None
                                  else n_seed_points)
@@ -508,17 +509,37 @@ class SimSceneDriver(SceneDriver):
             except Exception as exc:
                 log.warning("[eval] camera '%s' capture failed: %s", cam, exc)
         if self.is_occluded(frame_idx, self.objects[0]):
-            target = views.get(self.occluder_cam)
-            if target is not None:
-                position, _quat = self.ground_truth(self.objects[0])
-                offset = self._seed_offset if self._seed_offset is not None else np.zeros(3)
-                paint_occluder(target, position + offset)
+            position, _quat = self.ground_truth(self.objects[0])
+            offset = self._seed_offset if self._seed_offset is not None else np.zeros(3)
+            for cam in self.occluder_cams():
+                target = views.get(cam)
+                if target is not None:
+                    paint_occluder(target, position + offset, radius=self.occluder_radius)
         return self.apply_blind(views, frame_idx) or None
+
+    def occluder_cams(self):
+        """Cameras the disc is painted in: ``occluder_cam`` is a name, a list, or ``"all"``."""
+        cams = self.occluder_cam
+        if isinstance(cams, str):
+            cams = self.cameras if cams == "all" else (cams,)
+        return tuple(cams)
 
     def is_occluded(self, frame_idx, obj):
         return bool(self.occlusion) and self.occlusion[0] <= frame_idx < self.occlusion[1]
 
     def gripper_pose(self):
+        if getattr(self, "virtual_grip", False) and getattr(self, "vg_local", None) is not None:
+            release = getattr(self, "virtual_grip_release", None)
+            frame = float(getattr(self, "current_frame", 0.0) or 0.0)
+            if release is not None and frame >= float(release) and \
+                    getattr(self, "_vg_frozen", None) is not None:
+                return self._vg_frozen
+            pos, quat = self.ground_truth(self.objects[0])
+            gp = np.asarray(pos, dtype=float) + rotation_matrix(quat) @ self.vg_local
+            pose = {"position": list(gp), "orientation_q": list(quat)}
+            if release is None or frame < float(release):
+                self._vg_frozen = pose
+            return pose
         pos, quat = self.sim.get_link_pose(self.robot.id, self.robot.ee_index)
         return {"position": list(pos), "orientation_q": list(quat)}
 
@@ -526,7 +547,8 @@ class SimSceneDriver(SceneDriver):
         info = super().describe()
         info.update({"seeding": self.seeding, "n_seed_points": self.n_seed_points,
                      "occlusion_window": list(self.occlusion) if self.occlusion else None,
-                     "occluder_cam": self.occluder_cam})
+                     "occluder_cam": list(self.occluder_cams()),
+                     "occluder_radius": self.occluder_radius})
         return info
 
 
@@ -546,21 +568,25 @@ class GraspSceneDriver(SimSceneDriver):
     def __init__(self, sim, env, robot, object_id, obj_name="cube", n_frames=30,
                  start=None, step_vector=(0.010, 0.0, 0.003), occlusion=(12, 19),
                  occluder_cam="head", settle=3, seeding=None, n_seed_points=None,
-                 blind=None):
+                 blind=None, rot_step_deg=0.0, **kwargs):
         super().__init__(sim, env, robot, n_frames, occlusion=occlusion,
                          occluder_cam=occluder_cam, seeding=seeding,
-                         n_seed_points=n_seed_points, blind=blind)
+                         n_seed_points=n_seed_points, blind=blind, **kwargs)
         from tracking_scenario import OBJECT_START
 
         self.object_id = object_id
         self.objects = (obj_name,)
         self.start = np.asarray(start if start is not None else OBJECT_START, dtype=float)
         self.step_vector = np.asarray(step_vector, dtype=float)
+        #: Yaw about world z per motion frame (deg): exercises rotation + foreshortening.
+        self.rot_step_deg = float(rot_step_deg or 0.0)
         self.settle = int(settle)
 
     # -- scene control ----------------------------------------------------
-    def _place(self, position):
-        self.sim.set_base_pose(self.object_id, list(position), [0.0, 0.0, 0.0, 1.0])
+    def _place(self, position, yaw_deg=0.0):
+        half = 0.5 * np.radians(yaw_deg)
+        quat = [0.0, 0.0, float(np.sin(half)), float(np.cos(half))]
+        self.sim.set_base_pose(self.object_id, list(position), quat)
         for _ in range(self.settle):
             self.sim.step()
 
@@ -584,12 +610,14 @@ class GraspSceneDriver(SimSceneDriver):
         return np.asarray(position, dtype=float), np.asarray(quat, dtype=float)
 
     def advance(self, frame_idx):
-        self._place(self.start + self.step_vector * float(frame_idx))
+        self._place(self.start + self.step_vector * float(frame_idx),
+                    self.rot_step_deg * float(frame_idx))
 
     def describe(self):
         info = super().describe()
         info.update({"start": [round(float(v), 4) for v in self.start],
-                     "step_vector": [round(float(v), 4) for v in self.step_vector]})
+                     "step_vector": [round(float(v), 4) for v in self.step_vector],
+                     "rot_step_deg": self.rot_step_deg})
         return info
 
 
@@ -605,12 +633,12 @@ class DoorSceneDriver(SimSceneDriver):
     name = "door_arc"
 
     def __init__(self, sim, env, robot, n_frames=None, occlusion=None, occluder_cam="head",
-                 seeding=None, n_seed_points=None, blind=None):
+                 seeding=None, n_seed_points=None, blind=None, **kwargs):
         import test_tracking_door_pybullet as door
 
         super().__init__(sim, env, robot, n_frames or door.FRAMES, occlusion=occlusion,
                          occluder_cam=occluder_cam, seeding=seeding,
-                         n_seed_points=n_seed_points, blind=blind)
+                         n_seed_points=n_seed_points, blind=blind, **kwargs)
         self._door = door
         self.objects = (door.OBJECT,)
         state = env.simenv.get_state()
@@ -705,6 +733,23 @@ def add_eval_args(parser):
     scene.add_argument("--scene", default="grasp", choices=list(SCENES))
     scene.add_argument("--frames", type=int, default=None,
                        help="frames to run (default: 30 grasp, 40 door, 24 synthetic)")
+    scene.add_argument("--rot-step", type=float, default=0.0,
+                       help="grasp only: object yaw per motion frame in degrees (default 0)")
+    scene.add_argument("--wrist-standoff", type=float, default=None,
+                       help="aim the gripper (and so the wrist camera) at the target from this "
+                            "many metres before the run, a pre-grasp framing (default: rest pose)")
+    scene.add_argument("--wrist-height", type=float, default=0.10,
+                       help="with --wrist-standoff: gripper height above the target (m)")
+    scene.add_argument("--wrist-azimuth", type=float, default=0.0,
+                       help="with --wrist-standoff: swing the approach this many degrees about "
+                            "world z away from the robot-base direction, so the arm does not "
+                            "sit between the head camera and the target")
+    scene.add_argument("--virtual-grip", action="store_true",
+                       help="report a gripper pose that rigidly follows the object (as if held) "
+                            "- exercises the gripper-FK anchor/attach logic without physics")
+    scene.add_argument("--virtual-grip-release", type=float, default=None,
+                       help="with --virtual-grip: from this motion frame the gripper stays put "
+                            "while the object moves on (a slip / drop)")
 
     trackers = parser.add_argument_group("trackers (every 2D x 3D combination is run)")
     trackers.add_argument("--provider", nargs="+", default=[config.tracker_provider_default],
@@ -727,6 +772,10 @@ def add_eval_args(parser):
     vis = parser.add_argument_group("visibility (occlusion / camera blackouts)")
     vis.add_argument("--occlusion", type=int, nargs="*", default=[12, 19],
                      help="[start end) painted disc occlusion window; pass no values to disable")
+    vis.add_argument("--occluder-cam", nargs="+", default=["head"],
+                     help="camera(s) the disc is painted in, or 'all' (default: head)")
+    vis.add_argument("--occluder-radius", type=int, default=40,
+                     help="disc radius in pixels (default %(default)s)")
     vis.add_argument("--scenario", default="occlusion", choices=list(SCENARIOS),
                      help="camera visibility schedule: occlusion (disc only) | head_only | "
                           "wrist_only | handoff (seed head -> seed wrist from head -> head blind)")
@@ -757,6 +806,56 @@ def timing_kwargs(args):
             "motion_rate_hz": getattr(args, "motion_rate", None)}
 
 
+def aim_wrist_at(sim, robot, target, standoff=0.30, height=0.10, azimuth_deg=0.0, iterations=4):
+    """Place the arm so the gripper points at ``target`` from ``standoff`` m (robot side).
+
+    The eval scenes boot the arm in its rest pose, where the wrist camera mostly images the
+    gripper. A pre-grasp pose is what the wrist camera really sees while the arm approaches,
+    so this is the "not the hard case" framing. Joints are reset *and* their motor targets
+    set, otherwise the position motors pull the arm back. Returns the EE position error (m).
+    """
+    target = np.asarray(target, dtype=float)
+    base = np.asarray(sim.get_base_pose(robot.id)[0], dtype=float)
+    back = base - target
+    back[2] = 0.0
+    back /= max(np.linalg.norm(back), 1e-9)
+    a = np.radians(float(azimuth_deg))
+    back = np.array([np.cos(a) * back[0] - np.sin(a) * back[1],
+                     np.sin(a) * back[0] + np.cos(a) * back[1], 0.0])
+    ee = target + back * standoff + np.array([0.0, 0.0, height])
+    z = target - ee
+    z /= np.linalg.norm(z)
+    y = np.cross(z, np.array([0.0, 0.0, 1.0]))
+    y /= max(np.linalg.norm(y), 1e-9)
+    x = np.cross(y, z)
+    from sim_adapter.transforms import quat_from_matrix
+
+    quat = list(quat_from_matrix(np.column_stack([x, y, z])))
+    arm_n = int(getattr(getattr(robot, "profile", None), "arm_joint_count", 7))
+    idx = list(robot.joint_indices[:arm_n])
+    movable = sim.get_movable_joints(robot.id)
+    lo = [j.lower_limit for j in movable]
+    hi = [j.upper_limit for j in movable]
+    ik = dict(lower_limits=lo, upper_limits=hi,
+              joint_ranges=[abs(b - a) for a, b in zip(lo, hi)],
+              rest_poses=[sim.get_joint_state(robot.id, j.index).position for j in movable]
+              if hasattr(movable[0], "index") else list((np.array(hi) + np.array(lo)) / 2))
+    for _ in range(max(1, int(iterations))):
+        q = sim.inverse_kinematics(robot.id, robot.ee_index, ee.tolist(), orientation_q=quat,
+                                   **ik)
+        for joint, value in zip(idx, q[:arm_n]):
+            sim.reset_joint_state(robot.id, joint, value)
+    sim.set_joint_positions(robot.id, idx, list(q[:arm_n]),
+                            forces=[config.arm_movement_force_franka] * arm_n)
+    for _ in range(10):
+        sim.step()
+    reached = np.asarray(sim.get_link_pose(robot.id, robot.ee_index)[0], dtype=float)
+    err = float(np.linalg.norm(reached - ee))
+    log.info("[eval] wrist aimed at %s from %.2f m (EE error %.3f m)",
+             list(np.round(target, 3)), standoff, err)
+    return err
+
+
 def build_scene(args):
     """Boot the scene named by :func:`add_eval_args`. ``(scene, tracker_kwargs_by_provider)``."""
     occlusion = tuple(args.occlusion) if args.occlusion else None
@@ -773,17 +872,40 @@ def build_scene(args):
 
         sim, env, robot = _boot()
         n_frames = args.frames or DEFAULT_FRAMES["grasp"]
+    occluder = list(getattr(args, "occluder_cam", None) or ["head"])
+    standoff = getattr(args, "wrist_standoff", None)
+    if standoff:
+        # Must run before the driver exists: the driver snapshots the arm pose as "home".
+        if args.scene == "door":
+            state = env.simenv.get_state()
+            target, _q = sim.get_link_pose(state["door_id"], state["door_handle_latch"])
+        else:
+            from tracking_scenario import OBJECT_START
+
+            target = (np.asarray(OBJECT_START, dtype=float)
+                      + np.asarray((0.010, 0.0, 0.003)) * 0.5 * n_frames)
+        aim_wrist_at(sim, robot, np.asarray(target, dtype=float), standoff=float(standoff),
+                     height=float(getattr(args, "wrist_height", 0.10)),
+                     azimuth_deg=float(getattr(args, "wrist_azimuth", 0.0) or 0.0))
     common = dict(n_frames=n_frames, occlusion=occlusion, seeding=args.seeding,
                   n_seed_points=args.seed_points,
-                  blind=blind_schedule(args.scenario, n_frames, args.blind))
+                  blind=blind_schedule(args.scenario, n_frames, args.blind),
+                  occluder_cam=occluder[0] if len(occluder) == 1 else occluder,
+                  occluder_radius=getattr(args, "occluder_radius", 40))
     if args.scene == "door":
         # The handle is a ~9 px feature: the default 25x25 NCC template is mostly wood grain
         # (measured in test_tracking_door_pybullet). KLT likewise wants a window that stays on
         # the lever (win 11 / fb 0.5 px: 0.041/0.084 m vs 0.060/0.342 at the default 21/1.0,
         # lock-step pose_tracker). CoTracker needs no such tuning.
-        return (DoorSceneDriver(sim, env, robot, **common),
-                {"template": dict(door.TRACKER_KWARGS), "klt": {"win": 11, "fb_max_px": 0.5}})
-    return GraspSceneDriver(sim, env, robot, env.simenv.object_id, **common), {}
+        scene = DoorSceneDriver(sim, env, robot, **common)
+        kw = {"template": dict(door.TRACKER_KWARGS), "klt": {"win": 11, "fb_max_px": 0.5}}
+    else:
+        scene = GraspSceneDriver(sim, env, robot, env.simenv.object_id,
+                                 rot_step_deg=getattr(args, "rot_step", 0.0), **common)
+        kw = {}
+    scene.virtual_grip = bool(getattr(args, "virtual_grip", False))
+    scene.virtual_grip_release = getattr(args, "virtual_grip_release", None)
+    return scene, kw
 
 
 # -- simulator-free reference scene ---------------------------------------
@@ -1023,6 +1145,9 @@ class TrackingEvalRunner:
             # Every seed point in the body frame: GT_i(t) = p(t) + R(t) @ local_i.
             R0 = rotation_matrix(quat)
             self.seed_local[obj] = (points - np.asarray(position, dtype=float)) @ R0
+            if getattr(self.scene, "virtual_grip", False) and obj == self.scene.objects[0]:
+                # the virtual gripper holds the seed centroid, in the object's frame
+                self.scene.vg_local = self.seed_local[obj].mean(axis=0)
             self.samples[obj] = []
             self.session.add_target(obj, points)
             log.info("[eval] seeded '%s' with %d point(s) | origin=%s seed_offset_local=%s "
@@ -1037,6 +1162,7 @@ class TrackingEvalRunner:
             self.scene.advance(frame)
             truth = {obj: self.scene.ground_truth(obj) for obj in self.scene.objects}
             views = self.scene.views(frame)
+            self.scene.current_frame = frame
             gripper = self.scene.gripper_pose()
 
             start = time.perf_counter()
@@ -1084,6 +1210,7 @@ class TrackingEvalRunner:
             mf = k * self.motion_rate_hz / self.camera_fps
             self.scene.advance(mf)
             truth = {obj: self.scene.ground_truth(obj) for obj in self.scene.objects}
+            self.scene.current_frame = mf
             gripper = self.scene.gripper_pose()
             rendered = {}
 

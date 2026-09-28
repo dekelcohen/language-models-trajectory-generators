@@ -24,6 +24,12 @@ Per frame, per object (step numbers follow the design in ``docs/plans/3d_trackin
                 depth-verified visible);
        black  - red for more than ``black_after`` frames. The session may then follow the
                 gripper's FK if the object is grasped; still ``predicted=True``.
+6    **Wrong-lock guards.** A filter re-init needs a fit supported by ``reset_min_frac`` of
+     the template spanning ``reset_min_spread`` of its extent (a few points that slid onto
+     the same wrong surface agree perfectly, but cannot cover the object). The first fits
+     after a re-init or after ``confirm_after`` unmeasured frames are *tentative* for
+     ``confirm_frames``: reported yellow with ``pose.tentative``, and they do not
+     force-correct other cameras - so a wrong lock cannot copy itself into every camera.
 
 Rotation is only fitted when the tracked points span at least ``min_rot_extent_m`` and are
 not collinear. With a tight seed cluster (5 points within a few pixels, today's affordance
@@ -60,6 +66,7 @@ class _ObjState:
     last_mode: str = ""
     history: Dict[str, int] = field(default_factory=dict)
     last_time: Optional[float] = None        # sim time of the last lift (real-time mode)
+    confirm_left: float = 0.0                # ref frames of agreeing fits still needed (tentative)
 
 
 def epipolar_distance(view_a, px_a, view_b, px_b, near=0.05, far=4.0):
@@ -94,7 +101,8 @@ class PoseTracker3D(MultiCamTracker3D):
     def __init__(self, epipolar_px=None, jump_m=None, fuse_tol_m=None, green_rmse_m=None,
                  min_inlier_frac=None, min_points=None, min_rot_extent_m=None, black_after=None,
                  max_jump_gate_m=None, kf_config=None, inlier_m=None, inlier_median_k=None,
-                 **kwargs):
+                 reset_min_frac=None, reset_min_spread=None, confirm_frames=None,
+                 confirm_after=None, **kwargs):
         super().__init__(**kwargs)
 
         def pick(value, key):
@@ -111,6 +119,10 @@ class PoseTracker3D(MultiCamTracker3D):
         self.min_points = int(pick(min_points, "track_pose_min_points"))
         self.min_rot_extent_m = float(pick(min_rot_extent_m, "track_pose_min_rot_extent_m"))
         self.black_after = int(pick(black_after, "track_pose_black_after"))
+        self.reset_min_frac = float(pick(reset_min_frac, "track_pose_reset_min_frac"))
+        self.reset_min_spread = float(pick(reset_min_spread, "track_pose_reset_min_spread"))
+        self.confirm_frames = float(pick(confirm_frames, "track_pose_confirm_frames"))
+        self.confirm_after = float(pick(confirm_after, "track_pose_confirm_after"))
         self.kf_config = kf_config or KFConfig()
         self._objects: Dict[str, _ObjState] = {}
         self._last_fit_reject = None
@@ -143,6 +155,22 @@ class PoseTracker3D(MultiCamTracker3D):
                            kf=RigidBodyKF(self.kf_config))
             self._objects[obj_name] = st
         return st
+
+    def inject_pose(self, obj_name, R, t, pos_std=None, rot_std=None, reason="external"):
+        """Re-initialise ``obj_name``'s filter on an externally found pose (search-based
+        re-acquisition, gripper FK). ``current_i = R @ seed_i + t``. The next fits are
+        tentative, so a wrong external pose must still be confirmed by the trackers."""
+        st = self._objects.get(obj_name)
+        if st is None:
+            return False
+        R = np.asarray(R, dtype=float).reshape(3, 3)
+        p = R @ st.centroid + np.asarray(t, dtype=float).reshape(3)
+        st.kf.init(p, R, pos_std=pos_std, rot_std=rot_std)
+        st.unmeasured_frames = 0
+        st.confirm_left = self.confirm_frames
+        if self.logger is not None:
+            self._log(f"[pose_tracker] '{obj_name}' filter re-initialised from {reason} pose")
+        return True
 
     def _rotation_observable(self, pts):
         pts = np.asarray(pts, dtype=float).reshape(-1, 3)
@@ -241,7 +269,10 @@ class PoseTracker3D(MultiCamTracker3D):
         return fused, (float(np.median(disagreements)) if disagreements else None)
 
     def _fit(self, st, points_by_idx):
-        """Relative pose from ``{seed_idx: P}``. Returns ``(R, p_centroid, rmse, n, rot_ok)``."""
+        """Relative pose from ``{seed_idx: P}``.
+
+        Returns ``(R, p_centroid, rmse, n, rot_ok, used_idx)`` - ``used_idx`` are the seed ids
+        that survived trimming (the fit's support, see :meth:`_support_ok`)."""
         if not points_by_idx:
             return None
         idx = np.array(sorted(points_by_idx), dtype=int)
@@ -255,7 +286,8 @@ class PoseTracker3D(MultiCamTracker3D):
             if fit.n_used / float(len(idx)) < self.min_inlier_frac:
                 self._last_fit_reject = f"inliers {fit.n_used}/{len(idx)} rmse={fit.rmse:.4f}"
                 return None
-            return fit.R, fit.R @ st.centroid + fit.t, fit.rmse, fit.n_used, True
+            used = idx[np.asarray(fit.inliers, dtype=bool)]
+            return fit.R, fit.R @ st.centroid + fit.t, fit.rmse, fit.n_used, True, used
         else:
             # Translation only: rotation is unobservable from this point set, so hold the
             # filter's rotation (identity before the first rotation-observable frame).
@@ -263,7 +295,28 @@ class PoseTracker3D(MultiCamTracker3D):
             shifted = cur - (tmpl - st.centroid) @ R.T
             p = np.median(shifted, axis=0)
             rmse = float(np.sqrt(np.mean(np.sum((shifted - p) ** 2, axis=1))))
-            return R, p, rmse, len(idx), False
+            return R, p, rmse, len(idx), False, idx
+
+    def _support_ok(self, st, used_idx):
+        """Is a fit supported widely enough to *replace* the track (a filter re-init)?
+
+        A handful of points that slid onto the same wrong surface (the door frame, an
+        occluder) agree with each other perfectly, so a low RMSE proves nothing; what they
+        cannot fake is covering most of the object. Needs ``reset_min_frac`` of the template
+        and, when the template has a real extent, ``reset_min_spread`` of that extent.
+        """
+        used = np.asarray(used_idx, dtype=int).reshape(-1)
+        n_tmpl = st.template.shape[0]
+        need = max(self.min_points, int(np.ceil(self.reset_min_frac * n_tmpl)))
+        if used.size < need:
+            return False, f"support {used.size}/{n_tmpl} < {need}"
+        full = float(np.max(np.linalg.norm(st.template - st.centroid, axis=1)))
+        if full >= self.min_rot_extent_m:
+            sub = st.template[used]
+            extent = float(np.max(np.linalg.norm(sub - sub.mean(axis=0), axis=1)))
+            if extent < self.reset_min_spread * full:
+                return False, f"spread {extent:.3f}/{full:.3f} m"
+        return True, ""
 
     # -- main -----------------------------------------------------------------
     def lift(self, obj_name, views, cam_tracks, point_index=None, seed_world_points=None,
@@ -340,18 +393,37 @@ class PoseTracker3D(MultiCamTracker3D):
 
         result = Lift3DResult(meta=meta, disagreement=disagreement)
         if mode is not None:
-            R, p, rmse, n, rot_ok = fit
+            R, p, rmse, n, rot_ok, used = fit
+            support_ok, why_weak = self._support_ok(st, used)
+            if not support_ok:
+                meta["weak_support"] = why_weak
+            was_unmeasured = st.unmeasured_frames
             # An unobservable rotation is not a measurement of "no rotation": inflate its
             # noise so the filter's rotation estimate is not falsely tightened.
             kf_res = st.kf.update(p, R, pos_std=max(rmse, 1e-4),
-                                  rot_std=None if rot_ok else 1.0)
+                                  rot_std=None if rot_ok else 1.0, allow_reset=support_ok)
             meta["kf"] = kf_res.reason or "update"
+            meta["kf_reset"] = bool(kf_res.reset)
             if kf_res.mahalanobis2 is not None:
                 meta["kf_d2"] = round(kf_res.mahalanobis2, 2)
             if not kf_res.accepted:
                 mode = None           # inconsistent with the motion model: treat as unmeasured
             else:
                 st.unmeasured_frames = 0
+                # The first fits after the filter was replaced, or after it coasted, are
+                # tentative: a wrong lock (points on the door frame, one camera on the wrong
+                # surface) looks exactly like a re-acquisition for a frame or two, and green
+                # would let it force-correct the other cameras onto itself.
+                if (kf_res.reset and kf_res.reason != "init") or \
+                        was_unmeasured >= self.confirm_after - 1e-6:
+                    st.confirm_left = self.confirm_frames
+                tentative = st.confirm_left > 1e-6
+                if tentative:
+                    st.confirm_left = max(0.0, st.confirm_left - max(dt, 1e-3))
+                    meta["tentative"] = True
+                    if mode == MODE_GREEN:
+                        mode = MODE_YELLOW
+                    correct = []
                 meta["rotation_observable"] = bool(rot_ok)
                 pose_R, pose_p = (R, p) if kf_res.reset else (st.kf.rotation, st.kf.position)
                 result.pose = ObjectPose(
@@ -359,7 +431,8 @@ class PoseTracker3D(MultiCamTracker3D):
                     source="measured_single_cam" if mode == MODE_YELLOW and len(fit_cams) == 1
                     else "measured",
                     mode=mode, rmse_m=rmse, n_points=n,
-                    velocity=st.kf.velocity, angular_velocity=st.kf.angular_velocity)
+                    velocity=st.kf.velocity, angular_velocity=st.kf.angular_velocity,
+                    tentative=tentative)
                 result.world_point = pose_p
                 result.used_cams = list(fit_cams)
                 result.per_point = np.array([fused[i] for i in sorted(fused)]) if fused else None

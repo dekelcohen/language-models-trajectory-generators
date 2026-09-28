@@ -36,6 +36,7 @@ This repository also contains the [full prompts](https://github.com/kwonathan/la
   - [Step-By-Step Installation Guide](#step-by-step-installation-guide)
   - [Installing ffmpeg](#installing-ffmpeg)
   - [XMem (Optional)](#xmem-optional)
+  - [3D Tracking (Optional)](#3d-tracking-optional)
   - [API Keys and Environment Variables](#api-keys-and-environment-variables)
 - [🦾 Running the Code](#-running-the-code)
   - [Setting Your OpenAI API Key](#setting-your-openai-api-key)
@@ -118,6 +119,37 @@ To enable XMem, create the `XMem/saves` directory and download the model weights
 mkdir XMem/saves
 wget -P XMem/saves https://github.com/hkchengrex/XMem/releases/download/v1.0/XMem.pth
 ```
+
+### 3D Tracking (Optional)
+
+`--tracking` tracks the target object (door handle, grasped object) and the gripper in 3D during trajectory execution: 2D point trackers per camera → depth lift → 6-DoF pose + Kalman filter → monitors such as "is the grasped object still in the gripper". Design, measurements and TODOs: [`docs/plans/3d_tracking.md`](docs/plans/3d_tracking.md).
+
+**1. CPU trackers (default, nothing extra to install).** `template` and `klt` use OpenCV from `requirements.txt`:
+```
+python main.py --tracking --tracker-provider template --tracker3d pose_tracker
+```
+| Flag | Values | Default |
+|---|---|---|
+| `--tracker-provider` | `template`, `klt`, `cotracker`, `csrt` (needs `opencv-contrib-python`) | `template` |
+| `--tracker3d` | `depth_fusion`, `pose_tracker` (pose, occlusion modes, re-acquisition, gripper FK), `triangulate`, `rigid_refine` | `depth_fusion` |
+| `--track-cameras` | any of `head wrist shoulder` | `head wrist` |
+| `--track-camera-fps` / `--track-latency` | simulated camera rate / `measured`, `zero`, a latency profile | `30` / `measured` |
+
+**2. CoTracker3 (optional, GPU recommended).** Needs a CUDA build of torch in the active env (the `requirements.txt` torch is CPU-only, and CoTracker is not real time on CPU). The first run downloads `facebookresearch/co-tracker` + weights via `torch.hub` into `TORCH_HOME` (default `<repo>/cache/torch`, git-ignored); later runs work offline:
+```
+set TORCH_HOME=<repo>\cache\torch
+python main.py --tracking --tracker-provider cotracker --tracker3d pose_tracker
+```
+
+**3. DINOv3 matcher (optional, study only, separate env).** Used only by the offline re-acquisition study (NCC vs DINOv3, `docs/plans/3d_tracking.md` §13.5). It is **not** wired into tracking and is **not** in `requirements.txt`. It gets its own conda env, like Genesis, because it needs a recent torch/transformers:
+```
+conda create -n vlm_dino python=3.11 -y
+conda activate vlm_dino
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # or a CUDA wheel
+pip install "transformers>=4.56" huggingface_hub opencv-python-headless numpy pillow
+huggingface-cli login     # after accepting the licence of facebook/dinov3-vits16-pretrain-lvd1689m
+```
+Run study scripts with that env's interpreter directly (e.g. `C:\Users\<you>\.conda\envs\vlm_dino\python.exe script.py`), not `conda run`. Set `HF_HUB_DISABLE_SYMLINKS_WARNING=1` on Windows.
 
 ### API Keys and Environment Variables
 

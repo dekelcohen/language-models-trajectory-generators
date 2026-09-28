@@ -148,10 +148,19 @@ class ObjectPose:
     n_points: int = 0
     velocity: Optional[np.ndarray] = None
     angular_velocity: Optional[np.ndarray] = None
+    #: A measurement the filter has not yet confirmed: the first fits after a re-acquisition
+    #: or a filter re-init. Measured, but not trustworthy enough to decide "still grasped?"
+    #: or to force-correct other cameras (a wrong lock would otherwise confirm itself).
+    tentative: bool = False
 
     @property
     def measured(self) -> bool:
         return self.source.startswith("measured")
+
+    @property
+    def trusted(self) -> bool:
+        """Measured and confirmed - the only poses that count as evidence about the world."""
+        return self.measured and not self.tentative
 
     @property
     def rotation_deg(self) -> float:
@@ -172,6 +181,7 @@ class ObjectPose:
             "n_points": int(self.n_points),
             "velocity": _as_list(self.velocity),
             "angular_velocity": _as_list(self.angular_velocity),
+            "tentative": bool(self.tentative),
         }
 
 

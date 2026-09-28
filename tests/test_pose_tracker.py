@@ -104,6 +104,36 @@ class TestRigidBodyKF(unittest.TestCase):
             kf.predict()
         self.assertTrue(kf.stale)
 
+    def _arc_run(self, model, horizon=10):
+        """Track a centroid on a 0.45 m hinge arc at 0.02 rad/frame, then coast ``horizon``."""
+        from tracking.kalman import KFConfig
+        kf = RigidBodyKF(KFConfig(motion_model=model))
+        r, w = 0.45, 0.02
+
+        def gt(k):
+            return np.array([r * np.cos(w * k), r * np.sin(w * k), 0.0]), rot_z(np.degrees(w * k))
+
+        for k in range(20):
+            kf.predict()
+            kf.update(*gt(k))
+        p_pred, _R = kf.predicted_pose(horizon)
+        return float(np.linalg.norm(p_pred - gt(19 + horizon)[0]))
+
+    def test_twist_model_extrapolates_a_hinge_arc(self):
+        cv, twist = self._arc_run("cv"), self._arc_run("twist")
+        self.assertLess(twist, 0.5 * cv)        # cv flies off along the tangent
+        self.assertLess(twist, 0.01)
+
+    def test_twist_equals_cv_without_rotation(self):
+        from tracking.kalman import KFConfig
+        a, b = RigidBodyKF(KFConfig(motion_model="cv")), RigidBodyKF(KFConfig(motion_model="twist"))
+        v = np.array([0.01, 0.0, -0.005])
+        for k in range(10):
+            for kf in (a, b):
+                kf.predict()
+                kf.update(v * k, np.eye(3))
+        np.testing.assert_allclose(a.predicted_pose(5)[0], b.predicted_pose(5)[0], atol=1e-4)
+
 
 class TestEpipolarDistance(unittest.TestCase):
     def test_true_correspondence_is_on_the_line_and_offset_is_not(self):

@@ -52,6 +52,13 @@ class VideoRecorder:
         state = None if report is None else report.objects.get(self.obj)
         expected = None if sample is None else sample.expected
         lines = list(self.extra_lines)
+        if state is not None:
+            meta = state.lift_meta or {}
+            pose = getattr(state, "pose", None)
+            lines.append(f"mode={meta.get('mode') or getattr(pose, 'mode', None) or '-'}  "
+                         f"predicted={bool(state.predicted)}  lost={bool(state.lost)}"
+                         + (f"  fit_rmse={1000 * meta['fit_rmse_m']:.1f}mm"
+                            if meta.get("fit_rmse_m") is not None else ""))
         if sample is not None and sample.t is not None:
             # Real time: the overlay is the latest *published* estimate, computed on an
             # older frame; "age" is how old - that gap is the lag you see.

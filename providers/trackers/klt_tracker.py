@@ -58,6 +58,20 @@ class KLTTracker(PointTracker):
         self._points = None
         self._alive = None
 
+    def relocate(self, frame, rows, points):
+        if not self.initialised:
+            return 0
+        h, w = self._prev.shape[:2]
+        moved = 0
+        for r, pt in zip(np.asarray(rows, dtype=int).reshape(-1),
+                         np.asarray(points, dtype=float).reshape(-1, 2)):
+            if r < 0 or r >= self.n_points or not self._inside(pt, w, h)[0]:
+                continue
+            self._points[r] = pt
+            self._alive[r] = True
+            moved += 1
+        return moved
+
     def update(self, frame):
         if not self.initialised:
             return self._empty_result()

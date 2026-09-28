@@ -77,6 +77,15 @@ class _TargetTrackers:
         self.last_pose = None
         self.pose_mode = None
         self.grip_rel = None
+        # The grasp offset used for the "is it still in the gripper?" depth test: the first
+        # trusted in-hand offset, refreshed only while that test confirms it.
+        self.grip_ref = None
+        # Search-based re-acquisition (tracking/reacquire.py): the newest appearance bank per
+        # camera, captured while the pose was trusted, and when the last search ran.
+        self.ref_banks = {}
+        self.last_bank_frame = None
+        self.last_search_frame = None
+        self.last_trusted_pose = None
 
 
 class TrackingSession:
@@ -197,7 +206,11 @@ class TrackingSession:
         if callable(set_time):
             set_time(frame_t)
         t0 = time.perf_counter()
-        report = self._compute(views, gripper_pose, trajectory_step, None)
+        self._frame_time = frame_t          # so monitors can reason in seconds
+        try:
+            report = self._compute(views, gripper_pose, trajectory_step, None)
+        finally:
+            self._frame_time = None
         wall = time.perf_counter() - t0
         timing, self._timing = self._timing, None
         if report is None:
@@ -292,6 +305,7 @@ class TrackingSession:
     def _process(self, views, gripper_pose, trajectory_step, rgb_paths):
         report = TrackFrameReport(frame_idx=self.frame_idx, trajectory_step=trajectory_step,
                                   rgb_paths=dict(rgb_paths))
+        report.sim_time = getattr(self, "_frame_time", None)
         report.gripper = self._gripper_state(gripper_pose, views)
 
         for name, target in self.targets.items():
@@ -352,6 +366,11 @@ class TrackingSession:
 
         # 5. pose-driven repair (only providers that fit a pose ask for it)
         self._pose_repairs(target, state, views, gripper)
+        fk_check = self._fk_check(target, state, views, gripper)
+        if fk_check is not None:
+            if state.lift_meta is None:
+                state.lift_meta = {}
+            state.lift_meta["fk_check"] = fk_check
 
         if fused is not None:
             target.last_world_point = state.world_point
@@ -386,24 +405,44 @@ class TrackingSession:
         if pose.measured:
             target.last_pose = pose
             target.pose_mode = pose.mode
-            if gripper is not None and gripper.world_pos is not None:
+            # A tentative fit may be a wrong lock: it must not teach the grasp offset.
+            if pose.trusted and gripper is not None and gripper.world_pos is not None:
                 target.grip_rel = self._relative_to_gripper(pose, target, gripper)
-            else:
+                if target.grip_rel is not None and target.grip_ref is None:
+                    target.grip_ref = target.grip_rel
+            elif pose.trusted:
                 target.grip_rel = None
-        elif pose.mode == "black" and getattr(target, "grip_rel", None) is not None \
-                and gripper is not None and gripper.world_pos is not None:
-            fk_pose = self._pose_from_gripper(target, gripper)
-            if fk_pose is not None:
-                state.pose = fk_pose
-                state.world_point = fk_pose.apply(target.seed_points_world.mean(axis=0))[0]
-                meta["fk_coast"] = True
+            if pose.trusted:
+                target.last_trusted_pose = pose
+                self._capture_bank(target, views, pose)
+        else:
+            external = self._external_pose(target, state, views, gripper, meta)
+            if external is not None:
+                self._adopt_external_pose(target, state, views, external, meta)
+                return
+            if pose.mode == "black" and getattr(target, "grip_rel", None) is not None \
+                    and gripper is not None and gripper.world_pos is not None:
+                fk_pose = self._pose_from_gripper(target, gripper)
+                if fk_pose is not None:
+                    state.pose = fk_pose
+                    state.world_point = fk_pose.apply(target.seed_points_world.mean(axis=0))[0]
+                    meta["fk_coast"] = True
 
         cooldown = config.track_pose_reseed_cooldown
         wanted = []
         if meta.get("correct_cams"):
             wanted = [(c, "pose_correction") for c in meta["correct_cams"]]
         elif meta.get("reacquire"):
-            wanted = [(c, "reacquire") for c in state.cams]
+            if state.pose.mode == "black" and state.pose.source == "predicted" and \
+                    getattr(config, "track_reacq_no_predicted_reseed_black", False) and \
+                    not self._appearance_verified(target, views, state.pose, meta):
+                # A long-unmeasured prediction is wherever the motion model drifted to:
+                # re-seeding there puts fresh tracks on the wrong surface, which then gate
+                # out the object when it reappears. Once black, the prediction re-seeds only
+                # if the banked appearance re-verifies at its projections.
+                meta["pose_reseed"] = "skip: black - stale prediction"
+            else:
+                wanted = [(c, "reacquire") for c in state.cams]
         for cam, reason in wanted:
             view = views.get(cam)
             health = target.health.get(cam)
@@ -417,6 +456,217 @@ class TrackingSession:
                 ("ok: " if event.applied else "skip: ") + (event.detail or "")
             if event.applied:
                 state.reseeds.append(event)
+        if pose.trusted and pose.mode == "green" and not meta.get("kf_reset"):
+            self._reanchor(target, state, views, meta)
+
+    def _reanchor(self, target, state, views, meta):
+        """Pose-guided per-point repair (docs/plans/3d_tracking.md §13, fix 1).
+
+        After a trusted green fit, every tracked point whose pixel is more than
+        ``track_pose_reanchor_px`` from where the pose projects *its* seed point - and that
+        projection is depth-verified visible, so never onto an occluder - is moved back and
+        its appearance re-taken there. Dead points are revived the same way. That undoes the
+        translation-only template sliding along a rotating handle, points stuck on a static
+        edge, and permanent point death. A camera where more than
+        ``track_pose_reanchor_max_frac`` of the checkable points disagree is left alone: then
+        the pose, not the points, is the suspect (the yellow force-correction handles that).
+        """
+        tol = float(config.track_pose_reanchor_px)
+        if tol <= 0 or state.pose is None:
+            return
+        world = state.pose.apply(target.seed_points_world)
+        reseeded = {e.cam for e in state.reseeds if e.applied}
+        done, skipped = {}, {}
+        for cam, track in state.cams.items():
+            view = views.get(cam)
+            idx = target.point_index.get(cam)
+            if cam in reseeded or view is None or idx is None or not track.seeded \
+                    or track.points_2d is None:
+                continue
+            pts = np.asarray(track.points_2d, dtype=float).reshape(-1, 2)
+            idx = np.asarray(idx, dtype=int).reshape(-1)
+            if idx.shape[0] != pts.shape[0]:
+                continue
+            vis = (np.ones(len(pts), dtype=bool) if track.visible is None
+                   else np.asarray(track.visible, dtype=bool).reshape(-1))
+            drifted, dead, checked = [], [], 0
+            for j, i in enumerate(idx):
+                if i < 0 or i >= len(world):
+                    continue
+                ok, px, _detail = geometry.is_visible(view, world[i])
+                if not ok:
+                    continue
+                checked += 1
+                if not vis[j] or not np.all(np.isfinite(pts[j])):
+                    dead.append((j, px))
+                elif np.linalg.norm(pts[j] - px) > tol:
+                    drifted.append((j, px))
+            if checked and len(drifted) > config.track_pose_reanchor_max_frac * checked:
+                skipped[cam] = f"{len(drifted)}/{checked} drifted"
+                drifted = []
+            moves = drifted + dead
+            if not moves:
+                continue
+            moved = target.trackers[cam].relocate(view.rgb, [m[0] for m in moves],
+                                                  [m[1] for m in moves])
+            if moved:
+                done[cam] = int(moved)
+        if done:
+            meta["reanchored"] = done
+        if skipped:
+            meta["reanchor_skipped"] = skipped
+
+    # -- re-acquisition: banks, gripper FK anchor, search (§13 fixes 6 + FK) -------------
+    def _capture_bank(self, target, views, pose):
+        if not getattr(config, "track_reacq_enable", False):
+            return
+        every = int(config.track_reacq_ref_every)
+        if target.last_bank_frame is not None and self.frame_idx - target.last_bank_frame < every:
+            return
+        from tracking.reacquire import capture_bank
+        for cam, view in views.items():
+            half = getattr(config, "track_reacq_patch_half", None) or \
+                getattr(target.trackers.get(cam), "patch_half", None)
+            bank = capture_bank(view, pose, target.seed_points_world, self.frame_idx, half=half)
+            if len(bank.templates) >= config.track_pose_min_points:
+                target.ref_banks[cam] = bank
+        target.last_bank_frame = self.frame_idx
+
+    def _appearance_verified(self, target, views, pose, meta):
+        """Does the banked appearance re-verify at ``pose``'s projections? (No bank: no.)"""
+        if not target.ref_banks:
+            return False
+        from tracking.reacquire import verify_pose
+        verified, checkable = verify_pose(views, target.ref_banks, target.seed_points_world,
+                                          pose.R, pose.t, radius=4)
+        meta["prediction_verified"] = f"{verified}/{checkable}"
+        return verified >= config.track_pose_min_points and \
+            verified >= float(config.track_reacq_verify_frac) * checkable
+
+    def _fk_counts(self, world, views):
+        support = contra = n = 0
+        for view in views.values():
+            for wp in world:
+                ok, _px, detail = geometry.is_visible(view, wp)
+                n += 1
+                if ok:
+                    support += 1
+                elif str(detail).startswith("depth_mismatch"):
+                    contra += 1
+        return support, contra, n
+
+    def _external_pose(self, target, state, views, gripper, meta):
+        """A pose found without the 2D tracks while unmeasured: ``(source, ObjectPose)``.
+
+        1. gripper FK x grip_rel, when depth confirms the object is where the gripper holds it;
+        2. search-based re-acquisition around the prediction / FK / last trusted pose.
+        """
+        if not meta.get("reacquire"):
+            return None
+        unmeasured = float(meta.get("unmeasured_frames") or 0.0)
+        if getattr(config, "track_fk_anchor", False) and target.grip_rel is not None \
+                and gripper is not None and gripper.world_pos is not None \
+                and gripper.world_quat is not None \
+                and unmeasured >= float(config.track_fk_anchor_after) - 1e-6:
+            fk_pose = self._pose_from_gripper(target, gripper)
+            support, contra, _n = self._fk_counts(fk_pose.apply(target.seed_points_world), views)
+            need = max(config.track_pose_min_points,
+                       config.track_attach_fk_support_frac * (support + contra))
+            meta["fk_anchor"] = {"support": support, "contra": contra}
+            if support >= need:
+                return "fk", fk_pose
+            if support == 0 and contra == 0:
+                # Every camera occluded: no evidence either way, so the grasp hypothesis
+                # stands - follow the gripper instead of a drifting motion model (predicted,
+                # source "fk": never read as proof of attachment).
+                return "fk_coast", fk_pose
+        if not getattr(config, "track_reacq_enable", False) or not target.ref_banks:
+            return None
+        if float(meta.get("unmeasured_frames") or 0.0) < float(config.track_reacq_after):
+            return None
+        if target.last_search_frame is not None and \
+                self.frame_idx - target.last_search_frame < int(config.track_reacq_every):
+            return None
+        target.last_search_frame = self.frame_idx
+        from tracking.reacquire import reacquire
+        wmin, wmax = int(config.track_reacq_win_min_px), int(config.track_reacq_win_max_px)
+        hyps = []
+        if state.pose is not None:
+            # the prediction's window grows with how long it has been unmeasured
+            grow = wmin + 15.0 * float(meta.get("unmeasured_frames") or 0.0)
+            hyps.append(("predicted", state.pose, int(np.clip(grow, wmin, wmax))))
+        if target.grip_rel is not None and gripper is not None and gripper.world_pos is not None \
+                and gripper.world_quat is not None:
+            hyps.append(("fk", self._pose_from_gripper(target, gripper), wmin))
+        if target.last_trusted_pose is not None:
+            hyps.append(("last", target.last_trusted_pose, wmax))
+        unmeasured_s = float(meta.get("unmeasured_frames") or 0.0) / float(config.track_kf_ref_hz)
+        max_dev = float(config.track_reacq_max_jump_m) + float(config.track_reacq_max_speed) * unmeasured_s
+        R, t, info = reacquire(views, target.ref_banks, target.seed_points_world, hyps,
+                               max_dev_m=max_dev)
+        meta["search"] = info
+        if R is None:
+            return None
+        return "search", ObjectPose(R=R, t=t, source="search", mode=state.pose.mode,
+                                    rmse_m=info.get("rmse_m"), n_points=int(info.get("inliers", 0)))
+
+    def _adopt_external_pose(self, target, state, views, external, meta):
+        """Re-seed every camera from an external pose and re-init the pose filter on it."""
+        source, pose = external
+        pose.source = "fk" if source.startswith("fk") else source
+        pose.mode = state.pose.mode if state.pose is not None else pose.mode
+        state.pose = pose
+        state.world_point = pose.apply(target.seed_points_world.mean(axis=0))[0]
+        inject = getattr(self.tracker3d, "inject_pose", None)
+        if callable(inject):
+            # FK x grip_rel carries the grasp-offset learning error and slip: loose enough
+            # that the re-seeded tracks can correct it instead of being gated out by it.
+            std = float(config.track_fk_anchor_std) if pose.source == "fk" else \
+                max(float(pose.rmse_m or 0.0), 0.005)
+            inject(target.name, pose.R, pose.t, pos_std=std, reason=source)
+        meta["external_pose"] = source
+        if source == "fk_coast":
+            return
+        cooldown = config.track_pose_reseed_cooldown
+        for cam, view in views.items():
+            if view is None or cam not in target.health:
+                continue
+            health = target.health[cam]
+            # FK is re-confirmed every frame; re-seeding each time would reset the trackers
+            # every frame. A search hit is rare and fresh: re-seed at once.
+            if source == "fk" and health.last_reseed_frame is not None and \
+                    self.frame_idx - health.last_reseed_frame < cooldown:
+                continue
+            event = self._reseed_from_pose(target, cam, view, pose, f"reacquire_{source}")
+            meta.setdefault("pose_reseed", {})[cam] = \
+                ("ok: " if event.applied else "skip: ") + (event.detail or "")
+            if event.applied:
+                state.reseeds.append(event)
+
+    def _fk_check(self, target, state, views, gripper):
+        """Test the hypothesis "the object is still where the gripper holds it" in depth.
+
+        Projects the seed points through ``gripper FK x grip_ref`` into every camera:
+        ``support`` = rendered depth agrees (the object is there), ``contra`` = the rendered
+        surface is *behind* the point (free space where the object should be), the rest is
+        occluded / out of frame and says nothing. Independent of the 2D tracks, so a stale
+        or lost track cannot fake a drop, and it is what ``attached_to_gripper`` reads.
+        """
+        ref = getattr(target, "grip_ref", None)
+        if ref is None or gripper is None or gripper.world_pos is None \
+                or gripper.world_quat is None:
+            return None
+        T = self._grip_matrix(gripper) @ ref
+        # grip_ref maps the *relative* pose (seed-time -> now), so apply it to the seed points.
+        world = target.seed_points_world @ T[:3, :3].T + T[:3, 3]
+        support, contra, n = self._fk_counts(world, views)
+        check = {"support": support, "contra": contra, "n": n}
+        pose = state.pose
+        if pose is not None and pose.trusted and target.grip_rel is not None and \
+                support >= max(config.track_pose_min_points,
+                               config.track_attach_fk_support_frac * (support + contra)):
+            target.grip_ref = target.grip_rel        # confirmed: follow small re-grips
+        return check
 
     @staticmethod
     def _grip_matrix(gripper):

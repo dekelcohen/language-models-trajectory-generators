@@ -14,6 +14,14 @@ update ``theta`` is folded into ``R_ref`` and reset to zero. That keeps the line
 exact to first order at any orientation - a plain Euler/quaternion state would wrap or become
 singular exactly when an object tumbles.
 
+Motion model (``track_kf_motion_model``): ``"twist"`` (default) predicts a constant *screw*
+motion - the centroid's velocity turns with the angular velocity, so a door handle swinging
+about its hinge is extrapolated along the arc, not the tangent. It has the same 12-D state as
+``"cv"`` (straight-line centroid, independent rotation), so no extra warm-up; offline on a
+door arc with 2-5 mm noise it halved the 1 s-ahead error (16-18 -> 8-13 mm), where fitting
+curvature (constant acceleration, circle fits) from noisy positions was 2-8x *worse*
+(docs/plans/3d_tracking.md §13).
+
 Units: ``dt`` is in *reference frames* - 1 unit = ``1 / config.track_kf_ref_hz`` seconds (0.1 s,
 the lock-step harness's motion rate the noise defaults were tuned at). The session passes
 ``dt = 1`` per tracked frame when it has no clock and ``elapsed_s * ref_hz`` in real-time mode,
@@ -39,6 +47,30 @@ from sim_adapter.transforms import exp_so3, log_so3
 CHI2_6_999 = 22.46
 
 
+def _skew(w):
+    return np.array([[0.0, -w[2], w[1]], [w[2], 0.0, -w[0]], [-w[1], w[0], 0.0]])
+
+
+def twist_terms(omega, dt):
+    """``(Rs, V)`` for a body moving with a constant (world-frame) twist for ``dt``.
+
+    Under a constant twist every point obeys ``p' = w x p + v0``, so the centroid's velocity
+    turns with the body: ``v(s) = exp([w] s) v``. Hence ``Rs = exp([w] dt)`` rotates the
+    velocity and ``V = int_0^dt exp([w] s) ds`` integrates it into the displacement
+    (``p(dt) = p + V v``). ``w -> 0`` degrades exactly to constant velocity (``V = I dt``).
+    """
+    w = np.asarray(omega, dtype=float).reshape(3)
+    n = float(np.linalg.norm(w))
+    K = _skew(w)
+    th = n * dt
+    if th < 1e-6:
+        return np.eye(3) + K * dt, np.eye(3) * dt + K * (dt ** 2 / 2.0) + K @ K * (dt ** 3 / 6.0)
+    Rs = exp_so3(w * dt)
+    V = (np.eye(3) * dt + K * ((1.0 - np.cos(th)) / n ** 2)
+         + K @ K * ((th - np.sin(th)) / n ** 3))
+    return Rs, V
+
+
 def _cfg(key):
     return field(default_factory=lambda: getattr(config, key))
 
@@ -54,6 +86,10 @@ class KFConfig:
     gate_chi2: float = CHI2_6_999
     reset_after: int = _cfg("track_kf_reset_after")          # ref-frames of agreeing rejections -> re-init
     max_coast: int = _cfg("track_kf_max_coast")              # ref-frames of prediction before giving up
+    motion_model: str = _cfg("track_kf_motion_model")        # "twist" (screw) | "cv" (straight line)
+    twist_tau: float = _cfg("track_kf_twist_tau")            # ref-frames, omega coherence window
+    coast_hold: float = _cfg("track_kf_coast_hold")          # ref-frames of full-velocity coast
+    coast_tau: float = _cfg("track_kf_coast_tau")            # ref-frames, velocity decay after it
 
 
 @dataclass
@@ -78,6 +114,8 @@ class RigidBodyKF:
         self.coast = 0
         self.rejects = 0
         self.last_rejected = None      # (p, R) of the last rejected measurement
+        self._w_m = np.zeros(3)        # EMA of omega after updates (see _bend)
+        self._w_s = 0.0                # EMA of |omega|^2
 
     # -- lifecycle ----------------------------------------------------------
     def init(self, p, R, pos_std=None, rot_std=None):
@@ -92,6 +130,8 @@ class RigidBodyKF:
         self.coast = 0
         self.rejects = 0
         self.last_rejected = None
+        self._w_m = np.zeros(3)
+        self._w_s = 0.0
 
     @property
     def position(self):
@@ -118,10 +158,56 @@ class RigidBodyKF:
         return self.coast > self.cfg.max_coast + 1e-6
 
     # -- filter -------------------------------------------------------------
-    def _F(self, dt):
+    @property
+    def _bend(self):
+        """How much of omega bends the centroid path, 0 (straight line) .. 1 (full twist).
+
+        The filter's omega is loose by design (ang_accel_std lets it follow a new rotation
+        within a few frames), so for a *translating* object it is noise of the same size as a
+        door's real 0.02 rad/ref-frame. Turning the velocity by that noise for a whole coast
+        curved the prediction off the box (grasp, all cameras occluded: red after the
+        occlusion). Scale by omega's *direction coherence* over ~``twist_tau`` ref-frames,
+        ``|EMA(w)|^2 / EMA(|w|^2)``: ~1 for a steady hinge, ~0.05-0.15 for noise.
+        Offline (hinge 0.45 m and translation, 2-5 mm / 0.01-0.05 rad noise, 0.3-1 s ahead)
+        this is never worse than cv and keeps most of the twist gain.
+        """
+        if str(getattr(self.cfg, "motion_model", "cv")).lower() != "twist":
+            return 0.0
+        if self._w_s <= 1e-12:
+            return 0.0
+        return float(min(1.0, (self._w_m @ self._w_m) / self._w_s))
+
+    def _propagate(self, x, dt, bend=None):
+        """State ``dt`` ahead under the motion model (no covariance)."""
+        bend = self._bend if bend is None else bend
+        out = x.copy()
+        if bend > 0.0:
+            Rs, V = twist_terms(x[9:12] * bend, dt)
+            out[0:3] = x[0:3] + V @ x[3:6]
+            out[3:6] = Rs @ x[3:6]
+        else:
+            out[0:3] = x[0:3] + x[3:6] * dt
+        out[6:9] = x[6:9] + x[9:12] * dt
+        return out
+
+    def _F(self, dt, bend=None):
+        bend = self._bend if bend is None else bend
         F = np.eye(12)
-        F[0:3, 3:6] = np.eye(3) * dt
         F[6:9, 9:12] = np.eye(3) * dt
+        if bend <= 0.0:
+            F[0:3, 3:6] = np.eye(3) * dt
+            return F
+        Rs, V = twist_terms(self.x[9:12] * bend, dt)
+        F[0:3, 3:6] = V
+        F[3:6, 3:6] = Rs
+        # d(p, v)/d(omega): numeric - it is 6 cheap evaluations and exact enough for P.
+        eps = 1e-6
+        for k in range(3):
+            xp, xm = self.x.copy(), self.x.copy()
+            xp[9 + k] += eps
+            xm[9 + k] -= eps
+            d = (self._propagate(xp, dt, bend) - self._propagate(xm, dt, bend)) / (2.0 * eps)
+            F[0:6, 9 + k] = d[0:6]
         return F
 
     def _Q(self, dt):
@@ -138,25 +224,46 @@ class RigidBodyKF:
     def predict(self, dt=1.0):
         if not self.initialized:
             return
-        F = self._F(dt)
-        self.x = F @ self.x
+        bend = self._bend
+        F = self._F(dt, bend)
+        self.x = self._propagate(self.x, dt, bend)
         self.P = F @ self.P @ F.T + self._Q(dt)
         self.coast += dt
         self._last_dt = dt
+        self._damp_coast(dt)
+
+    def _damp_coast(self, dt):
+        """Decay (v, omega) once the coast exceeds ``coast_hold``: an unseen object is more
+        likely to have stopped than to keep going for seconds (the prediction then stays near
+        where it was lost, which is also where search / re-seeding look)."""
+        c = self.cfg
+        if c.coast_tau is None or c.coast_tau <= 0 or c.coast_hold is None:
+            return
+        over = min(dt, self.coast - float(c.coast_hold))
+        if over <= 0:
+            return
+        f = float(np.exp(-over / float(c.coast_tau)))
+        self.x[3:6] *= f
+        self.x[9:12] *= f
 
     def predicted_pose(self, dt=1.0):
         """Pose ``dt`` ahead, without mutating the filter."""
-        p = self.x[0:3] + self.x[3:6] * dt
-        theta = self.x[6:9] + self.x[9:12] * dt
-        return p, exp_so3(theta) @ self.R_ref
+        x = self._propagate(self.x, dt)
+        return x[0:3], exp_so3(x[6:9]) @ self.R_ref
 
     def _innovation(self, p, R):
         z_rot = log_so3(np.asarray(R, dtype=float) @ self.R_ref.T)
         return np.concatenate([np.asarray(p, dtype=float).reshape(3) - self.x[0:3],
                                z_rot - self.x[6:9]])
 
-    def update(self, p, R, pos_std=None, rot_std=None):
-        """Fuse a measured pose. Returns :class:`KFResult`; never raises on bad input."""
+    def update(self, p, R, pos_std=None, rot_std=None, allow_reset=True):
+        """Fuse a measured pose. Returns :class:`KFResult`; never raises on bad input.
+
+        ``allow_reset=False``: the measurement is too weakly supported (few points, small
+        spread) to *replace* the track. It may still refine it inside the gate, and it
+        still counts towards the consistent-rejection streak, so the first well-supported
+        agreeing measurement re-initialises at once.
+        """
         if not np.all(np.isfinite(p)) or not np.all(np.isfinite(R)):
             return KFResult(False, reason="non-finite measurement")
         if not self.initialized:
@@ -189,6 +296,9 @@ class RigidBodyKF:
             self.last_rejected = (np.asarray(p, dtype=float).copy(),
                                   np.asarray(R, dtype=float).copy())
             if self.rejects >= c.reset_after - 1e-6:
+                if not allow_reset:
+                    return KFResult(False, mahalanobis2=d2,
+                                    reason="re-init refused: weak support")
                 self.init(p, R, pos_std, rot_std)
                 return KFResult(True, reset=True, mahalanobis2=d2,
                                 reason=f"{c.reset_after} consistent rejections -> re-init")
@@ -200,6 +310,10 @@ class RigidBodyKF:
         # fold the rotation error into the reference so theta stays small
         self.R_ref = exp_so3(self.x[6:9]) @ self.R_ref
         self.x[6:9] = 0.0
+        a = 1.0 - np.exp(-float(getattr(self, "_last_dt", 1.0)) / max(float(self.cfg.twist_tau), 1e-6))
+        w = self.x[9:12]
+        self._w_m = (1.0 - a) * self._w_m + a * w
+        self._w_s = (1.0 - a) * self._w_s + a * float(w @ w)
         self.coast = 0
         self.rejects = 0
         self.last_rejected = None

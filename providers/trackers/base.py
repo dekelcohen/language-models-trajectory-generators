@@ -68,6 +68,17 @@ class PointTracker(ABC):
         self.initialised = False
         self.n_points = 0
 
+    def relocate(self, frame: np.ndarray, rows, points) -> int:
+        """Move rows ``rows`` to ``points`` (pixels in ``frame``, the frame just tracked).
+
+        Used by the session's pose-guided re-anchoring: a point that drifted off where the
+        object's fitted pose puts it is put back, and its appearance model re-taken there,
+        without touching the other points (a full ``init`` would throw away every healthy
+        template). Returns how many rows were moved; ``0`` = unsupported (the default, e.g.
+        a windowed tracker whose state is a whole clip).
+        """
+        return 0
+
     # -- helpers shared by implementations ---------------------------------
     @staticmethod
     def _as_points(points) -> np.ndarray:

@@ -60,6 +60,24 @@ class TemplateTracker(PointTracker):
         self._points = None
         self._alive = None
 
+    def relocate(self, frame, rows, points):
+        if not self.initialised:
+            return 0
+        gray = self._to_gray(frame)
+        moved = 0
+        for r, pt in zip(np.asarray(rows, dtype=int).reshape(-1),
+                         np.asarray(points, dtype=float).reshape(-1, 2)):
+            if r < 0 or r >= self.n_points:
+                continue
+            patch = self._crop(gray, pt, self.patch_half)
+            if patch is None:
+                continue
+            self._templates[r] = patch
+            self._points[r] = pt
+            self._alive[r] = True        # a point killed by a low score may come back
+            moved += 1
+        return moved
+
     # -- per-frame ---------------------------------------------------------
     def update(self, frame):
         if not self.initialised:

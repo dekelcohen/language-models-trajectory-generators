@@ -7,6 +7,36 @@ marked as measured, source-verified, or untested. Nothing here is aspirational u
 sits under a "TODO" heading. §3-§5 and §7.3/§7.4 are kept as the record of the LAPA
 evaluation; they are no longer on the critical path.
 
+## Goals: what tracking is for
+
+Tracks of the task-foreground objects (gripper, door handle, grasped object) feed three
+consumers. Only **G2 is real time**; G1 and G3 can wait a few seconds, so they may use slow
+but strong tools (VLM re-detection, §13.8).
+
+| Goal | Consumer | Latency | State |
+|---|---|---|---|
+| **G1. Subtask Reviewer** sees video + tracks | VLM reviewer (`--review-provider vlm`) | seconds | reviewer built; tracks not yet in its prompt |
+| **G2. Fast feedback / Code-as-Monitor** | code or a small fast model, per frame | < 0.5 s | `attached_to_gripper`, `object_not_lost` monitors (§9.8, §13) |
+| **G3. Multimodal one-shot prompt** (video + tracks of a demo) | planner LLM | seconds | not implemented |
+
+- **G1. Subtask Reviewer LLM sees video + tracks.**
+  - Example: compute the handle's movement directions as the door starts to open → learn the
+    articulation (hinge axis, arc) → correct "pull left" (wrong) to "pull right".
+- **G2. Fast feedback: Code-as-Monitor** (or a similar constraint-monitor approach).
+  - Code or a fast model computes whether the grasped object is still near the gripper.
+  - Break trajectory execution as soon as a constraint is violated. It must never fire
+    because tracking lags, drifts or is occluded (§13: FK check, three-state monitor).
+- **G3. Multimodal prompt (one shot): video + tracks →**
+  - Movement directions of the articulation and of the task (e.g. USB pull direction), as
+    vectors/paths relative to the hinge and to relevant static objects (USB pull direction
+    relative to the laptop).
+    - Note: an insert/remove skill (USB, socket, peg) should take the surface normal as a
+      parameter, so it needs no one-shot demo.
+  - Video recorded with 3D (RGB-D) cameras where possible; 3D reconstruction when only a 2D
+    video is available.
+  - Contact points and poses. Example: affordance + tool pose (hammer; ping-pong bat
+    backhand vs forehand).
+
 ---
 
 ## 0. Status board and how to resume
@@ -37,6 +67,7 @@ list, §9 the pipeline as built, §10 the decision log; this is the orientation.
 | LAPA | **dropped** (kept selectable as `--tracker3d lapa`, not maintained) | §3-§5, §10 D1 |
 | Tracking video renderer | **done** | `tests/tools/render_tracking_video.py` (§0.4) |
 | Door recovery after a long occlusion | **open** | §11.3 |
+| **VLM re-detection** (re-find the object when tracking is lost; for G1/G3) | **TODO (large)** | §13.8 |
 | Remote WebSocket server | **not started**, and no longer required (CoTracker runs locally) | §7.5 |
 
 ### 0.2 Environment (the part that is easy to lose)
@@ -1382,3 +1413,278 @@ fp32 was worse (grasp 0.126 at 30 fps). Two cameras cost two flushes per 8 frame
 `tests\tools\render_tracking_video.py` plays real-time runs at real speed (playback fps =
 camera fps) with a `t / estimate from frame / age` line (§0.5). Rendered with tags
 `rt30_*` (template, KLT) and `rt10_gpu` / `rt30_gpu` (CoTracker) in `outputs\tracking_video\`.
+
+## 13. Robustness: lag, occlusion, re-acquisition, gripper FK (CPU trackers)
+
+Goal: `attached_to_gripper` must never say "dropped" because tracking lags, drifts or is
+occluded. Measured on CPU only (template, KLT; no CoTracker), `pose_tracker` lift.
+
+### 13.1 Flow
+
+```
+2D tracks -> per-point lift + gates -> rigid fit -> Kalman (coherence twist)
+   |  green (trusted) : re-anchor drifted points (fix 1), bank appearance, learn grip_rel
+   |  tentative       : first fits after re-init/coast are never trusted (fix 2)
+   |  unmeasured      : 1. gripper FK anchor  (depth supports FK x grip_rel)  -> inject + re-seed
+   |                    2. FK coast           (all cams occluded: no support, no contra) -> inject
+   |                    3. search re-acquire  (banked patches, RANSAC, plausibility + verify)
+   |                    4. black + stale prediction: do not re-seed unless appearance verifies
+   |                    long coast (> 1 s): velocities decay (fix 7)
+monitor attached_to_gripper: attached / detached / unknown (fix 5) - predictions, FK and
+tentative fits are never evidence; the depth FK check is.
+```
+
+### 13.2 Fixes
+
+| # | Fix | Where | Status |
+|---|---|---|---|
+| 1 | Pose-guided per-point re-anchor (undo template sliding, revive dead points) | `session._reanchor`, tracker `relocate` | done |
+| 2 | False-green guards: support check on resets, tentative fits after re-init / coast | `pose_tracker._support_ok`, `confirm_*` | done |
+| 3 | Twist motion model scaled by ω direction coherence (noise ω does not bend the path) | `kalman._bend` | done |
+| 4 | `pose_tracker` as default lift | `config.tracker3d_provider_default` | **pending** (below) |
+| 5 | Three-state grasp monitor + depth FK check | `monitors.attached_to_gripper`, `session._fk_check` | done |
+| 6 | Search re-acquisition, gripper FK anchor / coast | `tracking/reacquire.py`, `session._external_pose` | done |
+| 7 | Coast damping: v, ω decay after 1 s unmeasured | `kalman._damp_coast` | done |
+
+- **Fix 4 blocked:** with `pose_tracker` as default, `test_wrist_camera_is_seeded_from_head`
+  fails. Cause: spurious 10-30° pose rotation on a translating 5-point cluster, so the
+  wrist's pose-projected join points are never depth-verified. The `pose_tracker` subtest of
+  the cross-camera bootstrap is order-dependent even at HEAD (fails with `-k`).
+- **3-camera door join test is order-fragile, independent of fix 4** (it already uses
+  `pose_tracker`). The centroid median depends on the sim state left by earlier tests:
+
+  | Test order | HEAD | now |
+  |---|---|---|
+  | standalone (`-k shoulder`) | 0.023 | 0.026 |
+  | after `test_affordance_pixel…` | 0.023 | 0.031 |
+  | after `test_a_fixed_world_offset…` | **0.045 (fails)** | **0.050 (fails)** |
+  | full file | 0.023 | **0.050 (fails)** |
+
+  - The pose error is about 0.08 m in every variant. The pose drifts from frame 5 on,
+    before the occlusion, with all 3 cameras 'ok': the same systematic template sliding as
+    in §13.9.
+  - Ablation (order "after offset"): all fixes off reproduces HEAD exactly. The twist
+    model alone improves it (0.029). Re-anchoring alone makes it worse (0.066): it pulls
+    points onto a green but drifted pose and re-takes their templates there.
+- **3D gate** = per-point jump gate (`jump_m + 3·pos_std`, capped) + epipolar gate + fit RMSE
+  (`track_pose_green_rmse_m`). 2D points that stick to an occluder lift to the occluder's
+  depth and are rejected there.
+
+### 13.3 Harness usage
+
+```powershell
+# occlusion on one / all cameras, occluder size, per-frame rotation, wrist framing
+python tests\tracking_eval.py --scene door --occlusion 15 25 --occluder-cam head --occluder-radius 40 `
+    --wrist-standoff 0.30 --wrist-height 0.15 --wrist-azimuth 60 --tracker3d pose_tracker
+python tests\tracking_eval.py --scene grasp --occlusion 12 19 --occluder-cam all --rot-step 3
+# virtual grasp: the sim gripper pose follows the object (FK tests); release at frame F
+python tests\tracking_eval.py --scene grasp --occlusion 12 19 --occluder-cam all --virtual-grip `
+    --virtual-grip-release 60
+```
+
+- `--occluder-cam head|wrist|all`, `--occluder-radius PX`, `--rot-step DEG`.
+- `--wrist-azimuth/--wrist-standoff/--wrist-height`: aim the wrist camera at the object.
+- `--virtual-grip`: `gripper_pose = GT object pose ∘ seed centroid`, so the FK anchor has a
+  true grasp; `--virtual-grip-release F` freezes the gripper at frame F (object moves away,
+  FK must be contradicted).
+
+### 13.4 Results (template, median / max error, m)
+
+| Run | Scene | Occlusion | Before | Now |
+|---|---|---|---|---|
+| G0 / D0 | grasp / door | none, wrist aimed | 0.004 / 0.031 | same |
+| G1 / D1 | grasp / door | head, wrist aimed | 0.006 / 0.032 | same |
+| G4 / D3 (KLT) | grasp / door | head | 0.016 / 0.029 (D3 was false green) | 0.025 / 0.034 |
+| G5 | grasp | all cams | post 0.019, **red after occlusion** | 0.003 / 0.023 |
+| G5v | grasp, virtual grip | all cams | 0.004 / 0.29 | 0.003 / 0.008 (FK coast) |
+| G6 | grasp, rot 3°/frame | all cams | 0.008 / 0.26 | 0.009 / 0.030 |
+| D4 / D5 | door, default wrist | head / all | black, 0.095 / 0.225; search v1: **wrong lock 0.63 green** | honest black, 0.096 / 0.30 |
+| D5v | door, virtual grip | all cams | wrong lock 0.39 | 0.053 / 0.098 (FK coast) |
+
+- Run-to-run variance of the sim harness is ±10 mm on door runs; some grid-seeded runs
+  differ by ±0.3 m after the occlusion (search succeeds or not).
+- D4/D5 residual: wrist framed off the handle and only 5 affordance seed points, so search
+  cannot reach a 4-point consensus; the track correctly stays black instead of false green.
+- D5v residual 5-6 cm: head-template drift on the rotating handle before the occlusion
+  (pose and points drift together, so re-anchoring cannot see it).
+
+### 13.5 Re-acquisition matcher: NCC vs DINOv3 (offline study)
+
+Smallest DINOv3 (`facebook/dinov3-vits16-pretrain-lvd1689m`, 21.6 M params) vs NCC patches
+for re-finding the handle / box after a gap, object-level RANSAC, success = < 2 cm.
+
+| Rotation since last seen | NCC win | DINO win | DINO+NCC win |
+|---|---|---|---|
+| door 0-10° | 100 % | 62 % | 100 % |
+| door 10-20° | 62 % | 38 % | 75 % |
+| door 20-35° | 33 % | 33 % | 33 % |
+| grasp 10-20° | 75 % | 75 % | 100 % |
+| grasp 20-35° | 67 % | 67 % | 100 % |
+| > 35° | 0 % | 0 % | 0-50 % |
+
+- DINO alone is worse than NCC at small rotations (patch-16 features are coarse on 256 px
+  images); hybrid DINO+NCC is modestly better at 10-35°, same beyond.
+- Cost: ~1.1 s per frame per camera on CPU (768 px input).
+- **Verdict:** not integrated. Not "much better", and it needs a separate env
+  (torch/transformers). Revisit on GPU / real textured scenes; then add a pluggable
+  `track_reacq_matcher`.
+
+### 13.6 Open items
+
+- Fix 4 (default `pose_tracker`): fix the spurious rotation on small point clusters first
+  (§13.9: it is systematic drift, not noise).
+- Seed more, better spread points (5 affordance points limit fit and search). Grid seeding
+  as-is is worse on the door (D0 0.069 vs 0.031 m), so it needs work first.
+- Active wrist aiming / more cameras for the D4 case.
+- **VLM re-detection** (large TODO, §13.8).
+
+<details>
+<summary>Code-level details (§13)</summary>
+
+**Coherence twist (`tracking/kalman.py`).** `bend = |EMA(ω)|² / EMA(|ω|²)` over
+`track_kf_twist_tau` reference frames (0..1), updated after each accepted measurement;
+`_propagate(x, dt, bend)` uses `twist_terms(ω·bend)`. Noise ω (coherence 0.05-0.15) keeps the
+cv path, a hinge (0.2-0.65) bends it. A χ² test on ω is useless: steady-state ω std
+(~0.023 rad/ref-frame) equals the door's real rate.
+
+**Tentative / support (`pose_tracker.py`).** `_support_ok`: a KF reset needs
+`track_pose_reset_min_frac` of the seed points spanning `track_pose_reset_min_spread` of the
+template. After a reset or `track_pose_confirm_after` unmeasured frames, fits are tentative for
+`track_pose_confirm_frames`: yellow at best, no force-correction, not trusted.
+`inject_pose(obj, R, t, pos_std, rot_std, reason)` re-inits the filter on an external pose and
+makes the next fits tentative.
+
+**Re-anchor (`session._reanchor`).** After a trusted green fit, a point > `track_pose_reanchor_px`
+from its pose projection (depth-verified) is relocated and its template re-taken; skipped when
+> `track_pose_reanchor_max_frac` of a camera's points disagree (then the pose is suspect).
+
+**Reference bank.** Every `track_reacq_ref_every` trusted frames each camera stores rotated
+patches (`track_reacq_angles`) at the depth-verified seed points (`capture_bank`).
+
+**Search (`reacquire.reacquire`).** After `track_reacq_after` unmeasured ref-frames, every
+`track_reacq_every` frames. Hypotheses: prediction (window grows with unmeasured time),
+FK (`win_min_px`), last trusted pose (`win_max_px`). NCC top-`k` peaks > `ncc_min`, lifted
+through depth, pooled over cameras; RANSAC Kabsch with `track_reacq_inlier_m` (1 cm). Accepted
+only if:
+- inliers ≥ max(`track_pose_min_points`, `track_reacq_min_inliers`=4, `min_frac`·banked);
+- RMSE ≤ `track_pose_green_rmse_m`, spread ≥ `track_reacq_min_spread`;
+- plausible: centroid within `track_reacq_max_jump_m + track_reacq_max_speed · t_unmeasured`
+  of some hypothesis;
+- verified (`verify_pose`): ≥ `track_reacq_verify_frac` of the depth-visible banked points
+  NCC-match within 3 px of their projection.
+
+Measured wrong locks this rejects: door "found" 63 cm off (chance consensus of pooled peaks,
+then self-confirmed by re-seeding every camera from it) and 41 cm off with 3/3 inliers.
+
+**FK anchor / coast (`session._external_pose`).** Needs `grip_rel` (learned from trusted
+poses within `track_attach_max_dist` of the gripper) and ≥ `track_fk_anchor_after`
+unmeasured ref-frames. Depth support ≥ max(min_pts, `track_attach_fk_support_frac`·checkable)
+→ inject with `track_fk_anchor_std` (2 cm, so the re-seeded tracks can correct the grasp-offset
+error) and re-seed (cooldown respected). Support = contra = 0 (all cameras occluded) → FK coast:
+inject, no re-seed. Pose source stays `fk` (predicted): never evidence of attachment.
+
+**Black + stale prediction.** With `track_reacq_no_predicted_reseed_black`, a black
+prediction re-seeds only if the bank verifies at its projections
+(`_appearance_verified`); otherwise fresh tracks would land on the door leaf.
+
+**Coast damping (`kalman.RigidBodyKF._damp_coast`).** Called at the end of `predict()`.
+Once the coast (unmeasured time, ref-frames) exceeds `coast_hold`, v and ω are multiplied by
+`exp(-over/coast_tau)` for the part of `dt` past the hold. Config: `track_kf_coast_hold=10.0`, `track_kf_coast_tau=10.0`
+(ref-frames; 0 disables). `predicted_pose()` (non-mutating look-ahead) is not damped.
+
+**Tests.** `tests/test_reacquire_unit.py`: Kabsch, RANSAC with wrong candidates, 3-point
+chance consensus rejected, `verify_pose`, `inject_pose` → tentative, coherence twist on noisy
+rotation, coast damping (hold then decay; disabled = constant velocity).
+
+**DINO env (study only).** `conda create -n vlm_dino python=3.11`; `pip install torch
+--index-url https://download.pytorch.org/whl/cpu transformers huggingface_hub
+opencv-python-headless pillow`; accept the gated model licence on Hugging Face and
+`huggingface-cli login`. Not a project dependency.
+
+</details>
+
+### 13.7 Videos
+
+`outputs\tracking_video\*_v3_*.mp4`: G5 fixed (all-cam occlusion), G5v / D5v FK coast,
+D4 honest black (no wrong lock). `*_v2_*`: earlier state (D3 false green fixed, D1, G1, G4).
+
+### 13.8 TODO (large): VLM re-detection
+
+When the tracks are lost for good (D4: wrist framed off, 5 seed points, handle rotated), the
+patch search (§13.5) cannot re-find the object. A pointing VLM can: it recognises "the door
+handle" from semantics, not from a stored patch.
+
+**Where it fits.** Not in the G2 real-time loop. It runs for G1 (reviewer) and G3 (one-shot
+prompt), which can wait a few seconds, and asynchronously for G2 to re-seed a black track.
+G2 keeps its honest `unknown` in the meantime.
+
+**Problems and mitigations**
+
+- **a) Too slow.** Gemini pointing takes seconds per call.
+  - Support fast ~4B pointing models (Molmo / Qwen-VL / moondream class) behind a small
+    local FastAPI server. Measure whether a local server is fast enough (target < 0.5 s per
+    image on the robot GPU).
+  - Call it only when black, at most every N seconds, one camera at a time (best-framed first).
+- **b) Mistakes on a heavily rotated handle.**
+  - One-shot with the seed-time crop of the target object (below) and the query "find this
+    object".
+  - Ask for several points on the object, not one, so a rigid fit can be done.
+  - Always verify: lift the VLM points through depth; accept only through the same gates as
+    search (plausibility vs FK / last pose, ≥ 4 inliers, appearance verification), then
+    re-seed as *tentative*.
+
+**Separate one-shot call to the perception VLM; scene analysis stays unchanged.**
+`helpers/perception_scene_analysis.py` is not modified. Tracking makes its own call to the
+same model (`--planner-perception-vlm`, e.g. Gemini) with its own prompt and conversation.
+
+1. **Reference crops at seed time.** When a target is seeded, save a crop of each target
+   object (door handle, grasped object) from the seeding camera: the seed points' bbox plus a
+   margin, at full resolution, with its label. Optionally add the latest trusted crop from
+   the reference bank as a second example (closer in rotation).
+2. **One-shot prompt** (new `prompts/track_redetect_prompt.py`):
+   - image 1..k: the reference crop(s), "this is `<label>` at the start of the task";
+   - image k+1: the current camera image (head, wrist or shoulder: whichever the last
+     trusted pose says should see it);
+   - ask for N points on the *same parts* as the crop (e.g. handle ends + centre), JSON in the
+     model's pointing format, or "not visible".
+3. **Call** via `models.call_llm_cached(..., options={"conversation_key": "track_redetect",
+   "cache": None})`, so it never shares history or cache with perception / planner.
+4. **Parse**: reuse without changes `_parse_affordance_points_block`-style JSON parsing,
+   `model_registry.get_model_info(model).pointing_coords_format` and
+   `denormalize_yx_point_to_xy_pixels`. Import them; do not edit them.
+5. **Lift** the pixels with `tracking.geometry.points_to_world` on *that camera's* depth.
+   Not `API.convert_2d_point_to_3d_world`: it re-captures the head camera.
+6. **Fit + verify**: add a `"vlm"` hypothesis to `reacquire()`. The VLM centroid centres a
+   small NCC + RANSAC window, and the same gates (plausibility, ≥ 4 inliers, appearance
+   verification) apply. Alternative: fit the seed template directly to ≥ 3 part-labelled VLM
+   points. Then re-seed as *tentative*.
+7. **Run it asynchronously** (thread / future): G2 keeps running and reports `unknown` until
+   the answer arrives. The result is applied only if the object has not been re-acquired
+   meanwhile, and the pose is propagated by the frames elapsed since the image was taken.
+8. **Config**: `track_redetect_enable`, `track_redetect_model` (default = the perception VLM,
+   or a local 4B server URL), `track_redetect_after_s` (black time before calling),
+   `track_redetect_min_interval_s`, `track_redetect_n_points`.
+
+**Evaluation.** Harness D4/D5 (black forever today), plus the rotated-handle frames of the
+§13.5 study: success < 2 cm vs rotation since seed, latency per model.
+
+### 13.9 Follow-up fixes (coast damping; rotation noise, negative)
+
+- **Coast damping (fix 7, done).** After `track_kf_coast_hold` (10 ref-frames = 1 s)
+  unmeasured, v and ω decay with `track_kf_coast_tau` (10 ref-frames). Short occlusions keep
+  the full constant-velocity crossing; a long coast drifts at most ≈ |v|·(hold + tau).
+  - Grasp, all cameras occluded, grid seeding, 4 repeats: before, 2 of 4 runs flew off
+    (post median 0.56-0.60 m, max 0.88 m); now all 4 recover (post median 9-14 mm,
+    max ≤ 0.10 m).
+  - Regression matrix (D0-D5v, G0-G6) unchanged within run-to-run variance.
+- **Rotation noise from the fit (tried, reverted).** Idea: a 5-point, ~2.5 cm cluster
+  cannot measure rotation to the fixed 0.03 rad floor, so scale the rotation measurement
+  std with `rmse / (r_rms·sqrt(n))`. Cross-camera bootstrap (cube only translates): the
+  pose still rotated 10-70° for k = 1, 2, 4, and the wrist never joined.
+  - Conclusion: the spurious rotation is **systematic** (the 2D templates slide
+    consistently as the cube grows in the image), not noise. The filter cannot average it
+    away, and re-anchoring cannot see it (pose and points agree).
+  - Candidate fixes: scale-aware 2D tracking (template pyramid / affine KLT), or a
+    rotation prior when there is no rotation evidence (no ω coherence, rigid-body
+    residuals do not improve with rotation).
+  - Fix 4 stays blocked on this.

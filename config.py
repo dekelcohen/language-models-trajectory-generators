@@ -182,6 +182,9 @@ tracker_cotracker_fp16 = True
 #                  with the green/yellow/red/black occlusion hierarchy (see track_pose_*)
 #   lapa         - LAPA learned view weighting; evaluated and dropped (needs a CUDA env,
 #                  no accuracy gain here) - kept selectable, see docs/plans/3d_tracking.md
+# NOTE (§13 fix 4, pending): pose_tracker is the intended default, but it still fails the
+# cross-camera bootstrap (spurious 20-30 deg rotation on a translating cube -> the wrist's
+# pose-projected join points are never depth-verified) and the 3-camera door join test.
 tracker3d_provider_default = "depth_fusion"
 tracking_cameras = ("head", "wrist")
 tracking_cameras_3 = ("head", "wrist", "shoulder")
@@ -263,6 +266,16 @@ track_lost_patience = 3
 # Built-in attached_to_gripper monitor defaults.
 track_attach_max_dist = 0.12
 track_attach_grace_frames = 3
+# ... and the bad evidence must also span this many seconds (sim time; 1/track_kf_ref_hz per
+# frame without a clock). At 30 fps, 3 frames is only 0.1 s - one tracker hiccup.
+track_attach_grace_s = 0.3
+# No trusted evidence (measured, non-tentative fit or depth test) for this long -> the
+# attachment state is reported "unknown" instead of silently keeping the last verdict.
+track_attach_unknown_s = 0.5
+# Depth test of "still in the gripper" (session._fk_check): the seed points placed by gripper
+# FK x grasp offset are depth-verified in every camera. At least this fraction of the checkable
+# points (and track_pose_min_points) agreeing = the object IS there, whatever the 2D tracks say.
+track_attach_fk_support_frac = 0.5
 
 # --- pose_tracker 3D provider (--tracker3d pose_tracker; docs/plans/3d_tracking.md §9) ---
 # Step 1.2: a point seen by two cameras is dropped when its pixel is further than this from
@@ -313,6 +326,75 @@ track_kf_pos_meas_std = 0.004           # m   - floor on position measurement no
 track_kf_rot_meas_std = 0.03            # rad - floor on rotation measurement noise
 track_kf_reset_after = 2                # ref-frames of consecutive agreeing gate rejections -> re-init
 track_kf_max_coast = 30                 # ref-frames without an update before giving up
+# "twist": constant screw motion (the centroid velocity turns with the angular velocity, so a
+# swinging handle is extrapolated along its arc); "cv": straight-line centroid. Same state size.
+track_kf_motion_model = "twist"
+# ...scaled by omega's direction coherence over this many ref-frames (a translating object's
+# omega is noise: bending a long coast with it curved the prediction off the object).
+track_kf_twist_tau = 10.0
+# Coast damping: after this many unmeasured ref-frames the velocities decay with time constant
+# tau (ref-frames). Real objects stop; a long cv coast flew 0.4-0.9 m off after an all-camera
+# occlusion (§13.9). Bounded drift beyond the hold ~ |v| * tau. tau <= 0 disables.
+track_kf_coast_hold = 10.0
+track_kf_coast_tau = 10.0
+# Wrong-lock guards (pose_tracker, docs/plans/3d_tracking.md §13). A Kalman re-init (the
+# "consistent rejections" path) is only allowed from a fit whose surviving points are at least
+# reset_min_frac of the template and span reset_min_spread of its extent: points that slid onto
+# the door frame agree with each other perfectly but do not cover the handle (measured: door,
+# all cameras occluded -> green at 207 mm). After a re-init, or after confirm_after ref-frames
+# without a measurement, fits are *tentative* (yellow, pose.tentative, no cross-camera
+# force-correction) for confirm_frames ref-frames.
+track_pose_reset_min_frac = 0.5
+track_pose_reset_min_spread = 0.5
+track_pose_confirm_after = 3
+track_pose_confirm_frames = 3
+# Pose-guided re-anchoring (session, after a trusted green fit): a tracked point further than
+# reanchor_px from its seed point's projection under the pose (depth-verified visible) is moved
+# back and its template re-taken; dead points are revived. Skipped for a camera where more than
+# reanchor_max_frac of the checkable points drifted (then the pose is the suspect). 0 = off.
+track_pose_reanchor_px = 3.0
+track_pose_reanchor_max_frac = 0.5
+# Search-based re-acquisition (tracking/reacquire.py, §13 fix 6). After reacq_after ref-frames
+# without a measurement, every reacq_every tracked frames: NCC-search the banked patches
+# (captured every reacq_ref_every frames while the pose is trusted, rotated by reacq_angles)
+# around each pose hypothesis (Kalman prediction, gripper FK, last measured pose), lift the
+# topk peaks per point through depth, RANSAC a rigid pose. Accepted with reacq_min_frac of the
+# banked points spanning reacq_min_spread of the template; then re-seed + tentative filter re-init.
+track_reacq_enable = True
+track_reacq_after = 2.0
+track_reacq_every = 3
+track_reacq_ref_every = 5
+track_reacq_win_min_px = 30
+track_reacq_win_max_px = 120
+track_reacq_angles = (-45, -30, -15, 0, 15, 30, 45)
+track_reacq_ncc_min = 0.6
+track_reacq_topk = 3
+track_reacq_min_frac = 0.3
+track_reacq_min_spread = 0.4
+track_reacq_iters = 300
+track_reacq_inlier_m = 0.01
+# 3 points always fit *some* rigid pose among several candidates each (measured: door
+# "found" 41 cm off with 3/3 inliers, 5/5 NCC-verified): demand >= 4.
+track_reacq_min_inliers = 4
+# A found pose must (a) lie within max_jump_m + max_speed * unmeasured-seconds of a hypothesis
+# and (b) re-verify: >= verify_frac of the depth-visible banked points NCC-match at their
+# projections (a few chance peaks can agree rigidly; measured: door "found" 63 cm away).
+track_reacq_max_jump_m = 0.08
+track_reacq_max_speed = 0.15
+track_reacq_verify_frac = 0.5
+track_reacq_patch_half = None           # None = the camera's 2D tracker patch_half
+# Black (no measurement) re-seeds from the Kalman prediction put fresh tracks on whatever is
+# there now (the door leaf); only FK- or search-based poses re-seed once black.
+track_reacq_no_predicted_reseed_black = True
+# Gripper FK anchor: while unmeasured (red/black) and the object was held (grip_rel), use the
+# pose FK x grip_rel when depth supports it (>= track_attach_fk_support_frac of the checkable
+# points, and >= track_pose_min_points): re-seed from it and re-init the filter (tentative).
+track_fk_anchor = True
+# ...only after this many unmeasured reference frames (one rejected fit is not a loss), with
+# this position std on the injected pose (grip_rel learning error + slip: the re-seeded tracks
+# must be able to correct it). All cameras occluded (no support, no contradiction): follow FK.
+track_fk_anchor_after = 1.0
+track_fk_anchor_std = 0.02
 
 # --- Seed points (tracking/seeding.py) -----------------------------------------
 # affordance: the detector's affordance pixel(s) only; grid: affordance points first, then
