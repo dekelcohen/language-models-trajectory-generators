@@ -291,4 +291,29 @@ def reacquire(views, banks, seed_points_world, hypotheses, frame_idx=None, max_d
     if verified < need or verified < float(config.track_reacq_verify_frac) * checkable:
         info["why"] = f"verification {verified}/{checkable} (need {need})"
         return None, None, info
+    support, contra = free_space_counts(views, tmpl @ np.asarray(R).T + np.asarray(t))
+    info["free_space"] = f"{support}+/{contra}-"
+    max_contra = float(getattr(config, "track_reacq_max_contra_frac", 1.0))
+    if contra > 0 and contra > max_contra * (support + contra):
+        info["why"] = f"free space in {contra} of {support + contra} camera views"
+        return None, None, info
     return R, t, info
+
+
+def free_space_counts(views, world):
+    """``(support, contra)`` over every camera x point: ``support`` = rendered depth agrees,
+    ``contra`` = the rendered surface is *behind* the point, i.e. that camera sees through
+    where the object should be. Occluded / out-of-frame views say nothing. Checks every
+    camera, banked or not: a wrong lock verified by one camera's patches is usually refuted
+    by another camera looking at empty space there."""
+    support = contra = 0
+    for view in views.values():
+        if view is None:
+            continue
+        for wp in np.asarray(world, dtype=float).reshape(-1, 3):
+            ok, _px, detail = geometry.is_visible(view, wp)
+            if ok:
+                support += 1
+            elif str(detail).startswith("depth_mismatch"):
+                contra += 1
+    return support, contra

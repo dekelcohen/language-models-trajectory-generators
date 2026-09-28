@@ -102,7 +102,7 @@ class PoseTracker3D(MultiCamTracker3D):
                  min_inlier_frac=None, min_points=None, min_rot_extent_m=None, black_after=None,
                  max_jump_gate_m=None, kf_config=None, inlier_m=None, inlier_median_k=None,
                  reset_min_frac=None, reset_min_spread=None, confirm_frames=None,
-                 confirm_after=None, **kwargs):
+                 confirm_after=None, px_noise=None, max_rot_std=None, **kwargs):
         super().__init__(**kwargs)
 
         def pick(value, key):
@@ -123,6 +123,8 @@ class PoseTracker3D(MultiCamTracker3D):
         self.reset_min_spread = float(pick(reset_min_spread, "track_pose_reset_min_spread"))
         self.confirm_frames = float(pick(confirm_frames, "track_pose_confirm_frames"))
         self.confirm_after = float(pick(confirm_after, "track_pose_confirm_after"))
+        self.px_noise = float(pick(px_noise, "track_pose_px_noise"))
+        self.max_rot_std = float(pick(max_rot_std, "track_pose_max_rot_std"))
         self.kf_config = kf_config or KFConfig()
         self._objects: Dict[str, _ObjState] = {}
         self._last_fit_reject = None
@@ -155,6 +157,18 @@ class PoseTracker3D(MultiCamTracker3D):
                            kf=RigidBodyKF(self.kf_config))
             self._objects[obj_name] = st
         return st
+
+    def extend_template(self, obj_name, seed_frame_points):
+        """Append points (in the seed-time frame) to ``obj_name``'s template - a camera that
+        joins seeing a different face tracks points the seed camera never saw. The centroid
+        (the pose's reference point) is unchanged. Returns the first new seed index."""
+        st = self._objects.get(obj_name)
+        if st is None:
+            return None
+        pts = np.asarray(seed_frame_points, dtype=float).reshape(-1, 3)
+        first = int(st.template.shape[0])
+        st.template = np.vstack([st.template, pts])
+        return first
 
     def inject_pose(self, obj_name, R, t, pos_std=None, rot_std=None, reason="external"):
         """Re-initialise ``obj_name``'s filter on an externally found pose (search-based
@@ -268,17 +282,51 @@ class PoseTracker3D(MultiCamTracker3D):
                 fused[i] = pts[int(np.argmin([r[1][2] for r in readings]))]
         return fused, (float(np.median(disagreements)) if disagreements else None)
 
-    def _fit(self, st, points_by_idx):
+    def _lateral_sigma(self, views, per_cam):
+        """``{seed_idx: sigma_m}``: the 3D error one ``px_noise`` of 2D tracking noise makes
+        at that point (``px_noise * z / f``), from its best camera."""
+        out = {}
+        if self.px_noise <= 0:
+            return out
+        for cam, entries in per_cam.items():
+            view = views.get(cam)
+            if view is None:
+                continue
+            P = geometry._mat4(view.projection_matrix)
+            f_px = abs(float(P[1, 1])) * float(view.height) / 2.0
+            if f_px <= 0:
+                continue
+            for i, (_P, _px, z, _c) in entries.items():
+                s = self.px_noise * float(z) / f_px
+                out[i] = min(out.get(i, s), s)
+        return out
+
+    def _rotation_std(self, tmpl, idx, sigma):
+        """Std (rad) the 2D noise alone puts on a rotation fitted to ``tmpl`` rows ``idx``
+        (``sigma``: per-point 3D noise, :meth:`_lateral_sigma`), floored at the filter's
+        ``rot_meas_std``. A small, far cluster cannot measure rotation (256 px: 1 px ~ 4 mm
+        at 0.85 m ~ 10 deg on a 2 cm lever), and the fit hides it in a *small* RMSE."""
+        s = [sigma[i] for i in idx if i in sigma]
+        r_rms = float(np.sqrt(np.mean(np.sum((tmpl - tmpl.mean(axis=0)) ** 2, axis=1))))
+        if not s or r_rms <= 1e-9:
+            return self.kf_config.rot_meas_std
+        rs = float(np.sqrt(np.mean(np.square(s)))) / (r_rms * np.sqrt(len(s)))
+        return max(rs, self.kf_config.rot_meas_std)
+
+    def _fit(self, st, points_by_idx, sigma=None):
         """Relative pose from ``{seed_idx: P}``.
 
-        Returns ``(R, p_centroid, rmse, n, rot_ok, used_idx)`` - ``used_idx`` are the seed ids
-        that survived trimming (the fit's support, see :meth:`_support_ok`)."""
+        Returns ``(R, p_centroid, rmse, n, rot_std, used_idx)``: ``rot_std`` (rad) is the
+        rotation's measurement noise, ``None`` when rotation is unobservable (then R is held);
+        ``used_idx`` are the seed ids that survived trimming (see :meth:`_support_ok`)."""
         if not points_by_idx:
             return None
         idx = np.array(sorted(points_by_idx), dtype=int)
         cur = np.array([points_by_idx[i] for i in idx])
         tmpl = st.template[idx]
-        if len(idx) >= self.min_points and self._rotation_observable(tmpl):
+        rot_std = self._rotation_std(tmpl, idx, sigma or {})
+        if len(idx) >= self.min_points and self._rotation_observable(tmpl) and \
+                rot_std <= self.max_rot_std:
             fit = fit_rigid_motion(tmpl, cur, min_points=self.min_points,
                                    trim_m=self.inlier_m, trim_median_k=self.inlier_median_k)
             if not np.isfinite(fit.rmse):
@@ -287,7 +335,7 @@ class PoseTracker3D(MultiCamTracker3D):
                 self._last_fit_reject = f"inliers {fit.n_used}/{len(idx)} rmse={fit.rmse:.4f}"
                 return None
             used = idx[np.asarray(fit.inliers, dtype=bool)]
-            return fit.R, fit.R @ st.centroid + fit.t, fit.rmse, fit.n_used, True, used
+            return fit.R, fit.R @ st.centroid + fit.t, fit.rmse, fit.n_used, rot_std, used
         else:
             # Translation only: rotation is unobservable from this point set, so hold the
             # filter's rotation (identity before the first rotation-observable frame).
@@ -295,7 +343,7 @@ class PoseTracker3D(MultiCamTracker3D):
             shifted = cur - (tmpl - st.centroid) @ R.T
             p = np.median(shifted, axis=0)
             rmse = float(np.sqrt(np.mean(np.sum((shifted - p) ** 2, axis=1))))
-            return R, p, rmse, len(idx), False, idx
+            return R, p, rmse, len(idx), None, idx
 
     def _support_ok(self, st, used_idx):
         """Is a fit supported widely enough to *replace* the track (a filter re-init)?
@@ -358,6 +406,7 @@ class PoseTracker3D(MultiCamTracker3D):
         self._epipolar_gate(views, per_cam, predicted_pts, meta)
         fused, disagreement = self._fuse_points(per_cam, predicted_pts)
         meta["n_fused"] = len(fused)
+        sigma = self._lateral_sigma(views, per_cam)
 
         mode, fit, fit_cams, correct = None, None, list(per_cam), []
         # With fewer than ``min_points`` points a fit is trivially perfect (1 point -> rmse 0)
@@ -366,7 +415,7 @@ class PoseTracker3D(MultiCamTracker3D):
         need = self.min_points if st.kf.initialized else 1
         if len(fused) >= need:
             self._last_fit_reject = None
-            fit = self._fit(st, fused)
+            fit = self._fit(st, fused, sigma)
             if self._last_fit_reject:
                 meta["fit_reject"] = self._last_fit_reject
             if fit is not None:
@@ -379,7 +428,7 @@ class PoseTracker3D(MultiCamTracker3D):
             for cam, entries in per_cam.items():
                 if len(entries) < need:
                     continue
-                single = self._fit(st, {i: e[0] for i, e in entries.items()})
+                single = self._fit(st, {i: e[0] for i, e in entries.items()}, sigma)
                 if single is not None and single[2] <= self.green_rmse_m and \
                         (best is None or single[2] < best[1][2]):
                     best = (cam, single)
@@ -393,15 +442,18 @@ class PoseTracker3D(MultiCamTracker3D):
 
         result = Lift3DResult(meta=meta, disagreement=disagreement)
         if mode is not None:
-            R, p, rmse, n, rot_ok, used = fit
+            R, p, rmse, n, rot_std, used = fit
             support_ok, why_weak = self._support_ok(st, used)
             if not support_ok:
                 meta["weak_support"] = why_weak
             was_unmeasured = st.unmeasured_frames
             # An unobservable rotation is not a measurement of "no rotation": inflate its
             # noise so the filter's rotation estimate is not falsely tightened.
+            if rot_std is not None:
+                meta["rot_std_deg"] = round(float(np.degrees(rot_std)), 1)
             kf_res = st.kf.update(p, R, pos_std=max(rmse, 1e-4),
-                                  rot_std=None if rot_ok else 1.0, allow_reset=support_ok)
+                                  rot_std=1.0 if rot_std is None else rot_std,
+                                  allow_reset=support_ok)
             meta["kf"] = kf_res.reason or "update"
             meta["kf_reset"] = bool(kf_res.reset)
             if kf_res.mahalanobis2 is not None:
@@ -424,7 +476,7 @@ class PoseTracker3D(MultiCamTracker3D):
                     if mode == MODE_GREEN:
                         mode = MODE_YELLOW
                     correct = []
-                meta["rotation_observable"] = bool(rot_ok)
+                meta["rotation_observable"] = rot_std is not None
                 pose_R, pose_p = (R, p) if kf_res.reset else (st.kf.rotation, st.kf.position)
                 result.pose = ObjectPose(
                     R=pose_R, t=pose_p - pose_R @ st.centroid,

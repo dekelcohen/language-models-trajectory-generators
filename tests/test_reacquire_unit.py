@@ -70,6 +70,84 @@ class TestVerifyPose(unittest.TestCase):
         self.assertEqual(ok2, 0)
 
 
+class TestTemplateExtension(unittest.TestCase):
+    def test_new_face_points_measure_the_pose_and_keep_the_centroid(self):
+        from test_pose_tracker import make_track, project_into
+        tr = PoseTracker3D()
+        views = views_with(TEMPLATE)
+        tr.lift("obj", views, tracks_for(views, TEMPLATE), seed_world_points=TEMPLATE)
+        new = TEMPLATE[:3] + [0.0, 0.0, -0.03]
+        self.assertEqual(tr.extend_template("obj", new), len(TEMPLATE))
+        np.testing.assert_allclose(tr._objects["obj"].centroid, CENTROID)
+        full = np.vstack([TEMPLATE, new])
+        for k in range(1, 7):
+            shift = np.array([0.002 * k, 0.0, 0.0])
+            pts = full + shift
+            views = views_with(pts)
+            # head images only the original face, wrist only the new points
+            tracks = {"head": make_track("head", project_into(views["head"], pts[:5])),
+                      "wrist": make_track("wrist", project_into(views["wrist"], pts[5:]))}
+            index = {"head": np.arange(5), "wrist": np.arange(5, 8)}
+            res = tr.lift("obj", views, tracks, point_index=index)
+        self.assertEqual(res.meta["mode"], "green")
+        np.testing.assert_allclose(res.world_point, CENTROID + shift, atol=3e-3)
+
+    def test_extend_unknown_object_is_a_noop(self):
+        self.assertIsNone(PoseTracker3D().extend_template("nope", TEMPLATE))
+
+
+class TestRotationObservability(unittest.TestCase):
+    def test_rotation_std_follows_pixel_noise_and_cluster_size(self):
+        tr = PoseTracker3D()
+        sigma = {i: 0.01 for i in range(5)}                 # 1 cm per point
+        big = tr._rotation_std(TEMPLATE, range(5), sigma)
+        small = tr._rotation_std(CENTROID + (TEMPLATE - CENTROID) * 0.25, range(5), sigma)
+        self.assertAlmostEqual(small / big, 4.0, places=6)
+        self.assertEqual(tr._rotation_std(TEMPLATE, range(5), {}), tr.kf_config.rot_meas_std)
+
+    def test_unmeasurable_rotation_is_held(self):
+        # Huge assumed pixel noise -> rotation std above the limit -> translation-only fit.
+        tr = PoseTracker3D(px_noise=50.0)
+        for k in range(6):
+            pts = posed(rot_z(3.0 * k), (0.001 * k, 0.0, 0.0))
+            views = views_with(pts)
+            res = tr.lift("obj", views, tracks_for(views, pts), seed_world_points=TEMPLATE)
+        self.assertFalse(res.meta["rotation_observable"])
+        self.assertAlmostEqual(res.pose.rotation_deg, 0.0, delta=1e-6)
+
+class TestFreeSpaceContradiction(unittest.TestCase):
+    """A pose one camera's patches verify must still not be where another camera sees
+    through (the D4 wrong lock: head-only 4/4 inliers, 5/5 verified, 0.40 m off)."""
+
+    def _views(self, wrist_sees_object):
+        views = views_with(TEMPLATE)
+        if not wrist_sees_object:
+            views["wrist"] = views_with(TEMPLATE + np.array([0.3, 0.0, 0.0]))["wrist"]
+        rng = np.random.default_rng(3)
+        for view in views.values():
+            view.rgb = rng.integers(0, 255, size=view.rgb.shape, dtype=np.uint8)
+        return views
+
+    def test_counts(self):
+        from tracking.reacquire import free_space_counts
+        s, c = free_space_counts(self._views(True), TEMPLATE)
+        self.assertEqual(c, 0)
+        self.assertEqual(s, 2 * len(TEMPLATE))
+        s, c = free_space_counts(self._views(False), TEMPLATE)
+        self.assertEqual((s, c), (len(TEMPLATE), len(TEMPLATE)))
+
+    def test_reacquire_rejects_pose_another_camera_sees_through(self):
+        from tracking.reacquire import reacquire
+        eye = ObjectPose(R=np.eye(3), t=np.zeros(3), source="measured", mode="green")
+        for wrist_sees, accepted in ((True, True), (False, False)):
+            views = self._views(wrist_sees)
+            banks = {"head": capture_bank(views["head"], eye, TEMPLATE, 0, half=4, angles=(0,))}
+            R, _t, info = reacquire(views, banks, TEMPLATE, [("predicted", eye, 20)])
+            self.assertEqual(R is not None, accepted, info)
+            if not accepted:
+                self.assertIn("free space", info["why"])
+
+
 class TestInjectPose(unittest.TestCase):
     def test_inject_reinitialises_filter_and_next_fit_is_tentative(self):
         tracker = PoseTracker3D()

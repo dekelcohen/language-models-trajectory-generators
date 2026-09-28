@@ -1445,11 +1445,15 @@ tentative fits are never evidence; the depth FK check is.
 | 5 | Three-state grasp monitor + depth FK check | `monitors.attached_to_gripper`, `session._fk_check` | done |
 | 6 | Search re-acquisition, gripper FK anchor / coast | `tracking/reacquire.py`, `session._external_pose` | done |
 | 7 | Coast damping: v, ω decay after 1 s unmeasured | `kalman._damp_coast` | done |
+| 8 | Join on the visible face: extend the template when a camera sees the other side | `session._join_on_visible_face`, `pose_tracker.extend_template` | done |
+| 9 | Rotation noise from pixel noise; hold rotation when unmeasurable | `pose_tracker._rotation_std` | done |
+| 10 | Search: reject poses whose points lie in free space in any camera | `reacquire.free_space_counts` | done |
 
-- **Fix 4 blocked:** with `pose_tracker` as default, `test_wrist_camera_is_seeded_from_head`
-  fails. Cause: spurious 10-30° pose rotation on a translating 5-point cluster, so the
-  wrist's pose-projected join points are never depth-verified. The `pose_tracker` subtest of
-  the cross-camera bootstrap is order-dependent even at HEAD (fails with `-k`).
+- **Fix 4 (default `pose_tracker`): unblocked.** The bootstrap failure was not rotation
+  drift: the head seeds the box's far face, the wrist sees its near face, so every seed
+  point is "occluded" by the box itself and the strict join can never pass (fix 8). With
+  `tracker3d_provider_default="pose_tracker"` all pybullet tests pass except the door test
+  below (same as with `depth_fusion`). Switching the default is still to do.
 - **3-camera door join test is order-fragile, independent of fix 4** (it already uses
   `pose_tracker`). The centroid median depends on the sim state left by earlier tests:
 
@@ -1531,8 +1535,8 @@ for re-finding the handle / box after a gap, object-level RANSAC, success = < 2 
 
 ### 13.6 Open items
 
-- Fix 4 (default `pose_tracker`): fix the spurious rotation on small point clusters first
-  (§13.9: it is systematic drift, not noise).
+- Fix 4: switch `tracker3d_provider_default` to `pose_tracker` (tests pass, §13.2).
+- 3-camera door test: order-fragile, 0.050 vs 0.040 in the full file (§13.2 table).
 - Seed more, better spread points (5 affordance points limit fit and search). Grid seeding
   as-is is worse on the door (D0 0.069 vs 0.031 m), so it needs work first.
 - Active wrist aiming / more cameras for the D4 case.
@@ -1681,10 +1685,42 @@ same model (`--planner-perception-vlm`, e.g. Gemini) with its own prompt and con
   cannot measure rotation to the fixed 0.03 rad floor, so scale the rotation measurement
   std with `rmse / (r_rms·sqrt(n))`. Cross-camera bootstrap (cube only translates): the
   pose still rotated 10-70° for k = 1, 2, 4, and the wrist never joined.
-  - Conclusion: the spurious rotation is **systematic** (the 2D templates slide
-    consistently as the cube grows in the image), not noise. The filter cannot average it
-    away, and re-anchoring cannot see it (pose and points agree).
-  - Candidate fixes: scale-aware 2D tracking (template pyramid / affine KLT), or a
-    rotation prior when there is no rotation evidence (no ω coherence, rigid-body
-    residuals do not improve with rotation).
-  - Fix 4 stays blocked on this.
+  - Conclusion (corrected in §13.10): the 2D errors stay < 1 px; the rotation is simply
+    unmeasurable from such a cluster, and the fit hides this in a small RMSE, so an
+    RMSE-based std cannot see it.
+  - Fix 4 was unblocked by the join fix instead (§13.10).
+
+### 13.10 Join on the visible face, rotation noise, free-space check (fixes 8-10)
+
+- **Fix 8, join on the visible face.** Cross-camera bootstrap diagnosis: with a correct
+  pose (≤ 3 mm), all 5 seed points were "occluded" in the wrist by 4-9 cm, which is the
+  box's own thickness (the head seeded the far face).
+  - Now: when the strict join fails for an *unseeded* camera with a trusted green pose,
+    each hidden point is snapped onto the surface that camera does see
+    (`geometry.surface_point`, still rejecting occluders > `track_reseed_self_occlusion_m`).
+    The snapped points are appended to the template in the seed frame, and the camera
+    tracks them.
+  - The object's reference point stays the original seed centroid (`seed_centroid`).
+  - Config: `track_pose_join_extend=True`, `track_pose_join_extend_min_sep_px=3`.
+  - Result: the bootstrap passes (wrist joins at frame 15-16, final error 16-24 mm).
+- **Fix 9, rotation noise.** Per point, 3D noise σ = `px_noise`·z/f from its best camera.
+  Rotation std = rms(σ) / (r_rms·√n), floored at `track_kf_rot_meas_std`.
+  - This is the rotation's measurement noise in the KF. Above `track_pose_max_rot_std`
+    (0.15 rad) the fit is translation-only and holds R.
+  - `px_noise=1.5` px, the template tracker's measured 2D error (1-3 px).
+  - Matrix (D0-D5, G0-G6): neutral within run-to-run noise (it measures centroids). It
+    matters where rotation drives joins/reseeds (bootstrap). px 3 hurts D1 (p95 0.043 → 0.071).
+- **Fix 10, free-space check in search.** Rejects a re-acquired pose when more than
+  `track_reacq_max_contra_frac` (0.3) of its checkable points have the rendered surface
+  *behind* them in some camera. Measured wrong lock under CPU load: head only, 5/5
+  NCC-verified, 0.40 m off.
+- **Tried and removed (simplicity):**
+  - *Pose-guided template warping* (seed crop warped under the last trusted pose): matrix
+    slightly better, but `wrist_only` p95 0.02 → 0.11 m (scale change as the wrist closes
+    in); on the bootstrap it feeds a wrong rotation back into the templates.
+  - *Re-anchor appearance veto* (seed-patch NCC must not get worse): neutral in the matrix,
+    and it broke `handoff` (0.040 > 0.03) by blocking needed re-anchors under scale change.
+- **Tests.** `tests/test_reacquire_unit.py`: template extension (the new-face points
+  measure the pose, the centroid is unchanged), rotation std ∝ 1/cluster size,
+  unmeasurable rotation held, free-space contradiction. Pybullet: 24/25 pass; the door
+  3-camera test fails at 0.050 (order-fragile, §13.2).

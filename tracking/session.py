@@ -69,6 +69,9 @@ class _TargetTrackers:
         # single world point (the donor's estimate), so the offsets rebuild a point *set*
         # around it and the object keeps multi-point outlier rejection after a re-seed.
         centroid = self.seed_points_world.mean(axis=0)
+        # Fixed reference point: a joining camera may append template points (join on the
+        # face it sees) but must not move the point the pose refers to.
+        self.seed_centroid = centroid.copy()
         self.local_offsets = self.seed_points_world - centroid
         self.last_world_point = centroid
         self.lost_frames = 0
@@ -425,7 +428,7 @@ class TrackingSession:
                 fk_pose = self._pose_from_gripper(target, gripper)
                 if fk_pose is not None:
                     state.pose = fk_pose
-                    state.world_point = fk_pose.apply(target.seed_points_world.mean(axis=0))[0]
+                    state.world_point = fk_pose.apply(target.seed_centroid)[0]
                     meta["fk_coast"] = True
 
         cooldown = config.track_pose_reseed_cooldown
@@ -616,7 +619,7 @@ class TrackingSession:
         pose.source = "fk" if source.startswith("fk") else source
         pose.mode = state.pose.mode if state.pose is not None else pose.mode
         state.pose = pose
-        state.world_point = pose.apply(target.seed_points_world.mean(axis=0))[0]
+        state.world_point = pose.apply(target.seed_centroid)[0]
         inject = getattr(self.tracker3d, "inject_pose", None)
         if callable(inject):
             # FK x grip_rel carries the grasp-offset learning error and slip: loose enough
@@ -677,7 +680,7 @@ class TrackingSession:
 
     def _relative_to_gripper(self, pose, target, gripper):
         """Object pose in the gripper frame, only while the object is actually in hand."""
-        centre = pose.apply(target.seed_points_world.mean(axis=0))[0]
+        centre = pose.apply(target.seed_centroid)[0]
         if np.linalg.norm(centre - np.asarray(gripper.world_pos, dtype=float)) > \
                 config.track_attach_max_dist:
             return None
@@ -708,6 +711,14 @@ class TrackingSession:
         min_frac = (config.track_pose_join_min_frac if reason == "unseeded"
                     else config.track_pose_reseed_min_frac)
         min_pts = max(config.track_pose_min_points, int(np.ceil(min_frac * len(world))))
+        if len(pixels) < min_pts and reason == "unseeded":
+            extra = self._join_on_visible_face(target, view, pose, world, pixels)
+            if extra is not None and len(pixels) + len(extra[0]) >= min_pts:
+                first = self.tracker3d.extend_template(target.name, extra[1])
+                if first is not None:
+                    target.seed_points_world = np.vstack([target.seed_points_world, extra[1]])
+                    pixels = pixels + extra[0]
+                    indices = indices + list(range(first, first + len(extra[1])))
         if len(pixels) < min_pts:
             event.detail = f"{len(pixels)}/{len(world)} predicted points depth-verified"
             return event
@@ -719,6 +730,35 @@ class TrackingSession:
         event.detail = f"{len(pixels)}/{len(world)} point(s) from {pose.source} pose ({pose.mode})"
         self._log(f"[tracking] {reason}: re-seeded '{target.name}' in {cam} - {event.detail}")
         return event
+
+    def _join_on_visible_face(self, target, view, pose, world, taken):
+        """New template points for a camera that sees the object's *other* face.
+
+        The seed points lie on the face the seeding camera saw; from the opposite side they
+        are hidden by the object's own thickness, so the strict join above never succeeds.
+        Snap them onto the surface this camera does image (:func:`geometry.surface_point`
+        still rejects a real occluder) and express them in the seed frame with the current
+        trusted green pose. Returns ``(pixels, seed_frame_points)`` or ``None``.
+        """
+        if not config.track_pose_join_extend or not pose.trusted or pose.mode != "green" \
+                or not hasattr(self.tracker3d, "extend_template"):
+            return None
+        R, t = np.asarray(pose.R, dtype=float), np.asarray(pose.t, dtype=float).reshape(3)
+        used = [np.asarray(p, dtype=float) for p in taken]
+        pixels, pts = [], []
+        for wp in world:
+            if geometry.is_visible(view, wp)[0]:
+                continue                                   # joined by the strict test
+            surf, px, _detail = geometry.surface_point(view, wp)
+            if surf is None:
+                continue
+            px = np.asarray(px, dtype=float)
+            if any(np.linalg.norm(px - u) < config.track_pose_join_extend_min_sep_px for u in used):
+                continue
+            used.append(px)
+            pixels.append(px)
+            pts.append(R.T @ (np.asarray(surf, dtype=float).reshape(3) - t))
+        return (pixels, np.asarray(pts)) if pts else None
 
     def _install_seed(self, target, cam, view, pixels, indices):
         """(Re-)initialise ``cam``'s tracker on ``pixels`` (seed ids ``indices``).

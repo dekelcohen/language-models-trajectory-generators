@@ -299,6 +299,12 @@ track_pose_min_points = 3
 # Rotation is only fitted when the points span at least this radius and are not collinear;
 # otherwise the pose is translation-only.
 track_pose_min_rot_extent_m = 0.02
+# 2D tracking noise (px) assumed when judging whether rotation is measurable: each point's 3D
+# error is ~px_noise*z/f, so a fitted rotation's std is ~that / (cluster rms radius * sqrt(n)).
+# That std is the rotation's measurement noise in the filter; above track_pose_max_rot_std
+# (rad) the rotation is treated as unobservable (translation-only update). 0 disables.
+track_pose_px_noise = 1.5
+track_pose_max_rot_std = 0.15
 # Red (predicting) for more than this many reference frames (track_kf_ref_hz) -> black
 # (follow gripper FK if grasped).
 track_pose_black_after = 8
@@ -314,6 +320,14 @@ track_pose_reseed_min_frac = 0.5
 # p95 0.133 m); 0.25 -> 0.029 m / 0.122 m (centroid; the door pose error is not better, see
 # docs/plans/3d_tracking.md §11.3). Grasp unchanged. Floored at track_pose_min_points.
 track_pose_join_min_frac = 0.25
+# A joining camera that sees the object from the side opposite the seeding camera sees every
+# seed point "occluded" by the object's own thickness, so the strict join above never succeeds
+# (bootstrap scenario: head seeds the box's far face, the wrist sees its near face). With this
+# on, such points are snapped onto the surface the camera does image (within
+# track_reseed_self_occlusion_m) and appended to the pose_tracker template, in the seed frame,
+# via the current trusted green pose. Pixels closer than min_sep_px to a taken one are skipped.
+track_pose_join_extend = True
+track_pose_join_extend_min_sep_px = 3.0
 # Constant-velocity rigid-body Kalman filter (tracking/kalman.py). Units are *reference frames*:
 # 1 unit = 1 / track_kf_ref_hz seconds. Without a clock (legacy cadence, lock-step harness) one
 # tracked frame = 1 unit; in real-time mode a frame steps elapsed_s * track_kf_ref_hz, so the
@@ -382,6 +396,9 @@ track_reacq_min_inliers = 4
 track_reacq_max_jump_m = 0.08
 track_reacq_max_speed = 0.15
 track_reacq_verify_frac = 0.5
+# Reject a found pose when more than this fraction of its (camera x point) depth checks see
+# free space (rendered surface behind the point) - another camera looks through it.
+track_reacq_max_contra_frac = 0.3
 track_reacq_patch_half = None           # None = the camera's 2D tracker patch_half
 # Black (no measurement) re-seeds from the Kalman prediction put fresh tracks on whatever is
 # there now (the door leaf); only FK- or search-based poses re-seed once black.
