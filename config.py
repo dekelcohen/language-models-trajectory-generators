@@ -400,6 +400,19 @@ track_reacq_verify_frac = 0.5
 # free space (rendered surface behind the point) - another camera looks through it.
 track_reacq_max_contra_frac = 0.3
 track_reacq_patch_half = None           # None = the camera's 2D tracker patch_half
+# Banks searched: the first (seed-time) bank + the newest bank_keep banks, merged per point
+# (best NCC over all). A pose that drifts just before the loss banks drifted patches; the
+# older banks still hold the object (measured D4: newest bank 5 px off, NCC 0.22 vs truth).
+track_reacq_bank_keep = 3
+track_reacq_keep_seed_bank = True
+# Search cost is linear in templates per point (12 points x 4 banks x 7 angles: ~0.7 s per
+# search, which freezes a real-time loop for ~20 frames). Merged banks drop templates within
+# dedupe_ncc of one already kept (seed bank first, then newest), and keep at most max_templates.
+track_reacq_dedupe_ncc = 0.92
+track_reacq_max_templates = 14
+# Search at most this many banked points (farthest-point spread subset; 0 = all). RANSAC
+# needs few; verification still checks every banked point.
+track_reacq_max_search_points = 8
 # Black (no measurement) re-seeds from the Kalman prediction put fresh tracks on whatever is
 # there now (the door leaf); only FK- or search-based poses re-seed once black.
 track_reacq_no_predicted_reseed_black = True
@@ -420,6 +433,13 @@ track_seeding_default = "affordance"
 track_seed_points = 20
 track_seed_erode_px = 1
 track_seed_min_points = 3
+# region seeding (tracking/seeding.region_seed): the affordance pixel's depth-connected part
+# within radius_px (|depth - near depth| <= depth_tol_m), 2D-textured pixels only
+# (min-eigenvalue >= corner_frac x max): uniform-bar points slide along the bar.
+track_seed_region_radius_px = 24
+track_seed_region_depth_tol_m = 0.03
+track_seed_region_corner_frac = 0.15
+track_seed_region_protrude_m = 0.012
 # Outputs
 tracking_output_dir = "./outputs/tracking"
 tracking_log_name = "track.jsonl"

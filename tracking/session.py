@@ -83,9 +83,11 @@ class _TargetTrackers:
         # The grasp offset used for the "is it still in the gripper?" depth test: the first
         # trusted in-hand offset, refreshed only while that test confirms it.
         self.grip_ref = None
-        # Search-based re-acquisition (tracking/reacquire.py): the newest appearance bank per
-        # camera, captured while the pose was trusted, and when the last search ran.
+        # Search-based re-acquisition (tracking/reacquire.py): per camera the seed-time bank
+        # and the newest banks (captured while the pose was trusted), merged into
+        # ``ref_banks`` for search, and when the last search ran.
         self.ref_banks = {}
+        self.bank_history = {}
         self.last_bank_frame = None
         self.last_search_frame = None
         self.last_trusted_pose = None
@@ -526,13 +528,21 @@ class TrackingSession:
         every = int(config.track_reacq_ref_every)
         if target.last_bank_frame is not None and self.frame_idx - target.last_bank_frame < every:
             return
-        from tracking.reacquire import capture_bank
+        from tracking.reacquire import capture_bank, merge_banks
+        keep = max(1, int(getattr(config, "track_reacq_bank_keep", 1)))
+        keep_seed = bool(getattr(config, "track_reacq_keep_seed_bank", False))
         for cam, view in views.items():
             half = getattr(config, "track_reacq_patch_half", None) or \
                 getattr(target.trackers.get(cam), "patch_half", None)
             bank = capture_bank(view, pose, target.seed_points_world, self.frame_idx, half=half)
-            if len(bank.templates) >= config.track_pose_min_points:
-                target.ref_banks[cam] = bank
+            if len(bank.templates) < config.track_pose_min_points:
+                continue
+            hist = target.bank_history.setdefault(cam, {"seed": None, "recent": []})
+            if keep_seed and hist["seed"] is None:
+                hist["seed"] = bank
+            else:
+                hist["recent"] = (hist["recent"] + [bank])[-keep:]
+            target.ref_banks[cam] = merge_banks([hist["seed"]] + hist["recent"])
         target.last_bank_frame = self.frame_idx
 
     def _appearance_verified(self, target, views, pose, meta):

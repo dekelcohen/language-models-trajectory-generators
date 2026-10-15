@@ -11,8 +11,9 @@ This module *looks for the object*, independent of the 2D tracks:
 
 1. **Reference bank.** While the pose is trusted, every ``track_reacq_ref_every`` frames each
    camera stores an appearance patch around every depth-verified seed point, together with
-   that pose. The newest bank is used, so the appearance gap is only the motion since the
-   object was last seen, not since seeding.
+   that pose. Search uses the union of the first (seed-time) bank and the newest
+   ``track_reacq_bank_keep`` banks (:func:`merge_banks`): the newest keeps the appearance gap
+   small, the older ones survive a pose that drifted just before the object was lost.
 2. **Hypotheses -> search windows.** Each pose hypothesis (Kalman prediction, gripper FK,
    last measured pose) projects every seed point into every camera; NCC with the banked
    patch, rotated over ``track_reacq_angles``, runs in a window around it. The prediction's
@@ -75,11 +76,66 @@ class RefBank:
     templates: Dict[int, List[np.ndarray]] = field(default_factory=dict)
 
 
+def _unit_vectors(tmpls):
+    """Zero-mean, unit-norm flattened templates (NCC between two = their dot product)."""
+    v = np.asarray([np.asarray(t, dtype=np.float32).ravel() for t in tmpls])
+    v = v - v.mean(axis=1, keepdims=True)
+    n = np.linalg.norm(v, axis=1, keepdims=True)
+    return v / np.maximum(n, 1e-6)
+
+
+def merge_banks(banks, max_templates=None, dedupe_ncc=None):
+    """One :class:`RefBank` whose per-seed template list is the union of ``banks``. Search
+    takes the best NCC over a point's templates, so a drifted newest bank cannot erase an
+    older good one. ``frame`` is the newest bank's.
+
+    ``banks[0]`` (the seed-time bank) comes first, then the rest newest first; a template
+    within ``dedupe_ncc`` of an already-kept one adds nothing but search time and is
+    dropped, and at most ``max_templates`` are kept per point (search cost is linear in it:
+    12 points x 4 banks x 7 angles cost ~0.7 s per search, freezing a real-time loop)."""
+    banks = [b for b in banks if b is not None and b.templates]
+    if not banks:
+        return None
+    max_templates = int(getattr(config, "track_reacq_max_templates", 0) or 0) \
+        if max_templates is None else int(max_templates)
+    dedupe_ncc = float(getattr(config, "track_reacq_dedupe_ncc", 1.0)) \
+        if dedupe_ncc is None else float(dedupe_ncc)
+    merged = RefBank(frame=max(b.frame for b in banks))
+    ordered = banks[:1] + sorted(banks[1:], key=lambda b: -b.frame)
+    pool: Dict[int, list] = {}
+    for b in ordered:
+        for i, tm in b.templates.items():
+            pool.setdefault(i, []).extend(tm)
+    for i, tm in pool.items():
+        if dedupe_ncc >= 1.0 or len(tm) < 2:
+            kept = list(tm)
+        else:
+            vecs = _unit_vectors(tm)
+            keep_idx = []
+            for j in range(len(tm)):
+                if keep_idx and float(np.max(vecs[keep_idx] @ vecs[j])) >= dedupe_ncc:
+                    continue
+                keep_idx.append(j)
+            kept = [tm[j] for j in keep_idx]
+        merged.templates[i] = kept[:max_templates] if max_templates > 0 else kept
+    return merged
+
+
 def rotated_templates(gray, pt, half, angles):
-    """The patch at ``pt`` rotated by each angle (a crop twice the size, rotated, re-cropped)."""
+    """The patch at ``pt`` rotated by each angle (a crop twice the size, rotated, re-cropped).
+
+    Near the image border (a point closer than ``2*half`` but at least ``half`` px to it) the
+    image is reflect-padded first, so a point the wrist camera sees at its frame edge is
+    still banked; the unrotated patch is always real pixels."""
+    if _crop(gray, pt, half) is None:
+        return []
     big = _crop(gray, pt, 2 * half)
     if big is None:
-        return []
+        pad = 2 * half
+        padded = cv2.copyMakeBorder(gray, pad, pad, pad, pad, cv2.BORDER_REFLECT_101)
+        big = _crop(padded, (float(pt[0]) + pad, float(pt[1]) + pad), 2 * half)
+        if big is None:
+            return []
     c = (2 * half, 2 * half)
     out = []
     for ang in angles:
@@ -122,30 +178,84 @@ def _peaks(score, k, min_score, suppress):
     return out
 
 
+def _window(c, radius, h, W, H):
+    x, y = int(round(float(c[0]))), int(round(float(c[1])))
+    return (max(0, x - radius - h), max(0, y - radius - h),
+            min(W, x + radius + h + 1), min(H, y + radius + h + 1))
+
+
+def _area(r):
+    return max(0, r[2] - r[0]) * max(0, r[3] - r[1])
+
+
+def merge_windows(rects):
+    """Greedy union of overlapping search windows: two are merged when their bounding box is
+    no larger than the two searched apart (hypotheses usually agree to a few px, and each
+    window costs one ``matchTemplate`` per template)."""
+    out = []
+    for r in rects:
+        r = tuple(r)
+        merged = True
+        while merged:
+            merged = False
+            for k, q in enumerate(out):
+                u = (min(r[0], q[0]), min(r[1], q[1]), max(r[2], q[2]), max(r[3], q[3]))
+                if _area(u) <= _area(r) + _area(q):
+                    r = u
+                    out.pop(k)
+                    merged = True
+                    break
+        out.append(r)
+    return out
+
+
+def search_windows(gray, bank, windows, topk, ncc_min):
+    """``{seed_idx: [(score, pixel), ...]}`` - NCC peaks of each banked patch in its windows
+    (``{seed_idx: [(X0, Y0, X1, Y1), ...]}``, image pixels). Overlapping windows share one
+    response map (:func:`merge_windows`); peaks are still taken per window, so a large
+    window's distractors cannot crowd out a small window's match."""
+    out = {}
+    for i, rects in windows.items():
+        tmpls = bank.templates.get(i)
+        if not tmpls or not rects:
+            continue
+        h = tmpls[0].shape[0] // 2
+        found = {}
+        for U in merge_windows(rects):
+            sub = gray[U[1]:U[3], U[0]:U[2]]
+            if sub.shape[0] <= 2 * h or sub.shape[1] <= 2 * h:
+                continue
+            best = None
+            for t in tmpls:
+                r = cv2.matchTemplate(sub, t, cv2.TM_CCOEFF_NORMED)
+                best = r if best is None else np.maximum(best, r)
+            for X0, Y0, X1, Y1 in rects:
+                if X0 < U[0] or Y0 < U[1] or X1 > U[2] or Y1 > U[3]:
+                    continue
+                # response index (u, v) = template top-left at (U0 + u, U1 + v)
+                u0, v0 = X0 - U[0], Y0 - U[1]
+                part = best[v0:v0 + max(0, Y1 - Y0 - 2 * h), u0:u0 + max(0, X1 - X0 - 2 * h)]
+                if part.size == 0:
+                    continue
+                for s, loc in _peaks(part, topk, ncc_min, suppress=max(2, h // 2)):
+                    px = (X0 + loc[0] + h, Y0 + loc[1] + h)
+                    found[px] = max(s, found.get(px, -1.0))
+        if found:
+            out[i] = sorted(((s, p) for p, s in found.items()), reverse=True)
+    return out
+
+
 def search_candidates(view, bank, centres, radius, topk, ncc_min):
     """``{seed_idx: [(score, pixel), ...]}`` - NCC peaks of each banked patch near its centre."""
     gray = _gray(view.rgb)
     H, W = gray.shape
-    out = {}
+    windows = {}
     for i, tmpls in bank.templates.items():
         c = centres.get(i)
         if c is None or not np.all(np.isfinite(c)):
             continue
-        h = tmpls[0].shape[0] // 2
-        x, y = int(round(float(c[0]))), int(round(float(c[1])))
-        X0, Y0 = max(0, x - radius - h), max(0, y - radius - h)
-        X1, Y1 = min(W, x + radius + h + 1), min(H, y + radius + h + 1)
-        sub = gray[Y0:Y1, X0:X1]
-        if sub.shape[0] <= 2 * h or sub.shape[1] <= 2 * h:
-            continue
-        best = None
-        for t in tmpls:
-            r = cv2.matchTemplate(sub, t, cv2.TM_CCOEFF_NORMED)
-            best = r if best is None else np.maximum(best, r)
-        peaks = _peaks(best, topk, ncc_min, suppress=max(2, h // 2))
-        if peaks:
-            out[i] = [(s, (X0 + loc[0] + h, Y0 + loc[1] + h)) for s, loc in peaks]
-    return out
+        windows[i] = [_window(c, int(radius), tmpls[0].shape[0] // 2, W, H)]
+    return search_windows(gray, bank, windows, topk, ncc_min)
 
 
 def ransac_pose(template, cands, iters, inlier_m, min_inliers, rng=None):
@@ -234,28 +344,44 @@ def reacquire(views, banks, seed_points_world, hypotheses, frame_idx=None, max_d
     tmpl = np.asarray(seed_points_world, dtype=float).reshape(-1, 3)
     info = {"cands": {}, "hyps": [h[0] for h in hypotheses]}
     pooled: Dict[int, list] = {}
+    banked = sorted(set().union(*[set(b.templates) for b in banks.values() if b])) if banks else []
+    max_pts = int(getattr(config, "track_reacq_max_search_points", 0) or 0)
+    if 0 < max_pts < len(banked):
+        # spread subset (corners of the part, not one cluster): RANSAC needs geometry,
+        # and verification below still checks every banked point
+        from tracking.seeding import farthest_point_order
+        order = farthest_point_order(tmpl[banked], [0], max_pts)
+        searched = {banked[j] for j in order}
+    else:
+        searched = set(banked)
+    info["searched"] = len(searched)
     for cam, bank in banks.items():
         view = views.get(cam)
         if view is None or bank is None or not bank.templates:
             continue
         n_c = 0
+        gray = _gray(view.rgb)
+        H, W = gray.shape
+        windows: Dict[int, list] = {}
         for _name, pose, radius in hypotheses:
-            centres = {}
             for i, wp in enumerate(pose.apply(tmpl)):
+                tm = bank.templates.get(i)
+                if not tm or i not in searched:
+                    continue
                 px, z = geometry.project_world_to_pixel(view, wp)
-                if px is not None and z is not None and z > 0:
-                    centres[i] = px
-            found = search_candidates(view, bank, centres, int(radius),
-                                      int(config.track_reacq_topk),
-                                      float(config.track_reacq_ncc_min))
-            for i, peaks in found.items():
-                pix = np.array([p for _s, p in peaks], dtype=float)
-                world, valid = geometry.points_to_world(view, pix)
-                for w in world[valid]:
-                    lst = pooled.setdefault(i, [])
-                    if all(np.linalg.norm(w - q) > 1e-3 for q in lst):
-                        lst.append(w)
-                        n_c += 1
+                if px is not None and z is not None and z > 0 and np.all(np.isfinite(px)):
+                    windows.setdefault(i, []).append(
+                        _window(px, int(radius), tm[0].shape[0] // 2, W, H))
+        found = search_windows(gray, bank, windows, int(config.track_reacq_topk),
+                               float(config.track_reacq_ncc_min))
+        for i, peaks in found.items():
+            pix = np.array([p for _s, p in peaks], dtype=float)
+            world, valid = geometry.points_to_world(view, pix)
+            for w in world[valid]:
+                lst = pooled.setdefault(i, [])
+                if all(np.linalg.norm(w - q) > 1e-3 for q in lst):
+                    lst.append(w)
+                    n_c += 1
         info["cands"][cam] = n_c
     cands = {i: np.array(v) for i, v in pooled.items()}
     n_banked = len(set().union(*[set(b.templates) for b in banks.values() if b])) if banks else 0

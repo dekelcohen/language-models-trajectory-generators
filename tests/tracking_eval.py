@@ -485,7 +485,14 @@ class SimSceneDriver(SceneDriver):
         self.cameras = tuple(names or config.tracking_cameras)
 
     def _grid_seed(self, view, body_id, link_index, affordance_px, points):
-        """``points`` replaced by a mask grid when ``seeding == "grid"`` and the mask allows."""
+        """``points`` replaced by a mask grid when ``seeding == "grid"`` and the mask allows,
+        or by textured points on the affordance pixel's depth-connected part (``"region"``)."""
+        if self.seeding == "region":
+            from tracking.seeding import region_seed
+
+            pts, _px, info = region_seed(view, affordance_px, n_points=self.n_seed_points)
+            log.info("[eval] region seeding: %s", info)
+            return points if pts is None else pts
         if self.seeding != "grid":
             return points
         from tracking.seeding import mask_grid_seed, sim_link_mask
@@ -763,9 +770,10 @@ def add_eval_args(parser):
 
     seeding = parser.add_argument_group("seeding")
     seeding.add_argument("--seeding", default=config.track_seeding_default,
-                         choices=["affordance", "grid"],
+                         choices=["affordance", "grid", "region"],
                          help="affordance: 5 points at one pixel (historical); grid: spread over "
-                              "the sim instance mask, affordance points first")
+                              "the sim instance mask, affordance points first; region: textured "
+                              "points on the affordance pixel's depth-connected part (no mask)")
     seeding.add_argument("--seed-points", type=int, default=config.track_seed_points,
                          help="grid seeding size")
 

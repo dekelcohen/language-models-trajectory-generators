@@ -204,5 +204,42 @@ class TestCoastDamping(unittest.TestCase):
         self.assertLess(damped, 0.2 + 0.2 + 0.02)           # hold (10 x 2 cm) + |v| * tau
 
 
+class TestBankMergeAndWindows(unittest.TestCase):
+    def _tm(self, seed):
+        return np.random.default_rng(seed).integers(0, 255, (11, 11)).astype(np.uint8)
+
+    def test_merge_dedupes_and_caps_seed_bank_first_then_newest(self):
+        from tracking.reacquire import RefBank, merge_banks
+        a, b, c = self._tm(1), self._tm(2), self._tm(3)
+        seed = RefBank(0, {0: [a]})
+        old, new = RefBank(5, {0: [a.copy(), b]}), RefBank(10, {0: [c], 1: [b]})
+        m = merge_banks([seed, old, new], max_templates=2, dedupe_ncc=0.92)
+        self.assertEqual(m.frame, 10)
+        kept = m.templates[0]
+        self.assertEqual(len(kept), 2)                       # a's duplicate dropped, then cap
+        self.assertTrue(np.array_equal(kept[0], a))          # seed bank first
+        self.assertTrue(np.array_equal(kept[1], c))          # then the newest bank
+        self.assertEqual(len(m.templates[1]), 1)
+
+    def test_overlapping_windows_merge_and_far_ones_do_not(self):
+        from tracking.reacquire import merge_windows
+        self.assertEqual(merge_windows([(0, 0, 100, 100), (10, 10, 50, 50)]), [(0, 0, 100, 100)])
+        self.assertEqual(len(merge_windows([(0, 0, 20, 20), (200, 200, 220, 220)])), 2)
+
+    def test_small_window_peak_survives_large_window_distractor(self):
+        from tracking.reacquire import RefBank, search_windows
+        rng = np.random.default_rng(0)
+        gray = rng.integers(0, 40, (200, 200)).astype(np.uint8)
+        t = self._tm(7)
+        noisy = np.clip(t.astype(int) + rng.integers(-20, 21, t.shape), 0, 255).astype(np.uint8)
+        gray[95:106, 95:106] = noisy                         # the true match, near the prediction
+        gray[15:26, 15:26] = t                               # a better far-away distractor
+        bank = RefBank(0, {0: [t]})
+        out = search_windows(gray, bank, {0: [(80, 80, 121, 121), (0, 0, 200, 200)]}, 1, 0.6)
+        pixels = {p for _s, p in out[0]}
+        self.assertIn((100, 100), pixels)
+        self.assertIn((20, 20), pixels)
+
+
 if __name__ == "__main__":
     unittest.main()

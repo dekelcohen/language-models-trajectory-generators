@@ -1,0 +1,5990 @@
+{
+  "schema": "tracking_eval/v1",
+  "created_at": "2026-09-28T16:37:34",
+  "wall_s": 38.115,
+  "config": {
+    "label": "klt+pose_tracker",
+    "tracker_provider": "klt",
+    "tracker3d": "pose_tracker",
+    "cameras": [
+      "head",
+      "wrist"
+    ],
+    "image_size": [
+      256,
+      256
+    ],
+    "track_interval": 1,
+    "lost_penalty_m": 1.0,
+    "recovery_threshold_m": 0.05,
+    "seed_offset_frame": "local",
+    "timing": {
+      "mode": "realtime",
+      "camera_fps": 30.0,
+      "motion_rate_hz": 10.0,
+      "latency": "measured"
+    },
+    "scene": "door_arc",
+    "n_frames": 40,
+    "objects": [
+      "door_handle"
+    ],
+    "seeding": "affordance",
+    "n_seed_points": 20,
+    "occlusion_window": [
+      15,
+      25
+    ],
+    "occluder_cam": [
+      "head"
+    ],
+    "occluder_radius": 40,
+    "hinge_step": 0.02,
+    "latch_step": 0.03,
+    "affordance": {
+      "point": [
+        176,
+        80
+      ],
+      "label": "door_handle"
+    }
+  },
+  "seed_offsets": {
+    "door_handle": {
+      "local": [
+        0.00371,
+        -0.173272,
+        0.006736
+      ],
+      "rotating": true
+    }
+  },
+  "objects": {
+    "door_handle": {
+      "n_frames": 118,
+      "n_valid_frames": 118,
+      "median_l2_m": 0.02869466990931651,
+      "p95_l2_m": 0.041935902678121674,
+      "max_l2_m": 0.05464386129860697,
+      "median_l2_valid_m": 0.02869466990931651,
+      "pct_lost": 0.0,
+      "n_dropped_frames": 0,
+      "err_during_occlusion_m": 0.027742453701269675,
+      "n_occluded_frames": 30,
+      "frames_to_recover": 0,
+      "s_to_recover": 0.0333,
+      "age_s_median": 0.033333333333333326,
+      "age_s_p95": 0.03333333333333366,
+      "age_s_max": 0.06666666666666687,
+      "max_jump_m": 0.015498361979809852,
+      "median_disagreement_m": 0.032522341173587245,
+      "latency_ms_mean": 17.963,
+      "latency_ms_p95": 24.804,
+      "median_point_err_m": 0.03435753628655733,
+      "median_pose_err_m": 0.029618566896185798,
+      "lost_penalty_m": 1.0,
+      "recovery_threshold_m": 0.05
+    }
+  },
+  "aggregate": {
+    "n_objects": 1,
+    "n_frames": 118,
+    "n_valid_frames": 118,
+    "median_l2_m": 0.028695,
+    "median_l2_valid_m": 0.028695,
+    "err_during_occlusion_m": 0.027742,
+    "latency_ms_mean": 17.963,
+    "median_disagreement_m": 0.032522,
+    "median_point_err_m": 0.034358,
+    "median_pose_err_m": 0.029619,
+    "age_s_median": 0.033333,
+    "p95_l2_m": 0.041936,
+    "max_l2_m": 0.054644,
+    "max_jump_m": 0.015498,
+    "pct_lost": 0.0,
+    "latency_ms_p95": 24.804,
+    "age_s_p95": 0.033333,
+    "age_s_max": 0.066667,
+    "s_to_recover": 0.0333,
+    "frames_to_recover": 0
+  },
+  "peak_vram_mb": null,
+  "session": {
+    "errors": 0,
+    "lift_errors": 0,
+    "aborted": false,
+    "abort_reason": null
+  },
+  "realtime": {
+    "camera_fps": 30.0,
+    "policy": "drop",
+    "min_period_s": 0.0,
+    "latency": {
+      "mode": "measured",
+      "scale": 1.0,
+      "profile": null
+    },
+    "stats": {
+      "frames_exposed": 120,
+      "frames_missed": 0,
+      "frames_dropped_busy": 3,
+      "frames_dropped_period": 0,
+      "frames_processed": 117,
+      "published": 116,
+      "max_queue_wait_s": 0.0,
+      "max_age_s": 0.06666666666666687
+    },
+    "n_warmup_frames": 2
+  },
+  "frames": {
+    "door_handle": [
+      {
+        "frame": 2,
+        "obj": "door_handle",
+        "predicted": [
+          -0.211802,
+          0.088564,
+          0.672396
+        ],
+        "expected": [
+          -0.213146,
+          0.102462,
+          0.679203
+        ],
+        "error_m": 0.015533,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.030852,
+        "latency_ms": 47.548,
+        "point_err_m": 0.019504,
+        "n_points_scored": 9,
+        "pose_err_m": 0.015533,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 1.0,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0206,
+          "fit_n": 5,
+          "kf": "init",
+          "kf_reset": true,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow"
+        },
+        "t": 0.06667,
+        "age_s": 0.06667
+      },
+      {
+        "frame": 3,
+        "obj": "door_handle",
+        "predicted": [
+          -0.212679,
+          0.089343,
+          0.673825
+        ],
+        "expected": [
+          -0.215119,
+          0.103204,
+          0.679286
+        ],
+        "error_m": 0.015096,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.026405,
+        "latency_ms": 19.556,
+        "point_err_m": 0.016578,
+        "n_points_scored": 9,
+        "pose_err_m": 0.015097,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.6667,
+          "jump_gate_m": 0.0928,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0147,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.03,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.1,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 4,
+        "obj": "door_handle",
+        "predicted": [
+          -0.214143,
+          0.091791,
+          0.673005
+        ],
+        "expected": [
+          -0.216726,
+          0.103801,
+          0.679353
+        ],
+        "error_m": 0.013827,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.024167,
+        "latency_ms": 23.297,
+        "point_err_m": 0.013481,
+        "n_points_scored": 9,
+        "pose_err_m": 0.013829,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0949,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0102,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.05,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.13333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 5,
+        "obj": "door_handle",
+        "predicted": [
+          -0.215369,
+          0.091711,
+          0.67143
+        ],
+        "expected": [
+          -0.219439,
+          0.104794,
+          0.679466
+        ],
+        "error_m": 0.015884,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.029241,
+        "latency_ms": 23.417,
+        "point_err_m": 0.020611,
+        "n_points_scored": 9,
+        "pose_err_m": 0.015887,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0839,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0123,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.08,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.16667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 6,
+        "obj": "door_handle",
+        "predicted": [
+          -0.217608,
+          0.092207,
+          0.670362
+        ],
+        "expected": [
+          -0.222277,
+          0.105813,
+          0.679584
+        ],
+        "error_m": 0.017087,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.029089,
+        "latency_ms": 16.94,
+        "point_err_m": 0.020901,
+        "n_points_scored": 9,
+        "pose_err_m": 0.017091,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0817,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0116,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.05,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.2,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 7,
+        "obj": "door_handle",
+        "predicted": [
+          -0.219405,
+          0.093551,
+          0.670018
+        ],
+        "expected": [
+          -0.224332,
+          0.106538,
+          0.679668
+        ],
+        "error_m": 0.016913,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.028328,
+        "latency_ms": 20.596,
+        "point_err_m": 0.016822,
+        "n_points_scored": 9,
+        "pose_err_m": 0.016919,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0788,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0112,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.02,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.23333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 8,
+        "obj": "door_handle",
+        "predicted": [
+          -0.221156,
+          0.095223,
+          0.668811
+        ],
+        "expected": [
+          -0.227569,
+          0.107658,
+          0.679801
+        ],
+        "error_m": 0.017791,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.028547,
+        "latency_ms": 24.72,
+        "point_err_m": 0.018067,
+        "n_points_scored": 9,
+        "pose_err_m": 0.017799,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0762,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0113,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.05,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.26667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 9,
+        "obj": "door_handle",
+        "predicted": [
+          -0.223238,
+          0.098177,
+          0.670351
+        ],
+        "expected": [
+          -0.230795,
+          0.108749,
+          0.679932
+        ],
+        "error_m": 0.016145,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.027364,
+        "latency_ms": 19.641,
+        "point_err_m": 0.017293,
+        "n_points_scored": 9,
+        "pose_err_m": 0.016157,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0745,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0125,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.45,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.3,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 10,
+        "obj": "door_handle",
+        "predicted": [
+          -0.225573,
+          0.098687,
+          0.669102
+        ],
+        "expected": [
+          -0.233052,
+          0.109497,
+          0.680022
+        ],
+        "error_m": 0.01709,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.029823,
+        "latency_ms": 22.313,
+        "point_err_m": 0.02086,
+        "n_points_scored": 9,
+        "pose_err_m": 0.017103,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.074,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0133,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.14,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.33333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 11,
+        "obj": "door_handle",
+        "predicted": [
+          -0.228844,
+          0.097776,
+          0.667642
+        ],
+        "expected": [
+          -0.23653,
+          0.110625,
+          0.680161
+        ],
+        "error_m": 0.019517,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.032341,
+        "latency_ms": 18.143,
+        "point_err_m": 0.021979,
+        "n_points_scored": 9,
+        "pose_err_m": 0.019533,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0738,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.009,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.3,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.36667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 12,
+        "obj": "door_handle",
+        "predicted": [
+          -0.231497,
+          0.099092,
+          0.667162
+        ],
+        "expected": [
+          -0.239938,
+          0.111701,
+          0.680296
+        ],
+        "error_m": 0.020069,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.03048,
+        "latency_ms": 22.197,
+        "point_err_m": 0.02002,
+        "n_points_scored": 9,
+        "pose_err_m": 0.020089,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0706,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0112,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.07,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.4,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 13,
+        "obj": "door_handle",
+        "predicted": [
+          -0.23422,
+          0.100433,
+          0.66689
+        ],
+        "expected": [
+          -0.242292,
+          0.112429,
+          0.680389
+        ],
+        "error_m": 0.01978,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.02771,
+        "latency_ms": 22.33,
+        "point_err_m": 0.018295,
+        "n_points_scored": 9,
+        "pose_err_m": 0.019804,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0702,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.013,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.09,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 0.43333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 14,
+        "obj": "door_handle",
+        "predicted": [
+          -0.237952,
+          0.101986,
+          0.664036
+        ],
+        "expected": [
+          -0.245887,
+          0.113513,
+          0.680529
+        ],
+        "error_m": 0.02163,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.024187,
+        "latency_ms": 22.923,
+        "point_err_m": 0.020215,
+        "n_points_scored": 9,
+        "pose_err_m": 0.021655,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0707,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0154,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.3,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.46667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 15,
+        "obj": "door_handle",
+        "predicted": [
+          -0.240494,
+          0.103196,
+          0.662821
+        ],
+        "expected": [
+          -0.249386,
+          0.114539,
+          0.680664
+        ],
+        "error_m": 0.022937,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.02782,
+        "latency_ms": 19.176,
+        "point_err_m": 0.022108,
+        "n_points_scored": 9,
+        "pose_err_m": 0.022964,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.065,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0155,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.02,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.5,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 16,
+        "obj": "door_handle",
+        "predicted": [
+          -0.243062,
+          0.104307,
+          0.662033
+        ],
+        "expected": [
+          -0.25179,
+          0.115227,
+          0.680756
+        ],
+        "error_m": 0.023366,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.029453,
+        "latency_ms": 21.016,
+        "point_err_m": 0.020641,
+        "n_points_scored": 9,
+        "pose_err_m": 0.023396,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0627,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0141,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.05,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "wrist": "1/1 drifted"
+          }
+        },
+        "t": 0.53333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 17,
+        "obj": "door_handle",
+        "predicted": [
+          -0.245536,
+          0.105532,
+          0.661554
+        ],
+        "expected": [
+          -0.255448,
+          0.116248,
+          0.680895
+        ],
+        "error_m": 0.024231,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.030228,
+        "latency_ms": 20.799,
+        "point_err_m": 0.021876,
+        "n_points_scored": 9,
+        "pose_err_m": 0.024265,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0138,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.07,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "wrist": "1/1 drifted"
+          }
+        },
+        "t": 0.56667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 18,
+        "obj": "door_handle",
+        "predicted": [
+          -0.248519,
+          0.106938,
+          0.661118
+        ],
+        "expected": [
+          -0.258997,
+          0.117208,
+          0.681029
+        ],
+        "error_m": 0.024732,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.036543,
+        "latency_ms": 25.416,
+        "point_err_m": 0.021434,
+        "n_points_scored": 9,
+        "pose_err_m": 0.024771,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0665,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0156,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.12,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.6,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 19,
+        "obj": "door_handle",
+        "predicted": [
+          -0.251972,
+          0.107177,
+          0.660434
+        ],
+        "expected": [
+          -0.26143,
+          0.117849,
+          0.68112
+        ],
+        "error_m": 0.025124,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.033317,
+        "latency_ms": 19.14,
+        "point_err_m": 0.023216,
+        "n_points_scored": 9,
+        "pose_err_m": 0.025171,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0679,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0178,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.15,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.63333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 20,
+        "obj": "door_handle",
+        "predicted": [
+          -0.254937,
+          0.108061,
+          0.659541
+        ],
+        "expected": [
+          -0.265126,
+          0.118797,
+          0.681256
+        ],
+        "error_m": 0.02628,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.031947,
+        "latency_ms": 23.806,
+        "point_err_m": 0.023078,
+        "n_points_scored": 9,
+        "pose_err_m": 0.026331,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0674,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.018,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.01,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.66667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 21,
+        "obj": "door_handle",
+        "predicted": [
+          -0.257897,
+          0.108981,
+          0.658815
+        ],
+        "expected": [
+          -0.268707,
+          0.119685,
+          0.681387
+        ],
+        "error_m": 0.027221,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.039249,
+        "latency_ms": 18.452,
+        "point_err_m": 0.023509,
+        "n_points_scored": 9,
+        "pose_err_m": 0.027277,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0665,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0125,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.01,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "wrist": "1/1 drifted"
+          }
+        },
+        "t": 0.7,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 22,
+        "obj": "door_handle",
+        "predicted": [
+          -0.260797,
+          0.109566,
+          0.657142
+        ],
+        "expected": [
+          -0.27116,
+          0.120277,
+          0.681476
+        ],
+        "error_m": 0.028536,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.03536,
+        "latency_ms": 22.089,
+        "point_err_m": 0.024367,
+        "n_points_scored": 9,
+        "pose_err_m": 0.028594,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0678,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0163,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.1,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.73333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 23,
+        "obj": "door_handle",
+        "predicted": [
+          -0.263601,
+          0.110541,
+          0.65665
+        ],
+        "expected": [
+          -0.274882,
+          0.121148,
+          0.68161
+        ],
+        "error_m": 0.029373,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.034191,
+        "latency_ms": 21.698,
+        "point_err_m": 0.025298,
+        "n_points_scored": 9,
+        "pose_err_m": 0.029437,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0679,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0238,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.03,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.76667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 24,
+        "obj": "door_handle",
+        "predicted": [
+          -0.266464,
+          0.111831,
+          0.656953
+        ],
+        "expected": [
+          -0.278486,
+          0.121961,
+          0.681739
+        ],
+        "error_m": 0.029351,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.030974,
+        "latency_ms": 20.139,
+        "point_err_m": 0.027486,
+        "n_points_scored": 9,
+        "pose_err_m": 0.029423,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0691,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0219,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.09,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.8,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 25,
+        "obj": "door_handle",
+        "predicted": [
+          -0.269094,
+          0.113646,
+          0.656864
+        ],
+        "expected": [
+          -0.280953,
+          0.122501,
+          0.681826
+        ],
+        "error_m": 0.02902,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.032348,
+        "latency_ms": 22.455,
+        "point_err_m": 0.027458,
+        "n_points_scored": 9,
+        "pose_err_m": 0.029095,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0673,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0234,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.16,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.83333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 26,
+        "obj": "door_handle",
+        "predicted": [
+          -0.27189,
+          0.114945,
+          0.65619
+        ],
+        "expected": [
+          -0.284696,
+          0.123294,
+          0.681957
+        ],
+        "error_m": 0.029961,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.028577,
+        "latency_ms": 24.323,
+        "point_err_m": 0.026844,
+        "n_points_scored": 9,
+        "pose_err_m": 0.030039,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.068,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0282,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.01,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.86667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 27,
+        "obj": "door_handle",
+        "predicted": [
+          -0.274823,
+          0.115756,
+          0.655628
+        ],
+        "expected": [
+          -0.288319,
+          0.124032,
+          0.682082
+        ],
+        "error_m": 0.030829,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.030595,
+        "latency_ms": 18.135,
+        "point_err_m": 0.027465,
+        "n_points_scored": 9,
+        "pose_err_m": 0.030914,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0689,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0236,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.01,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.9,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 28,
+        "obj": "door_handle",
+        "predicted": [
+          -0.277637,
+          0.116801,
+          0.65506
+        ],
+        "expected": [
+          -0.290797,
+          0.124519,
+          0.682167
+        ],
+        "error_m": 0.031106,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.03138,
+        "latency_ms": 21.173,
+        "point_err_m": 0.028294,
+        "n_points_scored": 9,
+        "pose_err_m": 0.031194,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0692,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0274,
+          "fit_n": 5,
+          "reacquire": true,
+          "unmeasured_frames": 0.33333333333333326,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "ok: 5/5 point(s) from predicted pose (red)",
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.93333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 29,
+        "obj": "door_handle",
+        "predicted": [
+          -0.279854,
+          0.119797,
+          0.65487
+        ],
+        "expected": [
+          -0.294556,
+          0.125233,
+          0.682294
+        ],
+        "error_m": 0.031588,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.037172,
+        "latency_ms": 24.057,
+        "point_err_m": 0.027989,
+        "n_points_scored": 9,
+        "pose_err_m": 0.031675,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0723,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.015,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.19,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 0.96667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 30,
+        "obj": "door_handle",
+        "predicted": [
+          -0.281829,
+          0.123079,
+          0.655317
+        ],
+        "expected": [
+          -0.298194,
+          0.125894,
+          0.682417
+        ],
+        "error_m": 0.031782,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.032696,
+        "latency_ms": 24.087,
+        "point_err_m": 0.0293,
+        "n_points_scored": 9,
+        "pose_err_m": 0.031871,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0698,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.018,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.24,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.0,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 31,
+        "obj": "door_handle",
+        "predicted": [
+          -0.283969,
+          0.125882,
+          0.654931
+        ],
+        "expected": [
+          -0.300683,
+          0.126329,
+          0.682499
+        ],
+        "error_m": 0.032242,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.036672,
+        "latency_ms": 22.278,
+        "point_err_m": 0.031297,
+        "n_points_scored": 9,
+        "pose_err_m": 0.032333,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0664,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.015,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.2,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.03333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 32,
+        "obj": "door_handle",
+        "predicted": [
+          -0.286003,
+          0.128637,
+          0.654353
+        ],
+        "expected": [
+          -0.304456,
+          0.126963,
+          0.682623
+        ],
+        "error_m": 0.033801,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.039311,
+        "latency_ms": 24.117,
+        "point_err_m": 0.031776,
+        "n_points_scored": 9,
+        "pose_err_m": 0.033895,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0664,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0162,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.18,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.06667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 33,
+        "obj": "door_handle",
+        "predicted": [
+          -0.288141,
+          0.131261,
+          0.653034
+        ],
+        "expected": [
+          -0.308106,
+          0.127547,
+          0.682742
+        ],
+        "error_m": 0.035985,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.033652,
+        "latency_ms": 21.045,
+        "point_err_m": 0.034761,
+        "n_points_scored": 8,
+        "pose_err_m": 0.036081,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0669,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0274,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.12,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.1,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 34,
+        "obj": "door_handle",
+        "predicted": [
+          -0.290601,
+          0.132993,
+          0.651943
+        ],
+        "expected": [
+          -0.310603,
+          0.12793,
+          0.682823
+        ],
+        "error_m": 0.037139,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.039888,
+        "latency_ms": 23.802,
+        "point_err_m": 0.033318,
+        "n_points_scored": 9,
+        "pose_err_m": 0.037238,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0656,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0241,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.04,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.13333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 35,
+        "obj": "door_handle",
+        "predicted": [
+          -0.292417,
+          0.13614,
+          0.651057
+        ],
+        "expected": [
+          -0.314388,
+          0.128484,
+          0.682943
+        ],
+        "error_m": 0.039472,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.039163,
+        "latency_ms": 23.46,
+        "point_err_m": 0.036247,
+        "n_points_scored": 9,
+        "pose_err_m": 0.039576,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0648,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0287,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.2,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.16667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 36,
+        "obj": "door_handle",
+        "predicted": [
+          -0.294423,
+          0.138673,
+          0.650192
+        ],
+        "expected": [
+          -0.31805,
+          0.12899,
+          0.683059
+        ],
+        "error_m": 0.041619,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.047872,
+        "latency_ms": 18.312,
+        "point_err_m": 0.04243,
+        "n_points_scored": 9,
+        "pose_err_m": 0.041728,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0642,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0297,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.1,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.2,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 37,
+        "obj": "door_handle",
+        "predicted": [
+          -0.296033,
+          0.141699,
+          0.649111
+        ],
+        "expected": [
+          -0.320553,
+          0.12932,
+          0.683137
+        ],
+        "error_m": 0.043729,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.046882,
+        "latency_ms": 19.367,
+        "point_err_m": 0.019286,
+        "n_points_scored": 4,
+        "pose_err_m": 0.043843,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0661,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0296,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.19,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.23333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 38,
+        "obj": "door_handle",
+        "predicted": [
+          -0.298539,
+          0.141424,
+          0.646847
+        ],
+        "expected": [
+          -0.324348,
+          0.129794,
+          0.683254
+        ],
+        "error_m": 0.046118,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.041981,
+        "latency_ms": 22.528,
+        "point_err_m": 0.024135,
+        "n_points_scored": 7,
+        "pose_err_m": 0.046226,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.067,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0323,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.96,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.26667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 39,
+        "obj": "door_handle",
+        "predicted": [
+          -0.300359,
+          0.14425,
+          0.646157
+        ],
+        "expected": [
+          -0.328019,
+          0.130223,
+          0.683365
+        ],
+        "error_m": 0.048438,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.04608,
+        "latency_ms": 29.261,
+        "point_err_m": 0.023993,
+        "n_points_scored": 7,
+        "pose_err_m": 0.048551,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0667,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0341,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.16,
+          "rotation_observable": false,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.3,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 40,
+        "obj": "door_handle",
+        "predicted": [
+          -0.302483,
+          0.146369,
+          0.645197
+        ],
+        "expected": [
+          -0.330528,
+          0.1305,
+          0.683441
+        ],
+        "error_m": 0.050009,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.044994,
+        "latency_ms": 16.207,
+        "point_err_m": 0.024998,
+        "n_points_scored": 7,
+        "pose_err_m": 0.050126,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0676,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0342,
+          "fit_n": 5,
+          "reacquire": true,
+          "unmeasured_frames": 0.33333333333333437,
+          "mode": "red",
+          "pose_reseed": {
+            "wrist": "skip: 1/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.33333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 41,
+        "obj": "door_handle",
+        "predicted": [
+          -0.304601,
+          0.148495,
+          0.644237
+        ],
+        "expected": [
+          -0.334331,
+          0.130894,
+          0.683554
+        ],
+        "error_m": 0.05234,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.043828,
+        "latency_ms": 16.843,
+        "point_err_m": 0.024667,
+        "n_points_scored": 7,
+        "pose_err_m": 0.052459,
+        "cam_status": {
+          "head": "jumped",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0706,
+          "rejected_jump": {
+            "head": 2
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0291,
+          "fit_n": 4,
+          "reacquire": true,
+          "unmeasured_frames": 0.6666666666666665,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 2/5 predicted points depth-verified",
+            "wrist": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.36667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 42,
+        "obj": "door_handle",
+        "predicted": [
+          -0.306713,
+          0.150627,
+          0.643278
+        ],
+        "expected": [
+          -0.338008,
+          0.131246,
+          0.683662
+        ],
+        "error_m": 0.054644,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.049881,
+        "latency_ms": 17.134,
+        "point_err_m": 0.024274,
+        "n_points_scored": 7,
+        "pose_err_m": 0.054766,
+        "cam_status": {
+          "head": "jumped",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0739,
+          "rejected_jump": {
+            "head": 2
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0312,
+          "fit_n": 4,
+          "reacquire": true,
+          "unmeasured_frames": 1.0000000000000009,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "ok: 3/5 point(s) from predicted pose (red)",
+            "wrist": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.4,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 43,
+        "obj": "door_handle",
+        "predicted": [
+          -0.315882,
+          0.147357,
+          0.655337
+        ],
+        "expected": [
+          -0.340522,
+          0.131469,
+          0.683735
+        ],
+        "error_m": 0.040817,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.052049,
+        "latency_ms": 15.627,
+        "point_err_m": 0.024726,
+        "n_points_scored": 7,
+        "pose_err_m": 0.040968,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0775,
+          "rejected_jump": {
+            "head": 2
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0314,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 10.53,
+          "rotation_observable": false,
+          "correct_cams": [
+            "head"
+          ],
+          "mode": "yellow"
+        },
+        "t": 1.43333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 44,
+        "obj": "door_handle",
+        "predicted": [
+          -0.323699,
+          0.144921,
+          0.665184
+        ],
+        "expected": [
+          -0.344332,
+          0.131783,
+          0.683845
+        ],
+        "error_m": 0.030765,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.05342,
+        "latency_ms": 17.86,
+        "point_err_m": 0.021197,
+        "n_points_scored": 4,
+        "pose_err_m": 0.030975,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0766,
+          "rejected_jump": {
+            "head": 2
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0315,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 5.43,
+          "rotation_observable": false,
+          "correct_cams": [
+            "head"
+          ],
+          "mode": "yellow"
+        },
+        "t": 1.46667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 45,
+        "obj": "door_handle",
+        "predicted": [
+          -0.327378,
+          0.145842,
+          0.667175
+        ],
+        "expected": [
+          -0.348015,
+          0.132057,
+          0.683949
+        ],
+        "error_m": 0.029954,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": 0.057326,
+        "latency_ms": 17.784,
+        "point_err_m": 0.024183,
+        "n_points_scored": 4,
+        "pose_err_m": 0.030186,
+        "cam_status": {
+          "head": "ok",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0757,
+          "rejected_jump": {
+            "head": 2
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0209,
+          "fit_n": 4,
+          "reacquire": true,
+          "unmeasured_frames": 0.33333333333333215,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "ok: 4/5 point(s) from predicted pose (red)",
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.5,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 46,
+        "obj": "door_handle",
+        "predicted": [
+          -0.331045,
+          0.146745,
+          0.669193
+        ],
+        "expected": [
+          -0.350532,
+          0.132228,
+          0.684019
+        ],
+        "error_m": 0.028465,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.461,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.02873,
+        "cam_status": {
+          "head": "lost",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.079,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0186,
+          "fit_n": 4,
+          "reacquire": true,
+          "unmeasured_frames": 0.6666666666666665,
+          "mode": "red",
+          "pose_reseed": {
+            "wrist": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.53333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 47,
+        "obj": "door_handle",
+        "predicted": [
+          -0.334702,
+          0.14763,
+          0.671241
+        ],
+        "expected": [
+          -0.354346,
+          0.132461,
+          0.684125
+        ],
+        "error_m": 0.027964,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.638,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.028256,
+        "cam_status": {
+          "head": "lost",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0826,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0204,
+          "fit_n": 4,
+          "reacquire": true,
+          "unmeasured_frames": 0.9999999999999987,
+          "mode": "red",
+          "pose_reseed": {
+            "wrist": "ok: 3/5 point(s) from predicted pose (red)"
+          }
+        },
+        "t": 1.56667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 48,
+        "obj": "door_handle",
+        "predicted": [
+          -0.338346,
+          0.148497,
+          0.673316
+        ],
+        "expected": [
+          -0.358032,
+          0.132658,
+          0.684225
+        ],
+        "error_m": 0.027521,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 8.387,
+        "point_err_m": 0.037117,
+        "n_points_scored": 2,
+        "pose_err_m": 0.027844,
+        "cam_status": {
+          "head": "lost",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0864,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 2,
+          "too_few_points": 2,
+          "reacquire": true,
+          "unmeasured_frames": 1.333333333333333,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.6,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 49,
+        "obj": "door_handle",
+        "predicted": [
+          -0.341979,
+          0.149346,
+          0.67542
+        ],
+        "expected": [
+          -0.360551,
+          0.132776,
+          0.684293
+        ],
+        "error_m": 0.026424,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.493,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.026794,
+        "cam_status": {
+          "head": "lost",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0904,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0253,
+          "fit_n": 3,
+          "reacquire": true,
+          "unmeasured_frames": 1.6666666666666674,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.63333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 50,
+        "obj": "door_handle",
+        "predicted": [
+          -0.3456,
+          0.150176,
+          0.677551
+        ],
+        "expected": [
+          -0.364368,
+          0.132929,
+          0.684394
+        ],
+        "error_m": 0.026391,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.233,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.026797,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0946,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.022,
+          "fit_n": 3,
+          "reacquire": true,
+          "unmeasured_frames": 1.9999999999999996,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/5 predicted points depth-verified",
+            "wrist": "ok: 4/5 point(s) from predicted pose (red)"
+          }
+        },
+        "t": 1.66667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 51,
+        "obj": "door_handle",
+        "predicted": [
+          -0.349209,
+          0.150987,
+          0.679711
+        ],
+        "expected": [
+          -0.368056,
+          0.133048,
+          0.684491
+        ],
+        "error_m": 0.026456,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.521,
+        "point_err_m": 0.023019,
+        "n_points_scored": 4,
+        "pose_err_m": 0.0269,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0991,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0224,
+          "fit_n": 4,
+          "reacquire": true,
+          "unmeasured_frames": 2.333333333333334,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.7,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 52,
+        "obj": "door_handle",
+        "predicted": [
+          -0.352805,
+          0.15178,
+          0.681897
+        ],
+        "expected": [
+          -0.370576,
+          0.133113,
+          0.684556
+        ],
+        "error_m": 0.025911,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.335,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.026415,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.1038,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0223,
+          "fit_n": 4,
+          "reacquire": true,
+          "unmeasured_frames": 2.666666666666666,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/5 predicted points depth-verified"
+          }
+        },
+        "t": 1.73333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 53,
+        "obj": "door_handle",
+        "predicted": [
+          -0.356388,
+          0.152554,
+          0.684112
+        ],
+        "expected": [
+          -0.374394,
+          0.133186,
+          0.684653
+        ],
+        "error_m": 0.026451,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.531,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.026993,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.1086,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0221,
+          "fit_n": 4,
+          "reacquire": true,
+          "unmeasured_frames": 3.0000000000000004,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/5 predicted points depth-verified",
+            "wrist": "ok: 5/5 point(s) from predicted pose (red)"
+          }
+        },
+        "t": 1.76667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 54,
+        "obj": "door_handle",
+        "predicted": [
+          -0.359581,
+          0.153576,
+          0.685691
+        ],
+        "expected": [
+          -0.378082,
+          0.133227,
+          0.684745
+        ],
+        "error_m": 0.027518,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.271,
+        "point_err_m": 0.030467,
+        "n_points_scored": 5,
+        "pose_err_m": 0.02808,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.1137,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0105,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "tentative": true,
+          "rotation_observable": false,
+          "mode": "yellow"
+        },
+        "t": 1.8,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 55,
+        "obj": "door_handle",
+        "predicted": [
+          -0.365908,
+          0.151458,
+          0.687117
+        ],
+        "expected": [
+          -0.380602,
+          0.133239,
+          0.684808
+        ],
+        "error_m": 0.02352,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.852,
+        "point_err_m": 0.028944,
+        "n_points_scored": 5,
+        "pose_err_m": 0.024202,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0806,
+          "rejected_jump": {
+            "wrist": 2
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0059,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.21,
+          "tentative": true,
+          "rotation_observable": false,
+          "mode": "yellow"
+        },
+        "t": 1.83333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 56,
+        "obj": "door_handle",
+        "predicted": [
+          -0.368687,
+          0.152606,
+          0.688817
+        ],
+        "expected": [
+          -0.384419,
+          0.133232,
+          0.684901
+        ],
+        "error_m": 0.025262,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.811,
+        "point_err_m": 0.030682,
+        "n_points_scored": 5,
+        "pose_err_m": 0.02595,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0669,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0139,
+          "fit_n": 5,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.36,
+          "tentative": true,
+          "rotation_observable": false,
+          "mode": "yellow"
+        },
+        "t": 1.86667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 57,
+        "obj": "door_handle",
+        "predicted": [
+          -0.372978,
+          0.152117,
+          0.689099
+        ],
+        "expected": [
+          -0.388105,
+          0.133197,
+          0.684989
+        ],
+        "error_m": 0.02457,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.982,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.025266,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0677,
+          "rejected_jump": {
+            "wrist": 2
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0059,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.28,
+          "tentative": true,
+          "rotation_observable": false,
+          "mode": "yellow"
+        },
+        "t": 1.9,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 58,
+        "obj": "door_handle",
+        "predicted": [
+          -0.376705,
+          0.152506,
+          0.691011
+        ],
+        "expected": [
+          -0.390624,
+          0.133156,
+          0.685048
+        ],
+        "error_m": 0.024571,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.825,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.025332,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "fit_rmse_m": 0.0159,
+          "fit_n": 5,
+          "reacquire": true,
+          "unmeasured_frames": 0.33333333333333215,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/5 predicted points depth-verified",
+            "wrist": "ok: 4/5 point(s) from predicted pose (red)"
+          }
+        },
+        "t": 1.93333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 59,
+        "obj": "door_handle",
+        "predicted": [
+          -0.379455,
+          0.153632,
+          0.692354
+        ],
+        "expected": [
+          -0.394438,
+          0.133069,
+          0.685137
+        ],
+        "error_m": 0.026446,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.234,
+        "point_err_m": 0.032794,
+        "n_points_scored": 4,
+        "pose_err_m": 0.027201,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0672,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0109,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.27,
+          "tentative": true,
+          "rotation_observable": false,
+          "mode": "yellow"
+        },
+        "t": 1.96667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 60,
+        "obj": "door_handle",
+        "predicted": [
+          -0.383678,
+          0.152874,
+          0.693488
+        ],
+        "expected": [
+          -0.398121,
+          0.132956,
+          0.685221
+        ],
+        "error_m": 0.025956,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.233,
+        "point_err_m": 0.031964,
+        "n_points_scored": 4,
+        "pose_err_m": 0.02673,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0681,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0072,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.16,
+          "tentative": true,
+          "rotation_observable": false,
+          "mode": "yellow"
+        },
+        "t": 2.0,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 61,
+        "obj": "door_handle",
+        "predicted": [
+          -0.386742,
+          0.153303,
+          0.694078
+        ],
+        "expected": [
+          -0.400637,
+          0.132863,
+          0.685278
+        ],
+        "error_m": 0.026236,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.798,
+        "point_err_m": 0.032553,
+        "n_points_scored": 4,
+        "pose_err_m": 0.027024,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0665,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0058,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.13,
+          "tentative": true,
+          "rotation_observable": false,
+          "mode": "yellow"
+        },
+        "t": 2.03333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 62,
+        "obj": "door_handle",
+        "predicted": [
+          -0.390531,
+          0.152883,
+          0.694928
+        ],
+        "expected": [
+          -0.404447,
+          0.132696,
+          0.685362
+        ],
+        "error_m": 0.026318,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.782,
+        "point_err_m": 0.032397,
+        "n_points_scored": 4,
+        "pose_err_m": 0.027113,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0643,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.007,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.14,
+          "tentative": true,
+          "rotation_observable": false,
+          "mode": "yellow"
+        },
+        "t": 2.06667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 63,
+        "obj": "door_handle",
+        "predicted": [
+          -0.39315,
+          0.153914,
+          0.695677
+        ],
+        "expected": [
+          -0.408126,
+          0.132507,
+          0.685442
+        ],
+        "error_m": 0.028058,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.914,
+        "point_err_m": 0.03514,
+        "n_points_scored": 4,
+        "pose_err_m": 0.028833,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0642,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0099,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.56,
+          "tentative": true,
+          "rotation_observable": false,
+          "mode": "yellow"
+        },
+        "t": 2.1,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 64,
+        "obj": "door_handle",
+        "predicted": [
+          -0.396014,
+          0.154697,
+          0.696391
+        ],
+        "expected": [
+          -0.410638,
+          0.132361,
+          0.685496
+        ],
+        "error_m": 0.028836,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.311,
+        "point_err_m": 0.033963,
+        "n_points_scored": 4,
+        "pose_err_m": 0.029618,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0654,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0114,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.22,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.13333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 65,
+        "obj": "door_handle",
+        "predicted": [
+          -0.398569,
+          0.155544,
+          0.696816
+        ],
+        "expected": [
+          -0.414441,
+          0.132115,
+          0.685575
+        ],
+        "error_m": 0.03045,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.686,
+        "point_err_m": 0.035441,
+        "n_points_scored": 4,
+        "pose_err_m": 0.031205,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0667,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0113,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.25,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.16667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 66,
+        "obj": "door_handle",
+        "predicted": [
+          -0.401404,
+          0.156155,
+          0.697168
+        ],
+        "expected": [
+          -0.418113,
+          0.131849,
+          0.685651
+        ],
+        "error_m": 0.031664,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.556,
+        "point_err_m": 0.034677,
+        "n_points_scored": 4,
+        "pose_err_m": 0.0324,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0678,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0112,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.1,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.2,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 67,
+        "obj": "door_handle",
+        "predicted": [
+          -0.404497,
+          0.156417,
+          0.697546
+        ],
+        "expected": [
+          -0.42062,
+          0.13165,
+          0.685701
+        ],
+        "error_m": 0.031837,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 16.265,
+        "point_err_m": 0.033343,
+        "n_points_scored": 4,
+        "pose_err_m": 0.032583,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0685,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0111,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.05,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.23333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 68,
+        "obj": "door_handle",
+        "predicted": [
+          -0.407385,
+          0.156677,
+          0.697794
+        ],
+        "expected": [
+          -0.424416,
+          0.131325,
+          0.685777
+        ],
+        "error_m": 0.03282,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.965,
+        "point_err_m": 0.03478,
+        "n_points_scored": 4,
+        "pose_err_m": 0.03355,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0689,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.011,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.06,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.26667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 69,
+        "obj": "door_handle",
+        "predicted": [
+          -0.410701,
+          0.156516,
+          0.698055
+        ],
+        "expected": [
+          -0.428079,
+          0.130983,
+          0.685848
+        ],
+        "error_m": 0.033211,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.786,
+        "point_err_m": 0.033991,
+        "n_points_scored": 4,
+        "pose_err_m": 0.033939,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0691,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0099,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.06,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.3,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 70,
+        "obj": "door_handle",
+        "predicted": [
+          -0.414342,
+          0.156119,
+          0.69849
+        ],
+        "expected": [
+          -0.430581,
+          0.130733,
+          0.685895
+        ],
+        "error_m": 0.032661,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 21.784,
+        "point_err_m": 0.032901,
+        "n_points_scored": 4,
+        "pose_err_m": 0.033417,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0686,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0098,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.08,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.33333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 71,
+        "obj": "door_handle",
+        "predicted": [
+          -0.417589,
+          0.155818,
+          0.698917
+        ],
+        "expected": [
+          -0.434366,
+          0.130329,
+          0.685966
+        ],
+        "error_m": 0.03315,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.483,
+        "point_err_m": 0.034038,
+        "n_points_scored": 4,
+        "pose_err_m": 0.033905,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0682,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0108,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.03,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.36667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 72,
+        "obj": "door_handle",
+        "predicted": [
+          -0.422108,
+          0.154769,
+          0.698511
+        ],
+        "expected": [
+          -0.43802,
+          0.12991,
+          0.686033
+        ],
+        "error_m": 0.032044,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.791,
+        "point_err_m": 0.03599,
+        "n_points_scored": 3,
+        "pose_err_m": 0.032823,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0684,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.28,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchored": {
+            "wrist": 1
+          }
+        },
+        "t": 2.4,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 73,
+        "obj": "door_handle",
+        "predicted": [
+          -0.425379,
+          0.154944,
+          0.698557
+        ],
+        "expected": [
+          -0.440514,
+          0.129608,
+          0.686077
+        ],
+        "error_m": 0.032042,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 10.907,
+        "point_err_m": 0.035295,
+        "n_points_scored": 4,
+        "pose_err_m": 0.032835,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0666,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0095,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.04,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.43333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 74,
+        "obj": "door_handle",
+        "predicted": [
+          -0.428474,
+          0.155147,
+          0.698451
+        ],
+        "expected": [
+          -0.444288,
+          0.129126,
+          0.686143
+        ],
+        "error_m": 0.032842,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.061,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.033619,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0667,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "fit_rmse_m": 0.0106,
+          "fit_n": 4,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.07,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.46667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 75,
+        "obj": "door_handle",
+        "predicted": [
+          -0.431805,
+          0.155113,
+          0.698841
+        ],
+        "expected": [
+          -0.447919,
+          0.128633,
+          0.686205
+        ],
+        "error_m": 0.033474,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 23.413,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": 0.03425,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0672,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 2,
+          "too_few_points": 2,
+          "reacquire": true,
+          "unmeasured_frames": 0.3333333333333366,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/5 predicted points depth-verified",
+            "wrist": "ok: 3/5 point(s) from predicted pose (red)"
+          }
+        },
+        "t": 2.5,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 76,
+        "obj": "door_handle",
+        "predicted": [
+          -0.435135,
+          0.155066,
+          0.699241
+        ],
+        "expected": [
+          -0.450396,
+          0.128281,
+          0.686247
+        ],
+        "error_m": 0.033455,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.689,
+        "point_err_m": 0.036547,
+        "n_points_scored": 2,
+        "pose_err_m": 0.034252,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.07,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 2,
+          "too_few_points": 2,
+          "reacquire": true,
+          "unmeasured_frames": 0.6666666666666687,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 2/5 predicted points depth-verified"
+          }
+        },
+        "t": 2.53333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 77,
+        "obj": "door_handle",
+        "predicted": [
+          -0.436872,
+          0.156121,
+          0.699687
+        ],
+        "expected": [
+          -0.454144,
+          0.127722,
+          0.686308
+        ],
+        "error_m": 0.03583,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.836,
+        "point_err_m": 0.123747,
+        "n_points_scored": 7,
+        "pose_err_m": 0.036584,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0732,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0082,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.14,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "2/2 drifted"
+          }
+        },
+        "t": 2.56667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 78,
+        "obj": "door_handle",
+        "predicted": [
+          -0.439979,
+          0.156211,
+          0.70011
+        ],
+        "expected": [
+          -0.457758,
+          0.127155,
+          0.686365
+        ],
+        "error_m": 0.036732,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.427,
+        "point_err_m": 0.131318,
+        "n_points_scored": 6,
+        "pose_err_m": 0.03748,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0694,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 2,
+          "too_few_points": 2,
+          "reacquire": true,
+          "unmeasured_frames": 0.33333333333333215,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 2/5 predicted points depth-verified",
+            "wrist": "ok: 3/5 point(s) from predicted pose (red)"
+          }
+        },
+        "t": 2.6,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 79,
+        "obj": "door_handle",
+        "predicted": [
+          -0.446202,
+          0.15241,
+          0.701192
+        ],
+        "expected": [
+          -0.460208,
+          0.126754,
+          0.686404
+        ],
+        "error_m": 0.032758,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.082,
+        "point_err_m": 0.131107,
+        "n_points_scored": 7,
+        "pose_err_m": 0.033637,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0723,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0081,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 1.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "2/2 drifted"
+          }
+        },
+        "t": 2.63333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 80,
+        "obj": "door_handle",
+        "predicted": [
+          -0.450552,
+          0.150091,
+          0.701937
+        ],
+        "expected": [
+          -0.462394,
+          0.126322,
+          0.68646
+        ],
+        "error_m": 0.030736,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 14.486,
+        "point_err_m": 0.134694,
+        "n_points_scored": 7,
+        "pose_err_m": 0.031717,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0688,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.26,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "2/2 drifted"
+          }
+        },
+        "t": 2.66667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 81,
+        "obj": "door_handle",
+        "predicted": [
+          -0.454025,
+          0.148958,
+          0.702271
+        ],
+        "expected": [
+          -0.463642,
+          0.126047,
+          0.6865
+        ],
+        "error_m": 0.029431,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 16.792,
+        "point_err_m": 0.13166,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030498,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0667,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.02,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 2.7,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 82,
+        "obj": "door_handle",
+        "predicted": [
+          -0.457125,
+          0.147888,
+          0.702569
+        ],
+        "expected": [
+          -0.464211,
+          0.125914,
+          0.68652
+        ],
+        "error_m": 0.028118,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.805,
+        "point_err_m": 0.134056,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029284,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0657,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.008,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.04,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "2/2 drifted"
+          }
+        },
+        "t": 2.73333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 83,
+        "obj": "door_handle",
+        "predicted": [
+          -0.459524,
+          0.146875,
+          0.702839
+        ],
+        "expected": [
+          -0.464815,
+          0.125766,
+          0.686543
+        ],
+        "error_m": 0.027188,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 16.187,
+        "point_err_m": 0.135698,
+        "n_points_scored": 7,
+        "pose_err_m": 0.028436,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0654,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.008,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.18,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 2.76667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 84,
+        "obj": "door_handle",
+        "predicted": [
+          -0.461425,
+          0.146,
+          0.703119
+        ],
+        "expected": [
+          -0.465218,
+          0.125663,
+          0.686559
+        ],
+        "error_m": 0.026499,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 18.153,
+        "point_err_m": 0.13613,
+        "n_points_scored": 7,
+        "pose_err_m": 0.027817,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0652,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.008,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.29,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.8,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 85,
+        "obj": "door_handle",
+        "predicted": [
+          -0.462799,
+          0.145238,
+          0.703349
+        ],
+        "expected": [
+          -0.465409,
+          0.125612,
+          0.686568
+        ],
+        "error_m": 0.025953,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 16.775,
+        "point_err_m": 0.13644,
+        "n_points_scored": 7,
+        "pose_err_m": 0.027328,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0652,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.008,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.42,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.83333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 86,
+        "obj": "door_handle",
+        "predicted": [
+          -0.462799,
+          0.145238,
+          0.703349
+        ],
+        "expected": [
+          -0.465615,
+          0.125556,
+          0.686577
+        ],
+        "error_m": 0.026012,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 16.775,
+        "point_err_m": 0.136659,
+        "n_points_scored": 7,
+        "pose_err_m": 0.027384,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0652,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.008,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.42,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.86667,
+        "age_s": 0.06667
+      },
+      {
+        "frame": 87,
+        "obj": "door_handle",
+        "predicted": [
+          -0.462949,
+          0.14541,
+          0.703328
+        ],
+        "expected": [
+          -0.465753,
+          0.125516,
+          0.686584
+        ],
+        "error_m": 0.026153,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 37.368,
+        "point_err_m": 0.136127,
+        "n_points_scored": 7,
+        "pose_err_m": 0.02752,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0652,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 1.08,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.9,
+        "age_s": 0.06667
+      },
+      {
+        "frame": 88,
+        "obj": "door_handle",
+        "predicted": [
+          -0.463849,
+          0.145295,
+          0.703443
+        ],
+        "expected": [
+          -0.465818,
+          0.125496,
+          0.686588
+        ],
+        "error_m": 0.026076,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.871,
+        "point_err_m": 0.137318,
+        "n_points_scored": 7,
+        "pose_err_m": 0.027464,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.6667,
+          "jump_gate_m": 0.0678,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 1.28,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.93333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 89,
+        "obj": "door_handle",
+        "predicted": [
+          -0.463849,
+          0.145295,
+          0.703443
+        ],
+        "expected": [
+          -0.465889,
+          0.125474,
+          0.686592
+        ],
+        "error_m": 0.026096,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.871,
+        "point_err_m": 0.137395,
+        "n_points_scored": 7,
+        "pose_err_m": 0.027483,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.6667,
+          "jump_gate_m": 0.0678,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 1.28,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 2.96667,
+        "age_s": 0.06667
+      },
+      {
+        "frame": 90,
+        "obj": "door_handle",
+        "predicted": [
+          -0.462793,
+          0.145727,
+          0.703297
+        ],
+        "expected": [
+          -0.465936,
+          0.125459,
+          0.686595
+        ],
+        "error_m": 0.026451,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 35.985,
+        "point_err_m": 0.137593,
+        "n_points_scored": 7,
+        "pose_err_m": 0.0278,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0667,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.81,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 3.0,
+        "age_s": 0.06667
+      },
+      {
+        "frame": 91,
+        "obj": "door_handle",
+        "predicted": [
+          -0.462188,
+          0.146002,
+          0.703246
+        ],
+        "expected": [
+          -0.465958,
+          0.125451,
+          0.686596
+        ],
+        "error_m": 0.026716,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 17.522,
+        "point_err_m": 0.137672,
+        "n_points_scored": 7,
+        "pose_err_m": 0.028041,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.6667,
+          "jump_gate_m": 0.0692,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.62,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 3.03333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 92,
+        "obj": "door_handle",
+        "predicted": [
+          -0.461045,
+          0.146399,
+          0.703116
+        ],
+        "expected": [
+          -0.465982,
+          0.125442,
+          0.686598
+        ],
+        "error_m": 0.027137,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 20.603,
+        "point_err_m": 0.137722,
+        "n_points_scored": 7,
+        "pose_err_m": 0.028418,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0675,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.3,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 3.06667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 93,
+        "obj": "door_handle",
+        "predicted": [
+          -0.460237,
+          0.146685,
+          0.703034
+        ],
+        "expected": [
+          -0.465998,
+          0.125436,
+          0.686599
+        ],
+        "error_m": 0.027473,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 24.338,
+        "point_err_m": 0.135918,
+        "n_points_scored": 7,
+        "pose_err_m": 0.028723,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0665,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.15,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 3.1,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 94,
+        "obj": "door_handle",
+        "predicted": [
+          -0.459632,
+          0.146906,
+          0.702982
+        ],
+        "expected": [
+          -0.466005,
+          0.125433,
+          0.6866
+        ],
+        "error_m": 0.02775,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 17.995,
+        "point_err_m": 0.136166,
+        "n_points_scored": 7,
+        "pose_err_m": 0.028976,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.066,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.07,
+          "rotation_observable": false,
+          "mode": "green"
+        },
+        "t": 3.13333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 95,
+        "obj": "door_handle",
+        "predicted": [
+          -0.459172,
+          0.147082,
+          0.70295
+        ],
+        "expected": [
+          -0.466013,
+          0.12543,
+          0.686601
+        ],
+        "error_m": 0.02798,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 17.304,
+        "point_err_m": 0.135968,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029187,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0656,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.03,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.16667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 96,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458826,
+          0.147222,
+          0.702935
+        ],
+        "expected": [
+          -0.466019,
+          0.125428,
+          0.686601
+        ],
+        "error_m": 0.028169,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 17.898,
+        "point_err_m": 0.136355,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029362,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0653,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.01,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "2/2 drifted"
+          }
+        },
+        "t": 3.2,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 97,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458573,
+          0.147335,
+          0.702932
+        ],
+        "expected": [
+          -0.466021,
+          0.125426,
+          0.686601
+        ],
+        "error_m": 0.028323,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 25.281,
+        "point_err_m": 0.136432,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029504,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0651,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "2/2 drifted"
+          }
+        },
+        "t": 3.23333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 98,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458395,
+          0.147425,
+          0.70294
+        ],
+        "expected": [
+          -0.466023,
+          0.125425,
+          0.686602
+        ],
+        "error_m": 0.028446,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 18.317,
+        "point_err_m": 0.136444,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029619,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0649,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "2/2 drifted"
+          }
+        },
+        "t": 3.26667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 99,
+        "obj": "door_handle",
+        "predicted": [
+          -0.45828,
+          0.147496,
+          0.702957
+        ],
+        "expected": [
+          -0.466025,
+          0.125424,
+          0.686602
+        ],
+        "error_m": 0.028542,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 16.804,
+        "point_err_m": 0.136347,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029709,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0648,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "2/2 drifted"
+          }
+        },
+        "t": 3.3,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 100,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458216,
+          0.147551,
+          0.702981
+        ],
+        "expected": [
+          -0.466025,
+          0.125424,
+          0.686602
+        ],
+        "error_m": 0.028616,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.82,
+        "point_err_m": 0.136345,
+        "n_points_scored": 7,
+        "pose_err_m": 0.02978,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0648,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "2/2 drifted"
+          }
+        },
+        "t": 3.33333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 101,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458193,
+          0.147595,
+          0.703011
+        ],
+        "expected": [
+          -0.466026,
+          0.125423,
+          0.686602
+        ],
+        "error_m": 0.028673,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 19.143,
+        "point_err_m": 0.136346,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029835,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0647,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.36667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 102,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458203,
+          0.147628,
+          0.703045
+        ],
+        "expected": [
+          -0.466026,
+          0.125423,
+          0.686602
+        ],
+        "error_m": 0.028716,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 18.694,
+        "point_err_m": 0.136346,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029877,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0647,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.4,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 103,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458237,
+          0.147654,
+          0.703082
+        ],
+        "expected": [
+          -0.466026,
+          0.125423,
+          0.686602
+        ],
+        "error_m": 0.028748,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.786,
+        "point_err_m": 0.136346,
+        "n_points_scored": 7,
+        "pose_err_m": 0.02991,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.43333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 104,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458288,
+          0.147674,
+          0.703122
+        ],
+        "expected": [
+          -0.466027,
+          0.125423,
+          0.686602
+        ],
+        "error_m": 0.028773,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.97,
+        "point_err_m": 0.136356,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029935,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.46667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 105,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458353,
+          0.147689,
+          0.703163
+        ],
+        "expected": [
+          -0.466026,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028792,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.83,
+        "point_err_m": 0.136346,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029955,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.5,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 106,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458424,
+          0.147703,
+          0.703206
+        ],
+        "expected": [
+          -0.466026,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028807,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.386,
+        "point_err_m": 0.136356,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029973,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.53333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 107,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458501,
+          0.147714,
+          0.703248
+        ],
+        "expected": [
+          -0.466026,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.02882,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 18.937,
+        "point_err_m": 0.136346,
+        "n_points_scored": 7,
+        "pose_err_m": 0.029988,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0076,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.56667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 108,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458579,
+          0.147724,
+          0.703291
+        ],
+        "expected": [
+          -0.466026,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028833,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 17.723,
+        "point_err_m": 0.136356,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030002,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0077,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.6,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 109,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458657,
+          0.147734,
+          0.703334
+        ],
+        "expected": [
+          -0.466026,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028846,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 16.164,
+        "point_err_m": 0.136346,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030017,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0077,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.63333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 110,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458732,
+          0.147745,
+          0.703376
+        ],
+        "expected": [
+          -0.466025,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028859,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 16.772,
+        "point_err_m": 0.136345,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030033,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0077,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.66667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 111,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458805,
+          0.147755,
+          0.703418
+        ],
+        "expected": [
+          -0.466025,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028873,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.689,
+        "point_err_m": 0.136354,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030049,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0077,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.7,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 112,
+        "obj": "door_handle",
+        "predicted": [
+          -0.458874,
+          0.147767,
+          0.703459
+        ],
+        "expected": [
+          -0.466024,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028889,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.847,
+        "point_err_m": 0.136345,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030067,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0646,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0077,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.73333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 113,
+        "obj": "door_handle",
+        "predicted": [
+          -0.45894,
+          0.14778,
+          0.7035
+        ],
+        "expected": [
+          -0.466024,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028906,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.058,
+        "point_err_m": 0.136344,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030086,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0647,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0077,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.76667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 114,
+        "obj": "door_handle",
+        "predicted": [
+          -0.459002,
+          0.147794,
+          0.703541
+        ],
+        "expected": [
+          -0.466024,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028925,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.016,
+        "point_err_m": 0.136347,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030107,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0647,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0077,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.8,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 115,
+        "obj": "door_handle",
+        "predicted": [
+          -0.459062,
+          0.147808,
+          0.703581
+        ],
+        "expected": [
+          -0.466023,
+          0.125422,
+          0.686603
+        ],
+        "error_m": 0.028945,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.282,
+        "point_err_m": 0.136337,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030129,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0647,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0077,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.83333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 116,
+        "obj": "door_handle",
+        "predicted": [
+          -0.459118,
+          0.147823,
+          0.703621
+        ],
+        "expected": [
+          -0.466023,
+          0.125423,
+          0.686603
+        ],
+        "error_m": 0.028966,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.977,
+        "point_err_m": 0.136337,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030152,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0647,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0077,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.86667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 117,
+        "obj": "door_handle",
+        "predicted": [
+          -0.459171,
+          0.147838,
+          0.70366
+        ],
+        "expected": [
+          -0.466022,
+          0.125423,
+          0.686603
+        ],
+        "error_m": 0.028989,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.348,
+        "point_err_m": 0.136439,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030175,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0647,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0078,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.9,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 118,
+        "obj": "door_handle",
+        "predicted": [
+          -0.459223,
+          0.147853,
+          0.7037
+        ],
+        "expected": [
+          -0.466022,
+          0.125423,
+          0.686603
+        ],
+        "error_m": 0.029012,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 16.289,
+        "point_err_m": 0.136448,
+        "n_points_scored": 7,
+        "pose_err_m": 0.0302,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0647,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0078,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.93333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 119,
+        "obj": "door_handle",
+        "predicted": [
+          -0.459271,
+          0.14787,
+          0.703739
+        ],
+        "expected": [
+          -0.466022,
+          0.125423,
+          0.686603
+        ],
+        "error_m": 0.029036,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.229,
+        "point_err_m": 0.136438,
+        "n_points_scored": 7,
+        "pose_err_m": 0.030226,
+        "cam_status": {
+          "head": "rejected",
+          "wrist": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "pose_tracker",
+          "dt": 0.3333,
+          "jump_gate_m": 0.0648,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 3,
+          "fit_rmse_m": 0.0078,
+          "fit_n": 3,
+          "kf": "update",
+          "kf_reset": false,
+          "kf_d2": 0.0,
+          "rotation_observable": false,
+          "mode": "green",
+          "reanchor_skipped": {
+            "head": "1/1 drifted"
+          }
+        },
+        "t": 3.96667,
+        "age_s": 0.03333
+      }
+    ]
+  }
+}

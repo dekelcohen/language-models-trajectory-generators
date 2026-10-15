@@ -1,0 +1,3081 @@
+{
+  "schema": "tracking_eval/v1",
+  "created_at": "2026-09-28T15:16:30",
+  "wall_s": 9.789,
+  "config": {
+    "label": "template+depth_fusion",
+    "tracker_provider": "template",
+    "tracker3d": "depth_fusion",
+    "cameras": [
+      "head"
+    ],
+    "image_size": [
+      256,
+      256
+    ],
+    "track_interval": 1,
+    "lost_penalty_m": 1.0,
+    "recovery_threshold_m": 0.05,
+    "seed_offset_frame": "local",
+    "timing": {
+      "mode": "realtime",
+      "camera_fps": 30.0,
+      "motion_rate_hz": 10.0,
+      "latency": "measured"
+    },
+    "scene": "grasp_scripted",
+    "n_frames": 30,
+    "objects": [
+      "cube"
+    ],
+    "seeding": "grid",
+    "n_seed_points": 20,
+    "occlusion_window": [
+      12,
+      19
+    ],
+    "occluder_cam": [
+      "head"
+    ],
+    "occluder_radius": 40,
+    "start": [
+      -0.2,
+      0.4,
+      0.1
+    ],
+    "step_vector": [
+      0.01,
+      0.0,
+      0.003
+    ],
+    "rot_step_deg": 0.0
+  },
+  "seed_offsets": {
+    "cube": {
+      "local": [
+        0.006828,
+        0.027842,
+        0.023728
+      ],
+      "rotating": true
+    }
+  },
+  "objects": {
+    "cube": {
+      "n_frames": 89,
+      "n_valid_frames": 89,
+      "median_l2_m": 0.16016347828331348,
+      "p95_l2_m": 0.2497518844763647,
+      "max_l2_m": 0.24997570253911588,
+      "median_l2_valid_m": 0.16016347828331348,
+      "pct_lost": 0.0,
+      "n_dropped_frames": 0,
+      "err_during_occlusion_m": 0.24965123511774362,
+      "n_occluded_frames": 21,
+      "frames_to_recover": null,
+      "s_to_recover": null,
+      "age_s_median": 0.033333333333333326,
+      "age_s_p95": 0.03333333333333366,
+      "age_s_max": 0.03333333333333366,
+      "max_jump_m": 0.39757035213862907,
+      "median_disagreement_m": null,
+      "latency_ms_mean": 5.004,
+      "latency_ms_p95": 8.691,
+      "median_point_err_m": 0.21004610496648862,
+      "median_pose_err_m": null,
+      "lost_penalty_m": 1.0,
+      "recovery_threshold_m": 0.05
+    }
+  },
+  "aggregate": {
+    "n_objects": 1,
+    "n_frames": 89,
+    "n_valid_frames": 89,
+    "median_l2_m": 0.160163,
+    "median_l2_valid_m": 0.160163,
+    "err_during_occlusion_m": 0.249651,
+    "latency_ms_mean": 5.004,
+    "median_disagreement_m": null,
+    "median_point_err_m": 0.210046,
+    "median_pose_err_m": null,
+    "age_s_median": 0.033333,
+    "p95_l2_m": 0.249752,
+    "max_l2_m": 0.249976,
+    "max_jump_m": 0.39757,
+    "pct_lost": 0.0,
+    "latency_ms_p95": 8.691,
+    "age_s_p95": 0.033333,
+    "age_s_max": 0.033333,
+    "s_to_recover": null,
+    "frames_to_recover": null
+  },
+  "peak_vram_mb": null,
+  "session": {
+    "errors": 0,
+    "lift_errors": 0,
+    "aborted": false,
+    "abort_reason": null
+  },
+  "realtime": {
+    "camera_fps": 30.0,
+    "policy": "drop",
+    "min_period_s": 0.0,
+    "latency": {
+      "mode": "measured",
+      "scale": 1.0,
+      "profile": null
+    },
+    "stats": {
+      "frames_exposed": 90,
+      "frames_missed": 0,
+      "frames_dropped_busy": 0,
+      "frames_dropped_period": 0,
+      "frames_processed": 90,
+      "published": 89,
+      "max_queue_wait_s": 0.0,
+      "max_age_s": 0.03333333333333366
+    },
+    "n_warmup_frames": 1
+  },
+  "frames": {
+    "cube": [
+      {
+        "frame": 1,
+        "obj": "cube",
+        "predicted": [
+          -0.193209,
+          0.427676,
+          0.122623
+        ],
+        "expected": [
+          -0.189839,
+          0.427842,
+          0.123706
+        ],
+        "error_m": 0.003543,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.588,
+        "point_err_m": 0.00348,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.03333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 2,
+        "obj": "cube",
+        "predicted": [
+          -0.189257,
+          0.42681,
+          0.122325
+        ],
+        "expected": [
+          -0.186506,
+          0.427842,
+          0.124706
+        ],
+        "error_m": 0.003782,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.147,
+        "point_err_m": 0.003365,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.06667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 3,
+        "obj": "cube",
+        "predicted": [
+          -0.186082,
+          0.428253,
+          0.123002
+        ],
+        "expected": [
+          -0.183172,
+          0.427842,
+          0.125706
+        ],
+        "error_m": 0.003993,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.752,
+        "point_err_m": 0.005142,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.1,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 4,
+        "obj": "cube",
+        "predicted": [
+          -0.184521,
+          0.428428,
+          0.126735
+        ],
+        "expected": [
+          -0.179839,
+          0.427842,
+          0.126706
+        ],
+        "error_m": 0.004718,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.02,
+        "point_err_m": 0.006457,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.13333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 5,
+        "obj": "cube",
+        "predicted": [
+          -0.180483,
+          0.427543,
+          0.12736
+        ],
+        "expected": [
+          -0.176506,
+          0.427842,
+          0.127706
+        ],
+        "error_m": 0.004004,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 9.141,
+        "point_err_m": 0.004214,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.16667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 6,
+        "obj": "cube",
+        "predicted": [
+          -0.176554,
+          0.426656,
+          0.126809
+        ],
+        "expected": [
+          -0.173172,
+          0.427842,
+          0.128706
+        ],
+        "error_m": 0.004055,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 8.105,
+        "point_err_m": 0.003998,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.2,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 7,
+        "obj": "cube",
+        "predicted": [
+          -0.172943,
+          0.428345,
+          0.128169
+        ],
+        "expected": [
+          -0.169839,
+          0.427842,
+          0.129706
+        ],
+        "error_m": 0.0035,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.721,
+        "point_err_m": 0.004101,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.23333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 8,
+        "obj": "cube",
+        "predicted": [
+          -0.16998,
+          0.430137,
+          0.129311
+        ],
+        "expected": [
+          -0.166506,
+          0.427842,
+          0.130706
+        ],
+        "error_m": 0.004391,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.016,
+        "point_err_m": 0.005533,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.26667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 9,
+        "obj": "cube",
+        "predicted": [
+          -0.167515,
+          0.427785,
+          0.130637
+        ],
+        "expected": [
+          -0.163172,
+          0.427842,
+          0.131706
+        ],
+        "error_m": 0.004473,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.859,
+        "point_err_m": 0.005793,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.3,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 10,
+        "obj": "cube",
+        "predicted": [
+          -0.163919,
+          0.426349,
+          0.131433
+        ],
+        "expected": [
+          -0.159839,
+          0.427842,
+          0.132706
+        ],
+        "error_m": 0.004528,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.662,
+        "point_err_m": 0.004627,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.33333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 11,
+        "obj": "cube",
+        "predicted": [
+          -0.159955,
+          0.428053,
+          0.132231
+        ],
+        "expected": [
+          -0.156506,
+          0.427842,
+          0.133706
+        ],
+        "error_m": 0.003757,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.855,
+        "point_err_m": 0.004685,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.36667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 12,
+        "obj": "cube",
+        "predicted": [
+          -0.156654,
+          0.430873,
+          0.13401
+        ],
+        "expected": [
+          -0.153172,
+          0.427842,
+          0.134706
+        ],
+        "error_m": 0.004669,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.922,
+        "point_err_m": 0.004941,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.4,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 13,
+        "obj": "cube",
+        "predicted": [
+          -0.153784,
+          0.428135,
+          0.133943
+        ],
+        "expected": [
+          -0.149839,
+          0.427842,
+          0.135706
+        ],
+        "error_m": 0.004331,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.033,
+        "point_err_m": 0.005483,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.43333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 14,
+        "obj": "cube",
+        "predicted": [
+          -0.150703,
+          0.427055,
+          0.134939
+        ],
+        "expected": [
+          -0.146506,
+          0.427842,
+          0.136706
+        ],
+        "error_m": 0.004621,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.062,
+        "point_err_m": 0.006312,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.46667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 15,
+        "obj": "cube",
+        "predicted": [
+          -0.147025,
+          0.427769,
+          0.136605
+        ],
+        "expected": [
+          -0.143172,
+          0.427842,
+          0.137706
+        ],
+        "error_m": 0.004008,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.698,
+        "point_err_m": 0.004991,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.5,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 16,
+        "obj": "cube",
+        "predicted": [
+          -0.144787,
+          0.435024,
+          0.139719
+        ],
+        "expected": [
+          -0.139839,
+          0.427842,
+          0.138706
+        ],
+        "error_m": 0.00878,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.138,
+        "point_err_m": 0.005511,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.53333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 17,
+        "obj": "cube",
+        "predicted": [
+          -0.140367,
+          0.430054,
+          0.13826
+        ],
+        "expected": [
+          -0.136506,
+          0.427842,
+          0.139706
+        ],
+        "error_m": 0.004679,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.282,
+        "point_err_m": 0.005432,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.56667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 18,
+        "obj": "cube",
+        "predicted": [
+          -0.137307,
+          0.427026,
+          0.138041
+        ],
+        "expected": [
+          -0.133172,
+          0.427842,
+          0.140706
+        ],
+        "error_m": 0.004987,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.994,
+        "point_err_m": 0.005669,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.6,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 19,
+        "obj": "cube",
+        "predicted": [
+          -0.133748,
+          0.425055,
+          0.138955
+        ],
+        "expected": [
+          -0.129839,
+          0.427842,
+          0.141706
+        ],
+        "error_m": 0.005533,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.049,
+        "point_err_m": 0.005053,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.63333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 20,
+        "obj": "cube",
+        "predicted": [
+          -0.131929,
+          0.435296,
+          0.144203
+        ],
+        "expected": [
+          -0.126506,
+          0.427842,
+          0.142706
+        ],
+        "error_m": 0.009339,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.234,
+        "point_err_m": 0.005692,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.66667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 21,
+        "obj": "cube",
+        "predicted": [
+          -0.127394,
+          0.430911,
+          0.143452
+        ],
+        "expected": [
+          -0.123172,
+          0.427842,
+          0.143706
+        ],
+        "error_m": 0.005225,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.785,
+        "point_err_m": 0.005461,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.7,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 22,
+        "obj": "cube",
+        "predicted": [
+          -0.124148,
+          0.427498,
+          0.142794
+        ],
+        "expected": [
+          -0.119839,
+          0.427842,
+          0.144706
+        ],
+        "error_m": 0.004727,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.311,
+        "point_err_m": 0.006752,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.73333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 23,
+        "obj": "cube",
+        "predicted": [
+          -0.120921,
+          0.425538,
+          0.141905
+        ],
+        "expected": [
+          -0.116506,
+          0.427842,
+          0.145706
+        ],
+        "error_m": 0.006265,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 8.607,
+        "point_err_m": 0.006514,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.76667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 24,
+        "obj": "cube",
+        "predicted": [
+          -0.118317,
+          0.435744,
+          0.148158
+        ],
+        "expected": [
+          -0.113172,
+          0.427842,
+          0.146706
+        ],
+        "error_m": 0.00954,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.936,
+        "point_err_m": 0.00623,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.8,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 25,
+        "obj": "cube",
+        "predicted": [
+          -0.114636,
+          0.430997,
+          0.147595
+        ],
+        "expected": [
+          -0.109839,
+          0.427842,
+          0.147706
+        ],
+        "error_m": 0.005743,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 8.702,
+        "point_err_m": 0.005776,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.83333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 26,
+        "obj": "cube",
+        "predicted": [
+          -0.111016,
+          0.430375,
+          0.147802
+        ],
+        "expected": [
+          -0.106506,
+          0.427842,
+          0.148706
+        ],
+        "error_m": 0.005251,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 8.249,
+        "point_err_m": 0.006895,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.86667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 27,
+        "obj": "cube",
+        "predicted": [
+          -0.107608,
+          0.42611,
+          0.146702
+        ],
+        "expected": [
+          -0.103172,
+          0.427842,
+          0.149706
+        ],
+        "error_m": 0.00563,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.916,
+        "point_err_m": 0.006812,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.9,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 28,
+        "obj": "cube",
+        "predicted": [
+          -0.105352,
+          0.428592,
+          0.147884
+        ],
+        "expected": [
+          -0.099839,
+          0.427842,
+          0.150706
+        ],
+        "error_m": 0.006238,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.181,
+        "point_err_m": 0.006136,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.93333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 29,
+        "obj": "cube",
+        "predicted": [
+          -0.101415,
+          0.432243,
+          0.152236
+        ],
+        "expected": [
+          -0.096506,
+          0.427842,
+          0.151706
+        ],
+        "error_m": 0.006614,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.652,
+        "point_err_m": 0.006207,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 0.96667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 30,
+        "obj": "cube",
+        "predicted": [
+          -0.097938,
+          0.43076,
+          0.151594
+        ],
+        "expected": [
+          -0.093172,
+          0.427842,
+          0.152706
+        ],
+        "error_m": 0.005697,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 8.676,
+        "point_err_m": 0.007487,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.0,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 31,
+        "obj": "cube",
+        "predicted": [
+          -0.095821,
+          0.433523,
+          0.152804
+        ],
+        "expected": [
+          -0.089839,
+          0.427842,
+          0.153706
+        ],
+        "error_m": 0.008299,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.298,
+        "point_err_m": 0.00766,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.03333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 32,
+        "obj": "cube",
+        "predicted": [
+          -0.093592,
+          0.432616,
+          0.156901
+        ],
+        "expected": [
+          -0.086506,
+          0.427842,
+          0.154706
+        ],
+        "error_m": 0.008822,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.962,
+        "point_err_m": 0.007391,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.06667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 33,
+        "obj": "cube",
+        "predicted": [
+          -0.08806,
+          0.433538,
+          0.15764
+        ],
+        "expected": [
+          -0.083172,
+          0.427842,
+          0.155706
+        ],
+        "error_m": 0.007751,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.95,
+        "point_err_m": 0.0058,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.1,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 34,
+        "obj": "cube",
+        "predicted": [
+          -0.084531,
+          0.432612,
+          0.157028
+        ],
+        "expected": [
+          -0.079839,
+          0.427842,
+          0.156706
+        ],
+        "error_m": 0.006698,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.302,
+        "point_err_m": 0.0061,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.13333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 35,
+        "obj": "cube",
+        "predicted": [
+          -0.082149,
+          0.437185,
+          0.158063
+        ],
+        "expected": [
+          -0.076506,
+          0.427842,
+          0.157706
+        ],
+        "error_m": 0.010921,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.266,
+        "point_err_m": 0.007885,
+        "n_points_scored": 20,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.16667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 36,
+        "obj": "cube",
+        "predicted": [
+          -0.080188,
+          0.43772,
+          0.163117
+        ],
+        "expected": [
+          -0.073172,
+          0.427842,
+          0.158706
+        ],
+        "error_m": 0.012894,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.859,
+        "point_err_m": null,
+        "n_points_scored": 0,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.2,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 37,
+        "obj": "cube",
+        "predicted": [
+          -0.054793,
+          0.645581,
+          0.281571
+        ],
+        "expected": [
+          -0.069839,
+          0.427842,
+          0.159706
+        ],
+        "error_m": 0.249976,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.408,
+        "point_err_m": 0.271779,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.23333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 38,
+        "obj": "cube",
+        "predicted": [
+          -0.051869,
+          0.646015,
+          0.28182
+        ],
+        "expected": [
+          -0.066506,
+          0.427842,
+          0.160706
+        ],
+        "error_m": 0.249965,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.713,
+        "point_err_m": 0.271728,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.26667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 39,
+        "obj": "cube",
+        "predicted": [
+          -0.051828,
+          0.646448,
+          0.282069
+        ],
+        "expected": [
+          -0.063172,
+          0.427842,
+          0.161706
+        ],
+        "error_m": 0.249809,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.409,
+        "point_err_m": 0.271472,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.3,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 40,
+        "obj": "cube",
+        "predicted": [
+          -0.050349,
+          0.645923,
+          0.283979
+        ],
+        "expected": [
+          -0.059839,
+          0.427842,
+          0.162706
+        ],
+        "error_m": 0.249713,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.492,
+        "point_err_m": 0.271028,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.33333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 41,
+        "obj": "cube",
+        "predicted": [
+          -0.045997,
+          0.645878,
+          0.285057
+        ],
+        "expected": [
+          -0.056506,
+          0.427842,
+          0.163706
+        ],
+        "error_m": 0.249752,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.116,
+        "point_err_m": 0.271436,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.36667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 42,
+        "obj": "cube",
+        "predicted": [
+          -0.043088,
+          0.646313,
+          0.285304
+        ],
+        "expected": [
+          -0.053172,
+          0.427842,
+          0.164706
+        ],
+        "error_m": 0.24975,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.149,
+        "point_err_m": 0.271392,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.4,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 43,
+        "obj": "cube",
+        "predicted": [
+          -0.040184,
+          0.646748,
+          0.285551
+        ],
+        "expected": [
+          -0.049839,
+          0.427842,
+          0.165706
+        ],
+        "error_m": 0.249751,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.363,
+        "point_err_m": 0.271351,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.43333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 44,
+        "obj": "cube",
+        "predicted": [
+          -0.037285,
+          0.647182,
+          0.285798
+        ],
+        "expected": [
+          -0.046506,
+          0.427842,
+          0.166706
+        ],
+        "error_m": 0.249756,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.038,
+        "point_err_m": 0.271313,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.46667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 45,
+        "obj": "cube",
+        "predicted": [
+          -0.037255,
+          0.646184,
+          0.288527
+        ],
+        "expected": [
+          -0.043172,
+          0.427842,
+          0.167706
+        ],
+        "error_m": 0.249612,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.878,
+        "point_err_m": 0.271168,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.5,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 46,
+        "obj": "cube",
+        "predicted": [
+          -0.034363,
+          0.64662,
+          0.288772
+        ],
+        "expected": [
+          -0.039839,
+          0.427842,
+          0.168706
+        ],
+        "error_m": 0.249619,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.883,
+        "point_err_m": 0.271132,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.53333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 47,
+        "obj": "cube",
+        "predicted": [
+          -0.031474,
+          0.647056,
+          0.289017
+        ],
+        "expected": [
+          -0.036506,
+          0.427842,
+          0.169706
+        ],
+        "error_m": 0.24963,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.475,
+        "point_err_m": 0.271099,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.56667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 48,
+        "obj": "cube",
+        "predicted": [
+          -0.02859,
+          0.647492,
+          0.289262
+        ],
+        "expected": [
+          -0.033172,
+          0.427842,
+          0.170706
+        ],
+        "error_m": 0.249645,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.178,
+        "point_err_m": 0.271069,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.6,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 49,
+        "obj": "cube",
+        "predicted": [
+          -0.025711,
+          0.646499,
+          0.291982
+        ],
+        "expected": [
+          -0.029839,
+          0.427842,
+          0.171706
+        ],
+        "error_m": 0.249588,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 4.344,
+        "point_err_m": 0.271078,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.63333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 50,
+        "obj": "cube",
+        "predicted": [
+          -0.022836,
+          0.646936,
+          0.292225
+        ],
+        "expected": [
+          -0.026506,
+          0.427842,
+          0.172706
+        ],
+        "error_m": 0.2496,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.798,
+        "point_err_m": 0.271045,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.66667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 51,
+        "obj": "cube",
+        "predicted": [
+          -0.022818,
+          0.647373,
+          0.292468
+        ],
+        "expected": [
+          -0.023172,
+          0.427842,
+          0.173706
+        ],
+        "error_m": 0.249596,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.025,
+        "point_err_m": 0.270927,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.7,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 52,
+        "obj": "cube",
+        "predicted": [
+          -0.021375,
+          0.648285,
+          0.291888
+        ],
+        "expected": [
+          -0.019839,
+          0.427842,
+          0.174706
+        ],
+        "error_m": 0.249658,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.842,
+        "point_err_m": 0.270673,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.73333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 53,
+        "obj": "cube",
+        "predicted": [
+          -0.017087,
+          0.648247,
+          0.292954
+        ],
+        "expected": [
+          -0.016506,
+          0.427842,
+          0.175706
+        ],
+        "error_m": 0.249651,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.237,
+        "point_err_m": 0.270888,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.76667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 54,
+        "obj": "cube",
+        "predicted": [
+          -0.014228,
+          0.647261,
+          0.295662
+        ],
+        "expected": [
+          -0.013172,
+          0.427842,
+          0.176706
+        ],
+        "error_m": 0.249592,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.968,
+        "point_err_m": 0.270896,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.8,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 55,
+        "obj": "cube",
+        "predicted": [
+          -0.011373,
+          0.647699,
+          0.295903
+        ],
+        "expected": [
+          -0.009839,
+          0.427842,
+          0.177706
+        ],
+        "error_m": 0.24962,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.209,
+        "point_err_m": 0.270876,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.83333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 56,
+        "obj": "cube",
+        "predicted": [
+          -0.008523,
+          0.648137,
+          0.296144
+        ],
+        "expected": [
+          -0.006506,
+          0.427842,
+          0.178706
+        ],
+        "error_m": 0.249651,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.925,
+        "point_err_m": 0.270859,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.86667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 57,
+        "obj": "cube",
+        "predicted": [
+          -0.008516,
+          0.648575,
+          0.296385
+        ],
+        "expected": [
+          -0.003172,
+          0.427842,
+          0.179706
+        ],
+        "error_m": 0.249731,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.989,
+        "point_err_m": 0.270817,
+        "n_points_scored": 6,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "ok"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.9,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 58,
+        "obj": "cube",
+        "predicted": [
+          -0.064038,
+          0.324802,
+          0.072442
+        ],
+        "expected": [
+          0.000161,
+          0.427842,
+          0.180706
+        ],
+        "error_m": 0.162664,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.891,
+        "point_err_m": 0.219208,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.93333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 59,
+        "obj": "cube",
+        "predicted": [
+          -0.059981,
+          0.340993,
+          0.07239
+        ],
+        "expected": [
+          0.003494,
+          0.427842,
+          0.181706
+        ],
+        "error_m": 0.153369,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.649,
+        "point_err_m": 0.20148,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 1.96667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 60,
+        "obj": "cube",
+        "predicted": [
+          -0.057313,
+          0.340986,
+          0.072385
+        ],
+        "expected": [
+          0.006828,
+          0.427842,
+          0.182706
+        ],
+        "error_m": 0.154366,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.513,
+        "point_err_m": 0.201797,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.0,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 61,
+        "obj": "cube",
+        "predicted": [
+          -0.055959,
+          0.341113,
+          0.07407
+        ],
+        "expected": [
+          0.010161,
+          0.427842,
+          0.183706
+        ],
+        "error_m": 0.15464,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.548,
+        "point_err_m": 0.203341,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.03333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 62,
+        "obj": "cube",
+        "predicted": [
+          -0.054607,
+          0.341081,
+          0.07564
+        ],
+        "expected": [
+          0.013494,
+          0.427842,
+          0.184706
+        ],
+        "error_m": 0.155115,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.308,
+        "point_err_m": 0.205223,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.06667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 63,
+        "obj": "cube",
+        "predicted": [
+          -0.051948,
+          0.341014,
+          0.075596
+        ],
+        "expected": [
+          0.016828,
+          0.427842,
+          0.185706
+        ],
+        "error_m": 0.156183,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.836,
+        "point_err_m": 0.205569,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.1,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 64,
+        "obj": "cube",
+        "predicted": [
+          -0.049288,
+          0.341006,
+          0.075591
+        ],
+        "expected": [
+          0.020161,
+          0.427842,
+          0.186706
+        ],
+        "error_m": 0.157195,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.736,
+        "point_err_m": 0.205941,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.13333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 65,
+        "obj": "cube",
+        "predicted": [
+          -0.046627,
+          0.341012,
+          0.075595
+        ],
+        "expected": [
+          0.023494,
+          0.427842,
+          0.187706
+        ],
+        "error_m": 0.158194,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.865,
+        "point_err_m": 0.206332,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.16667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 66,
+        "obj": "cube",
+        "predicted": [
+          -0.045312,
+          0.339071,
+          0.075909
+        ],
+        "expected": [
+          0.026828,
+          0.427842,
+          0.188706
+        ],
+        "error_m": 0.160647,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.095,
+        "point_err_m": 0.207678,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.2,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 67,
+        "obj": "cube",
+        "predicted": [
+          -0.043961,
+          0.340733,
+          0.078587
+        ],
+        "expected": [
+          0.030161,
+          0.427842,
+          0.189706
+        ],
+        "error_m": 0.159466,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.876,
+        "point_err_m": 0.209789,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.23333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 68,
+        "obj": "cube",
+        "predicted": [
+          -0.041306,
+          0.341049,
+          0.078794
+        ],
+        "expected": [
+          0.033494,
+          0.427842,
+          0.190706
+        ],
+        "error_m": 0.160163,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.633,
+        "point_err_m": 0.210303,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.26667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 69,
+        "obj": "cube",
+        "predicted": [
+          -0.038653,
+          0.341028,
+          0.078781
+        ],
+        "expected": [
+          0.036828,
+          0.427842,
+          0.191706
+        ],
+        "error_m": 0.161202,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.525,
+        "point_err_m": 0.210745,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.3,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 70,
+        "obj": "cube",
+        "predicted": [
+          -0.035999,
+          0.34102,
+          0.078776
+        ],
+        "expected": [
+          0.040161,
+          0.427842,
+          0.192706
+        ],
+        "error_m": 0.16223,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.556,
+        "point_err_m": 0.211204,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.33333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 71,
+        "obj": "cube",
+        "predicted": [
+          -0.033357,
+          0.341035,
+          0.080369
+        ],
+        "expected": [
+          0.043494,
+          0.427842,
+          0.193706
+        ],
+        "error_m": 0.162132,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.773,
+        "point_err_m": 0.212609,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.36667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 72,
+        "obj": "cube",
+        "predicted": [
+          -0.032006,
+          0.33875,
+          0.080469
+        ],
+        "expected": [
+          0.046828,
+          0.427842,
+          0.194706
+        ],
+        "error_m": 0.164931,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.609,
+        "point_err_m": 0.213061,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.4,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 73,
+        "obj": "cube",
+        "predicted": [
+          -0.030695,
+          0.339817,
+          0.081155
+        ],
+        "expected": [
+          0.050161,
+          0.427842,
+          0.195706
+        ],
+        "error_m": 0.165554,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.755,
+        "point_err_m": 0.215214,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.43333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 74,
+        "obj": "cube",
+        "predicted": [
+          -0.028076,
+          0.341047,
+          0.081951
+        ],
+        "expected": [
+          0.053494,
+          0.427842,
+          0.196706
+        ],
+        "error_m": 0.165395,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.484,
+        "point_err_m": 0.215871,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.46667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 75,
+        "obj": "cube",
+        "predicted": [
+          -0.025429,
+          0.341037,
+          0.081945
+        ],
+        "expected": [
+          0.056828,
+          0.427842,
+          0.197706
+        ],
+        "error_m": 0.166439,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.678,
+        "point_err_m": 0.216388,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.5,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 76,
+        "obj": "cube",
+        "predicted": [
+          -0.022832,
+          0.341018,
+          0.085074
+        ],
+        "expected": [
+          0.060161,
+          0.427842,
+          0.198706
+        ],
+        "error_m": 0.165344,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.602,
+        "point_err_m": 0.21784,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.53333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 77,
+        "obj": "cube",
+        "predicted": [
+          -0.020193,
+          0.341029,
+          0.085082
+        ],
+        "expected": [
+          0.063494,
+          0.427842,
+          0.199706
+        ],
+        "error_m": 0.16637,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.541,
+        "point_err_m": 0.218367,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.56667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 78,
+        "obj": "cube",
+        "predicted": [
+          -0.020021,
+          0.337002,
+          0.082497
+        ],
+        "expected": [
+          0.066828,
+          0.427842,
+          0.200706
+        ],
+        "error_m": 0.172534,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.419,
+        "point_err_m": 0.220314,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.6,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 79,
+        "obj": "cube",
+        "predicted": [
+          -0.017462,
+          0.339115,
+          0.083854
+        ],
+        "expected": [
+          0.070161,
+          0.427842,
+          0.201706
+        ],
+        "error_m": 0.171579,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.688,
+        "point_err_m": 0.221069,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.63333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 80,
+        "obj": "cube",
+        "predicted": [
+          -0.014914,
+          0.341014,
+          0.085072
+        ],
+        "expected": [
+          0.073494,
+          0.427842,
+          0.202706
+        ],
+        "error_m": 0.170859,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 3.789,
+        "point_err_m": 0.221877,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.66667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 81,
+        "obj": "cube",
+        "predicted": [
+          -0.012358,
+          0.341109,
+          0.088257
+        ],
+        "expected": [
+          0.076828,
+          0.427842,
+          0.203706
+        ],
+        "error_m": 0.169721,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.604,
+        "point_err_m": 0.223385,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.7,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 82,
+        "obj": "cube",
+        "predicted": [
+          -0.009723,
+          0.341048,
+          0.088218
+        ],
+        "expected": [
+          0.080161,
+          0.427842,
+          0.204706
+        ],
+        "error_m": 0.170827,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.39,
+        "point_err_m": 0.223949,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.73333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 83,
+        "obj": "cube",
+        "predicted": [
+          -0.00709,
+          0.341039,
+          0.088212
+        ],
+        "expected": [
+          0.083494,
+          0.427842,
+          0.205706
+        ],
+        "error_m": 0.171887,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.523,
+        "point_err_m": 0.224548,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.76667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 84,
+        "obj": "cube",
+        "predicted": [
+          -0.006771,
+          0.33645,
+          0.085295
+        ],
+        "expected": [
+          0.086828,
+          0.427842,
+          0.206706
+        ],
+        "error_m": 0.178477,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.896,
+        "point_err_m": 0.226537,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.8,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 85,
+        "obj": "cube",
+        "predicted": [
+          -0.004266,
+          0.338475,
+          0.086583
+        ],
+        "expected": [
+          0.090161,
+          0.427842,
+          0.207706
+        ],
+        "error_m": 0.17769,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.494,
+        "point_err_m": 0.227344,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.83333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 86,
+        "obj": "cube",
+        "predicted": [
+          -0.001826,
+          0.339722,
+          0.090492
+        ],
+        "expected": [
+          0.093494,
+          0.427842,
+          0.208706
+        ],
+        "error_m": 0.175572,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.748,
+        "point_err_m": 0.228968,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.86667,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 87,
+        "obj": "cube",
+        "predicted": [
+          0.000693,
+          0.341051,
+          0.091328
+        ],
+        "expected": [
+          0.096828,
+          0.427842,
+          0.209706
+        ],
+        "error_m": 0.175465,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.602,
+        "point_err_m": 0.22981,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.9,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 88,
+        "obj": "cube",
+        "predicted": [
+          0.003315,
+          0.341083,
+          0.091348
+        ],
+        "expected": [
+          0.100161,
+          0.427842,
+          0.210706
+        ],
+        "error_m": 0.176502,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.856,
+        "point_err_m": 0.23046,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.93333,
+        "age_s": 0.03333
+      },
+      {
+        "frame": 89,
+        "obj": "cube",
+        "predicted": [
+          0.005943,
+          0.341048,
+          0.091326
+        ],
+        "expected": [
+          0.103494,
+          0.427842,
+          0.211706
+        ],
+        "error_m": 0.177597,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 2.492,
+        "point_err_m": 0.231127,
+        "n_points_scored": 4,
+        "pose_err_m": null,
+        "cam_status": {
+          "head": "rejected"
+        },
+        "blind_cams": [],
+        "lift": {
+          "provider": "depth_fusion",
+          "n_cams": 1
+        },
+        "t": 2.96667,
+        "age_s": 0.03333
+      }
+    ]
+  }
+}
