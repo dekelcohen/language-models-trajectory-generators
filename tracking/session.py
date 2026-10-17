@@ -1019,6 +1019,15 @@ class TrackingSession:
     def stop(self):
         self.active = False
         self.reporter.close()
+        # Release provider resources (a remote tracker's server session holds GPU memory).
+        for target in self.targets.values():
+            for cam, tracker in target.trackers.items():
+                close = getattr(tracker, "close", None)
+                if close is not None:
+                    try:
+                        close()
+                    except Exception as exc:  # noqa: BLE001 - teardown is best-effort
+                        self._log(f"[tracking] closing {target.name}/{cam} tracker failed: {exc}")
 
     def summary(self):
         summary = self.reporter.summary()
@@ -1064,7 +1073,16 @@ def add_tracking_args(parser, include_enable=True):
                        help="2D point tracker used by --tracking: 'template' (default, base "
                             "opencv), 'csrt' (needs opencv-contrib-python), 'cotracker' "
                             "(CoTracker3 online, needs torch + a one-off torch.hub download "
-                            "into TORCH_HOME), 'remote' (stub)")
+                            "into TORCH_HOME), 'remote' (CoTracker3 on gpu_server, another "
+                            "process/env/machine; see --tracking-server)")
+    group.add_argument("--tracking-server", dest="tracking_server",
+                       choices=["no-shutdown", "shutdown", "no-launch"],
+                       default=config.tracking_server_policy_default,
+                       help="gpu_server lifecycle for --tracker-provider remote: a local server is "
+                            "started on demand when none answers at config.tracker_remote_url. "
+                            "'no-shutdown' (default) leaves it running for the next run (it exits "
+                            "after config.gpu_server_idle_timeout_s = 30 min without requests); "
+                            "'shutdown' stops it when the run exits; 'no-launch' never starts one")
     group.add_argument("--tracker3d", dest="tracker3d", choices=list(tracker3d_providers),
                        default=config.tracker3d_provider_default,
                        help="3D lift: 'depth_fusion' (default, weighted per-camera average), "
@@ -1102,6 +1120,9 @@ def add_tracking_args(parser, include_enable=True):
 def make_session(robot, env, args, targets=None, monitor=None, track_gripper=True,
                  logger=None, run_id=None):
     """Build a session from parsed CLI ``args`` (the shape ``env.py`` receives)."""
+    if args.tracker_provider == "remote":
+        from gpu_server import launcher
+        launcher.configure(getattr(args, "tracking_server", None))
     session = TrackingSession(
         robot=robot,
         env=env,

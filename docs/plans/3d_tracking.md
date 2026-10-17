@@ -66,9 +66,9 @@ list, §9 the pipeline as built, §10 the decision log; this is the orientation.
 | `tracking/motion.py` | **done** | 62 tests (§6) |
 | LAPA | **dropped** (kept selectable as `--tracker3d lapa`, not maintained) | §3-§5, §10 D1 |
 | Tracking video renderer | **done** | `tests/tools/render_tracking_video.py` (§0.4) |
-| Door recovery after a long occlusion | **open** | §11.3 |
+| Door recovery after a long occlusion | **open** - CoTracker3 alone passes the occlusion; template+search stays black; NCC/SIFT re-detection fails (twin lever, wood edges); RoMa v2 re-detects it (15/15 frames < 6 px, offline/remote only); integration plan in §13.12 | §11.3, §13.11, §13.12 |
 | **VLM re-detection** (re-find the object when tracking is lost; for G1/G3) | **TODO (large)** | §13.8 |
-| Remote WebSocket server | **not started**, and no longer required (CoTracker runs locally) | §7.5 |
+| **Generic GPU model server** (CoTracker3, RoMa v2; VLM-ready plug-ins) + `--provider remote` | **done** - TCP/WS/inproc; remote CoTracker is bit-identical to local in lock-step; auto-launched when tracking needs it, left running by default (`--tracking-server`), idle exit after 30 min | `gpu_server/`, `gpu_server/README.md`, `tests/test_gpu_server.py` (§13.13) |
 
 ### 0.2 Environment (the part that is easy to lose)
 
@@ -1724,3 +1724,441 @@ same model (`--planner-perception-vlm`, e.g. Gemini) with its own prompt and con
   measure the pose, the centroid is unchanged), rotation std ∝ 1/cluster size,
   unmeasurable rotation held, free-space contradiction. Pybullet: 24/25 pass; the door
   3-camera test fails at 0.050 (order-fragile, §13.2).
+
+### 13.11 Door handle: status, CoTracker3-alone baseline, re-detection probe (2026-10-17)
+
+**Summary**
+
+- **Status of the two door problems.** (a) Drift before the occlusion: reduced, not fixed
+  (region seeding: D0/D1 ~0.031 → ~0.015 m median; lever slide at k40 36 → 27 mm). (b) Black
+  after the occlusion (D4): still never recovers (0.096 → 0.060 m median, black to the end).
+  Details of the 2026-10-15 work: commit `bd22a9a`, `tests/tracking_tools/README.md`.
+- **CoTracker3 alone drifts too.** No 3D, no gates, no re-seeding: on clean video (no occluder)
+  the per-point error on the head grows from 0.8 px (median, before mf 15) to 5-6 px
+  (≈ 30-40 mm at 1.4 m) once the latch has turned. Online and offline models give the same
+  result, with or without the support grid. The centroid stays within ~2 px (≈ 13 mm).
+  The points stay on the handle (95-100 % inside the handle mask).
+- **Why.** The rendered handle is a uniform grey blob with no texture. Only its silhouette
+  carries information, and the silhouette changes as the lever turns 46° and the door swings
+  46°. Points inside the blob slide (aperture problem). This is a property of the scene,
+  not of our tracker.
+- **CoTracker does not go black after the occlusion.** With the head disc occluder
+  (mf 15-25), CoTracker carries the points through and is back on the handle afterwards:
+  post-occlusion 5.0 px median, 100 % on the handle, the same as without the occluder.
+  This is the behaviour the template + search pipeline lacks.
+- **In our pipeline, CoTracker recovers but is stale.** D4, region12 seeding, lock-step:
+  CoTracker 0.038 / 0.076 m (median / p95), recovers (`frames_to_recover=0`), versus template
+  0.036 / 0.118 m, black from frame 23 and never recovers. Most CoTracker frames are
+  `coast`: with step 8, one camera frame per motion frame means a fresh prediction only
+  every 8 motion frames (0.8 s), and the KF coasts in between. Real time (30 fps): 0.095 /
+  0.17 m and 0.22 / 0.31 m in two runs (latency 0.8 s per frame, under CPU load from parallel
+  jobs).
+- **Re-detection from a large context crop does not work on this scene with
+  NCC/SIFT/ORB/AKAZE.** Reference crop at the last frame before the occlusion; targets
+  are post-occlusion frames. No method gets ≥ 13 % of frames within 10 px, for any crop
+  size from 30 to 140 px.
+  - NCC with a 100 px crop: the truth scores 0.36-0.54, below the top-1 false positive
+    (0.56-0.70). The truth ranks 10-18th or is not among the candidates at all.
+  - The top false positives are:
+    - the other vertical wooden edges (door-frame post, door edge): with a 100 px crop the
+      template is mostly wood edge, so it matches any wood edge;
+    - the **twin lever on the other side of the door**, ~26 px away. It is the same rigid
+      link and looks the same, and it becomes the more visible one as the door swings.
+  - With a 140 px crop the truth cannot even be scored at most frames: the handle ends up
+    near the image border, where the template cannot be placed.
+- **RoMa v2 is not installable on this machine.** It requires `torchvision>=0.23` (torch
+  ≈ 2.8). The driver supports at most torch 2.0.1+cu117. Its backbone is DINOv3 ViT-L (no
+  small variant), too large for 4 GB anyway. Cloned for reference only:
+  `D:\Vision\Image_matching\RoMaV2`, and RoMa v1 in `D:\Vision\Image_matching\RoMa`.
+  (Update §13.12: it does run on CPU with torch 2.12, ~5-6 s per turbo match, and it
+  re-detects the handle.)
+
+**Details**
+
+*CoTracker3 alone* (`tests/tracking_tools/dump_door_clip.py`, `cotracker_alone.py`)
+
+- Clip: door scene, region12 seeding, 30 fps camera / 10 Hz motion, 120 frames.
+  Per frame and camera, the clip stores:
+  - clean RGB, plus RGB with the head disc painted in mf [15, 25);
+  - depth and the handle-link mask;
+  - the GT pixel of every seed point, with its self-visibility.
+- Queries: the GT pixels at frame 0. Errors are counted only on GT-visible points.
+
+| head (median / p90 px) | pre (mf < 15) | occl. window | post | last 1/3 s | on handle (post) |
+|---|---|---|---|---|---|
+| online, clean | 0.84 / 2.5 | 3.5 / 5.2 | 5.4 / 7.3 | 6.4 / 9.8 | 0.99 |
+| online + support grid, clean | 0.86 / 2.5 | 3.5 / 5.3 | 5.4 / 7.3 | 6.3 / 8.9 | 0.99 |
+| offline (whole clip, CPU), clean | 0.85 / 2.5 | 3.1 / 5.3 | 6.2 / 6.7 | 6.3 / 6.8 | 0.99 |
+| online, head occluded | 0.84 / 2.6 | (hidden) | 5.1 / 6.3 | 5.7 / 6.4 | 1.00 |
+| offline, head occluded | 0.84 / 2.5 | (hidden) | 6.1 / 6.8 | 6.4 / 6.9 | 0.99 |
+
+- Per-point error grows linearly with the latch angle (mf 0 → 27). It stops growing when the
+  latch reaches its stop at 0.8 rad, although the hinge keeps swinging.
+- Centroid error (px), head, clean online: 0.6 @mf5, 1.4 @10, 2.1 @14, 2.2 @20, 1.2 @30, 2.3 @40.
+- Wrist (6 visible seeds, default framing): 2.2 px before mf 15, 8 px by mf 18, then
+  the handle leaves the image.
+- Online speed: 120 frames in ~4 s (~0.25 s per 8-frame flush, fp16, one camera).
+  The offline model runs out of memory on 4 GB for 120 frames at 384x512 and falls back
+  to CPU (~60 s).
+- Mm per px: head ≈ 6.4 mm at 1.4 m, wrist ≈ 3.6 mm at 0.8 m (f ≈ 222 px).
+- GT check (`outputs/tracking_probes/door_clip/gt_check.png`): as the door swings, the
+  seeded (near-side) lever moves to the right edge of the door and is partly hidden behind
+  it. The other lever of the same link shows on the left.
+
+*Re-detection probe* (`tests/tracking_tools/redetect_probe.py`)
+
+- Reference: camera frame 44 (mf 14.7, last frame before the occlusion), a square crop
+  around the GT handle centroid.
+- Targets: post-occlusion frames 75-119.
+- Methods:
+  - NCC: brute force over scale {0.8 .. 1.25} x in-plane angle {-30 .. 30°}, using the
+    central 70 % of the warped crop;
+  - SIFT / AKAZE / ORB: ratio test 0.8 + RANSAC partial affine.
+
+| crop | NCC med px | SIFT | ORB | AKAZE |
+|---|---|---|---|---|
+| 30 | 79 | fail | fail | fail |
+| 60 | 80 | fail | 67 | fail |
+| 100 | 78 (13 % < 10 px) | 26 | 26 | fail |
+| 140 | 18 | 26 | 26 | 46 |
+
+- `--detail 100 140` prints, per target frame:
+  - the top-5 NCC candidates (score, px error, on-handle-mask);
+  - `at_gt`: the best score of a placement within 2 px of the truth;
+  - the rank of the first candidate within 5 px of the truth.
+- Crop 100: `at_gt` 0.36-0.54; top-1 0.56-0.70; margin +0.11..+0.25.
+  The first frames (75, 79) have top-1 7-8 px from the truth, on the handle; later frames
+  lock onto the door-frame post or the twin lever.
+- Crop 140: top-1 0.43-0.64, 15-25 px off. The truth placement is off-image.
+
+*In-pipeline D4* (`outputs/tracking_probes/d4_ct/`, region12, head occluded mf 15-25)
+
+| provider, timing | median / p95 (m) | recovers | note |
+|---|---|---|---|
+| template, lock-step | 0.036 / 0.118 | no (black from frame 23) | green but drifting 1 → 21 mm by frame 13 |
+| CoTracker, lock-step | 0.038 / 0.076 | yes | `coast` between flushes (step 8 = 0.8 s) |
+| template, real time | 0.067 / 0.193 | no | |
+| CoTracker, real time | 0.095 / 0.174 (run 2: 0.22 / 0.31) | no | latency ≈ 0.8 s per frame |
+
+**Conclusions / next steps**
+
+1. **Drift (a).** Neither tracker can pin interior points on a textureless part. Constrain
+   the pose with depth geometry instead of more 2D appearance:
+   - segment the protruding component each frame (the `region_seed` machinery: RANSAC
+     door plane + protrusion ≥ 12 mm);
+   - fit the seed-time handle point cloud to it (trimmed ICP, point-to-plane), seeded by
+     the KF prediction;
+   - this also gives a silhouette/depth consistency check for "green".
+2. **Black after occlusion (b).** CoTracker's behaviour through occlusion is what we want.
+   To use it:
+   - feed it to `pose_tracker` without the 0.8 s staleness: step 4, head only, and
+     latency-compensated timestamps (the fresh row belongs to an older frame);
+   - **do not re-seed / reset it on occlusion** (re-seed only on a verified relocation).
+3. **Re-detection.**
+   - Appearance alone is ambiguous in this scene: twin lever, repeated wood edges. Every
+     candidate must also pass geometric priors:
+     - near the KF / last-trusted hypothesis;
+     - on a protruding depth component;
+     - consistent with the door-plane normal.
+   - A context crop is useful only if it is masked to the handle + rosette. With a raw
+     100 px crop the score is dominated by wood edges.
+   - Learned matchers to try within torch 2.0.1+cu117:
+     - RoMa v1 `tiny_roma_v1_outdoor` (XFeat-based, small);
+     - EfficientLoFTR / kornia LoFTR;
+     - full RoMa v1 (DINOv2) only if 4 GB allows.
+   - RoMa v2 needs a newer GPU driver (cu12x).
+
+**Artifacts.** Videos in `outputs/tracking_video/`:
+
+| file | content |
+|---|---|
+| `door_cotracker_alone_head_online.mp4` | CoTracker3 online alone, head, clean (top) / occluded (bottom). Green ring = GT, cyan = tracked, crosses = centroids, x6 zoom on the right |
+| `door_cotracker_alone_head_offline.mp4` | same, offline model |
+| `door_cotracker_alone_wrist_online.mp4` | wrist, online |
+| `door_redetect_ncc100_head.mp4`, `door_redetect_ncc140_head.mp4` (+ `.png`) | NCC similarity map (jet 0.2 → 0.8) per post-occlusion frame, top-5 candidates with scores, GT ring, reference crop + template box |
+| `door_template_pose_tracker_d4_region12_v4.mp4` / `door_cotracker_pose_tracker_d4_region12_v4.mp4` | full pipeline D4, region12, real time |
+
+- Probe outputs in `outputs/tracking_probes/door_clip/`: clip npz, `*_cotracker_alone.json`
+  (+ tracks npz), `*_redetect_head.json`, `*_redetect_ncc_detail_head.json`, `gt_check.png`.
+
+```powershell
+$vp = "C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_traj\python.exe"
+$lp = "C:\Users\dekelco\AppData\Local\miniconda3\envs\env_lapa_tracking\python.exe"
+& $vp tests\tracking_tools\dump_door_clip.py --seeding region --seed-points 12 --occlusion 15 25 --occluder-cam head
+$env:TORCH_HOME="$PWD\cache\torch"
+& $lp tests\tracking_tools\cotracker_alone.py outputs\tracking_probes\door_clip\door_region12_fps30.npz
+& $vp tests\tracking_tools\render_clip_tracks.py <clip.npz> <tracks.npz> --keys head__clean__online head__occluded__online --out outputs\tracking_video\x.mp4
+& $vp tests\tracking_tools\redetect_probe.py outputs\tracking_probes\door_clip\door_region12_fps30.npz [--detail 100 140 --every 2]
+```
+
+### 13.12 RoMa v2 re-detection works; CoTracker3 integration plan (2026-10-17)
+
+**Summary**
+
+- **RoMa v2 re-detects the door handle after the occlusion; NCC does not.**
+  - Setup: reference = head frame 44 (the last frame before the occlusion); targets = 15
+    post-occlusion frames (75-117, every 3rd). Same setup as the NCC probe in §13.11.
+  - Read the dense warp A→B at the handle centroid ("direct"): **15/15 frames within 6 px,
+    median 2.2 px (≈ 14 mm)**.
+  - NCC top-1 on the same frames: median 18-20 px, 0 % within 5 px.
+  - RoMa never picked the twin lever or the wood edges.
+  - Matching only the 100 px crop against B ("crop-only", i.e. re-detect from a stored crop)
+    also works: median 3.2 px, max 5.9 px.
+- **Use the warp at the point, not a box-wide transform.** A single RANSAC similarity over
+  the 100 px box is pulled toward the door's motion (median 26 px). The handle and the door
+  move differently. Two point estimates work, and agree within ~0.5 px:
+  - the direct lookup at the anchor;
+  - the median displacement of confident points within 8 px of it.
+- **Cost.** Not on the A1000 env (torch 2.0.1, no `torch._dynamo` config). It runs on CPU in
+  env `stmd` (torch 2.12, fp32, turbo 320²) at **5-6 s per match** with 425 M params. T4
+  timing: run the notebook. RoMa v2 is a remote / low-rate re-detector, not a per-frame
+  tracker.
+- **CoTracker3 integration (answer to "exclusive or combined?"): combined.**
+  - CoTracker3 is the drift-robust **anchor** that carries the handle through the occlusion.
+  - A CPU tracker (KLT/template) is the per-frame **bridge** between CoTracker flushes.
+  - RoMa v2 (remote) is the **re-detector** when everything is lost.
+  - Information flows one way into CoTracker: NCC/KLT is re-anchored by CoTracker, never
+    the reverse.
+  - CoTracker is re-seeded only on a *verified* relocation (e.g. RoMa + geometry gate), and
+    **never reset on occlusion**.
+- **Handle 3D shape fit (ICP): not needed first.**
+  - CoTracker alone keeps the centroid within ~2 px (≈ 13 mm) and 95-100 % of its points
+    on the handle.
+  - The in-pipeline error (0.038 m) is dominated by staleness/coasting, not by drift.
+  - Revisit ICP only if, after integration, (a) the position error stays > ~1 cm, (b) the
+    lever rotation is needed to better than ~5°, or (c) a CPU-only deployment must work
+    without CoTracker.
+
+**Details: RoMa v2 sweep** (`romav2_redetect_colab.ipynb` code, CPU fp32, turbo; results in
+`outputs/tracking_probes/romav2_pairs/head_sweep/results_turbo_cpu.json`)
+
+| method (15 frames, px to GT centroid) | median | max | < 5 px |
+|---|---|---|---|
+| RoMa v2 fullA+box, direct warp at the anchor | 2.2 | 5.5 | 93 % |
+| RoMa v2 fullA+box, local median (r = 8 px) | 2.2 | 5.6 | 87 % |
+| RoMa v2 fullA+box, RANSAC similarity on the box | 25.8 | 35.4 | 0 % |
+| RoMa v2 crop-only, direct | 3.2 | 5.9 | 87 % |
+| RoMa v2 crop-only, RANSAC on the box | 12.5 | 35.2 | 20 % |
+| NCC crop 100, top-1 (§13.11) | 19.6 | ~85 | 0 % |
+| NCC crop 140, top-1 (§13.11) | 17.7 | ~25 | 0 % |
+
+- Error grows with the door angle (0.4 px at f75 → 5.5 px at f117). The predicted point
+  trails the GT in x, because the lever slides behind the door edge and the GT centroid
+  includes the partly hidden seed points.
+- Overlap at the anchor (confidence): fullA+box ≥ 0.59, crop-only ≥ 0.80. The lowest
+  values are at the latest frames.
+- Caveats:
+  - head camera only;
+  - A and B are clean frames (the occluder is only inside the window);
+  - sim renders.
+  The wrist camera and a "B still partly occluded" case are untested.
+
+**Notebook** `tests/tracking_tools/romav2_redetect_colab.ipynb`
+
+- Built from a script; its code was executed end to end on CPU.
+- Steps:
+  - clones `Parskatt/RoMaV2` and installs only `einops rich`. There is no
+    `pip install -e`, because its `torchvision>=0.23` pin could replace the runtime torch;
+    `src/` goes on `sys.path` instead;
+  - patches the hard-coded bf16 → fp16 on T4 (sm75 has no native bf16); `fp32` on CPU or
+    as a NaN-safe fallback;
+  - loads **any pair** (URL, path or Colab upload) or the `manifest.json` from
+    `export_sim_pairs.py`;
+  - runs both modes and prints a table: time, peak VRAM, n_keep, mean overlap, RANSAC
+    inliers/scale, and the errors of RANSAC / local / direct;
+  - draws 5 panels per pair: box; B with the mapped box points coloured by overlap (the
+    RoMa counterpart of the NCC similarity map); overlap map; B warped into A; match lines;
+  - benchmarks turbo / fast / base / precise;
+  - zips the figures.
+- Sim images reach Colab via imgbb:
+  `$env:IMGBB_API_KEY="..."; python tests/tracking_tools/export_sim_pairs.py <clip> --upload`.
+  It prints a ready-to-paste `PAIRS = [...]`. The key is read from the environment only.
+- Kaggle: enable Internet; only `cuda:0` is used.
+
+**Details: CoTracker3 integration design**
+
+1. **Why not CoTracker alone?**
+   - Rate/latency: the online model advances in fixed 8-frame steps. The window of 16 is a
+     trained constant (`predictor.py`: `step = window_len // 2`), so "step 4" would need a
+     different window and is untested.
+   - On the A1000: ~0.25 s per flush per camera, i.e. throughput-real-time for one camera
+     at 30 fps, but each result is 0-7 frames old plus 0.25 s compute. Two cameras are
+     ≈ 16 fps.
+   - CPU-only machines have no CoTracker at all.
+2. **Bridge (combined mode):**
+   - Each CoTracker flush returns fresh positions for the *last 8 frames*, including the
+     frame the flush was triggered on.
+   - The bridge tracker (KLT/template) is re-anchored to the CoTracker positions at that
+     frame (`relocate` rows; the template tracker supports it). It then tracks forward
+     frame by frame until the next flush.
+   - With real-time latency (the result belongs to frame t_f < now), the bridge replays its
+     buffered frames t_f → now (KLT on ≤ 8 frames, a few ms). This is a delayed-measurement
+     update: measurements carry their true frame time, so `pose_tracker`'s KF stays
+     consistent.
+   - Expected effect: no `coast` between flushes. In the lock-step D4 run, most CoTracker
+     frames were `coast`.
+3. **Does NCC help CoTracker?**
+   - No, not directly. CoTracker3-online keeps per-query track features accumulated since
+     the query frame plus the last window's coordinates.
+   - The only way to inject positions is a new `is_first_step` call with new queries,
+     i.e. a re-seed that drops that memory. That memory is exactly what carries it through
+     the occlusion.
+   - So the flow is one-way: CoTracker → bridge. NCC/KLT serves only as the in-between
+     measurement and as a consistency check (a large CoTracker ↔ bridge disagreement lowers
+     confidence).
+4. **Session policy changes needed:**
+   - `_pose_repairs` `reacquire` (red/black) calls `_reseed_from_pose` → `tracker.reset()` +
+     `init()` on every camera (`tracking/session.py` ~781). For CoTracker this is harmful
+     during an occlusion. Make it skip trackers flagged `keeps_memory_through_occlusion`,
+     unless the new pose is verified (appearance/RoMa + depth-protrusion + KF gate).
+   - `_reanchor` → `relocate` already returns 0 for CoTracker (unsupported), which is the
+     right behaviour.
+5. **Remote GPU server (CPU-only clients): feasible and recommended for both models.**
+   - FastAPI with a WebSocket per stream `(obj, cam)`:
+     - `init {jpeg, points}`;
+     - `frame {jpeg, frame_idx}` → returns `{frame_idx_of_result, points, vis, conf}` after
+       each flush;
+     - the server holds the CoTracker online state and batches cameras (B = 2) in one
+       forward.
+   - Bandwidth: 256² JPEG ≈ 15 KB → 2 cams × 30 fps ≈ 0.9 MB/s. LAN RTT ~1-5 ms.
+   - On an L4/A10/4090-class GPU a flush should take tens of ms, making both cameras real
+     time. Verify on the target GPU.
+   - Client: a `RemoteCoTrackerTracker` implementing `init / update / reset`. `update`
+     never blocks: it sends the frame, returns the latest received result, and sets
+     `stale_frames` from the frame indices. This matches the existing `stale_frames` +
+     score-decay contract and the bridge in (2). This is the §7.5 "Remote WebSocket
+     server" item.
+   - RoMa v2 is a stateless REST endpoint `POST /redetect {ref_jpeg, box|points, query_jpeg}
+     → {points_B, overlap}`. It is called only when black/red, or at ~1 Hz as a
+     verification, so 0.1-1 s latency is fine.
+   - Mapping every seed pixel through the warp re-seeds all points at once, keeping the
+     pattern's geometry. Then gate on overlap ≥ 0.5 and the geometric priors of §13.11
+     (near the KF, on a protruding depth component).
+6. **Order of work:**
+   1. Session policy: do not reset CoTracker on red/black.
+   2. Bridge tracker plus delayed-measurement timestamps.
+   3. Re-run D0/D1/D4, lock-step and real time.
+   4. Remote CoTracker server/client.
+   5. RoMa `/redetect` + gated re-seed.
+   6. ICP only if the numbers still require it.
+
+**Artifacts** (`outputs/tracking_video/`)
+
+| file | content |
+|---|---|
+| `door_redetect_romav2_fullA_box_head.mp4` (+ `.png` = last frame) | per post-occlusion frame: box on A, box points mapped into B coloured by overlap, RANSAC / local / direct / GT markers, overlap map, B warped into A, match lines |
+| `door_redetect_romav2_crop_only_head.mp4` (+ `.png`) | same, matching only the 100 px crop |
+| `door_redetect_romav2_vs_ncc_head.png` | error vs frame (log): RoMa direct and box-RANSAC (both modes) vs NCC crop 100/140 top-1 |
+
+**How to read the 5-panel RoMa frames** (title `door_head_f44->fN`: A = pre-occlusion frame 44, B = post-occlusion frame N):
+
+1. *A / crop + anchor* is the **input**, not a result. The cyan box is the 100 px crop and the red `+` is the anchor (the handle centroid that gets queried).
+2. *B: box points mapped* is the **result**. Each box pixel of A is drawn where RoMa maps it in B, coloured by `overlap` (yellow = confidently co-visible, purple = not co-visible). Markers: orange `+` = direct warp at the anchor (the method we use); magenta `x` = local median; red `X` = box RANSAC; green ring = ground truth. **The handle is re-detected correctly when the orange `+` sits inside the green ring.** A red `X` far from the ring is the known box-RANSAC failure: the door dominates the box.
+3. *overlap_AB over A*: RoMa's co-visibility. Dark areas of A are predicted not visible in B, here the moved door leaf and the arm.
+4. *B warped into A*: B resampled through the warp. Where it reproduces A the warp is right; white means no overlap.
+5. *Match lines*: A's 100 px box (zoomed to B's height, left) beside B (right). Thick **red** lines are ~10 matches from the handle itself (≤ 12 px from the anchor). Thin **blue** lines are ~8 matches from a door ring around it (20-45 px, overlap ≥ 0.6) for global context. The **orange** line is the anchor's own match; the green ring is GT in B. Lines that land parallel and on the handle mean the warp is locally consistent.
+
+In the error plot, the dashed line marks 5 px (about 32 mm at 6.4 mm/px). Solid lines are RoMa direct; they stay under it, while NCC and box RANSAC sit at 15-90 px.
+
+- Pairs and manifests: `outputs/tracking_probes/romav2_pairs/head` (3 pairs) and
+  `head_sweep` (15 pairs + `results_turbo_cpu.json`).
+
+```powershell
+$vp = "C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_traj\python.exe"
+& $vp tests\tracking_tools\export_sim_pairs.py outputs\tracking_probes\door_clip\door_region12_fps30.npz [--queries 75 78 ...] [--upload]
+# then open tests\tracking_tools\romav2_redetect_colab.ipynb in Colab (T4) / Kaggle and paste PAIRS
+```
+
+### 13.13 Generic GPU model server + auto-launch; RoMa via the server (2026-10-17)
+
+**Brief**
+- `gpu_server/` is a generic model server: one GPU process, plug-in modules loaded lazily
+  (`cotracker`, `romav2`, `echo`; VLMs later), served over TCP, WebSocket or in-process.
+  Details: `gpu_server/README.md`.
+- `--tracker-provider remote` (eval: `--provider remote`) proxies CoTracker3 from the
+  CPU-only `vlm_traj` env. Lock-step D4 is **bit-identical** to local CoTracker
+  (median 0.038233 / p95 0.076449 m).
+- **Auto-launch:** when tracking uses the remote provider, the client starts the server in
+  `env_lapa_tracking` if nothing is listening, or attaches to the running one.
+  - `--tracking-server no-shutdown` (default) leaves it running; `shutdown` stops it at
+    exit; `no-launch` never spawns.
+  - A launched server exits after **30 min idle**.
+- IPC: tcp 1.09 ms, ws 1.61 ms, inproc 0.009 ms per 256x256 frame round trip. All are
+  negligible against model time, so no shared memory.
+- RoMa v2 through the server reproduces the offline sweep: fullA+box direct median
+  **2.16 px**, crop-only 3.17 px. The match-lines panel was redrawn to be readable.
+
+**Details: lifecycle** (`gpu_server/launcher.py`, `server.py`, `host.py`)
+
+1. **Who starts it.** `agent_runner.py` and `run_tracking_eval.py` call `launcher.prewarm()`
+   at startup, so the model loads while the scene boots.
+   - `RemoteTracker._ensure_session` calls `launcher.ensure_server(url, module)`: ping →
+     reuse, or `load` the missing module, or spawn (loopback URLs only) → wait until loaded.
+   - `init` retries once after a dropped connection (e.g. the server idled out between
+     episodes).
+2. **Spawn.** `python -u -m gpu_server.server --preload <module> --idle-timeout-s 1800` runs
+   in the conda env `config.gpu_server_conda_env`, or `$GPU_SERVER_PYTHON`.
+   - It is detached: on Windows `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` (+ breakaway
+     from job); on POSIX a new session. It outlives the client.
+   - Log: `outputs/gpu_server/server_<port>.log`.
+3. **Bind first, preload in the background.** Ports listen within ~1 s and `ping` reports
+   `loading`. A second process (env worker, second run) attaches instead of starting a
+   duplicate. A losing duplicate fails to bind cheaply.
+4. **Idle exit.** No request (any op, including ping) for `gpu_server_idle_timeout_s`
+   (1800 s). In-flight requests or a load in progress block it. Open, silent connections
+   do not, so a forgotten client cannot pin the GPU.
+5. **Shutdown policy at exit.** It runs in the agent process's `atexit`, since
+   multiprocessing children skip atexit.
+   - `shutdown` first closes this process's sessions, then sends `{"op": "shutdown"}`.
+   - The server waits up to 10 s for other connections' sessions to close. It refuses
+     (`busy`) if another client still tracks, unless `force`.
+6. `TrackingSession.stop()` now closes trackers, which frees each remote CoTracker session
+   (~100 MB VRAM per camera stream).
+
+**Real-world check** (door, occlusion 15-25 on head, pose_tracker, region seeding,
+lock-step, from `vlm_traj`, no server running):
+
+| run | server | median / p95 m | mean latency ms | after exit |
+|---|---|---|---|---|
+| 1, `--tracking-server no-shutdown` | **launched** (pid 9052, env_lapa_tracking) | 0.0382 / 0.0764 | 475 (cold CUDA) | still listening on 8765/8766 |
+| 2, `--tracking-server shutdown` | **attached** to pid 9052 | 0.0382 / 0.0764 | 122 (warm) | stopped cleanly (server log: `exited: shutdown requested`) |
+
+JSONs: `outputs/tracking_probes/gpu_server/door_remote_pose_tracker_autolaunch_d4{,_attach}.json`.
+
+**Tests** (`tests/test_gpu_server.py`; vlm_traj via pytest, env_lapa_tracking via unittest
+with WS):
+- busy vs forced shutdown;
+- shutdown waits for a departing client;
+- idle timeout only without requests;
+- ports listen before preload finishes;
+- launcher with real detached subprocesses: launch → attach → `no-shutdown` keeps it →
+  `shutdown` stops it; idle self-exit; `no-launch` fails loudly.
+
+**RoMa via the server** (`tests/tracking_tools/render_romav2_redetect.py`, server in `stmd`
+on CPU, turbo fp32, ~4-5 s per match):
+
+| mode | direct-warp median / max px | < 5 px |
+|---|---|---|
+| fullA + box | **2.16** / 5.48 | 93 % |
+| crop only (100 px) | 3.17 / 5.86 | 87 % |
+
+The videos `door_redetect_romav2_{fullA_box,crop_only}_head.{mp4,png}` were re-rendered
+with the new match-lines panel (legend in §13.12). The Colab notebook
+`tests/tracking_tools/romav2_redetect_colab.ipynb` uses the same panel. Its script export
+was validated locally in `stmd` (CPU, setting `base`, fp32), 15 pairs:
+
+| mode | median / max px | < 5 px | time per match |
+|---|---|---|---|
+| fullA + box | 2.80 / 5.70 | 80 % | 26 s |
+| crop only | 3.90 / 6.40 | 66 % | 31 s |
+
+`base` is **no better than `turbo`** here and is ~6x slower on CPU, so keep `turbo` as the
+default.
+
+**Open (next)**
+1. Session policy: do not reset CoTracker on red/black (§13.12 (4)).
+2. HybridTracker: CoTracker flushes + a KLT bridge with delayed-measurement timestamps.
+3. Wire RoMa `match` into `reacquire` as a gated re-seed (overlap ≥ 0.5, KF gate, depth
+   protrusion).
+4. Re-check A1000 throttling (1.24 s per flush vs the earlier 0.223 s profile) before
+   quoting real-time numbers.

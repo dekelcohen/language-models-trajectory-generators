@@ -1,0 +1,1095 @@
+{
+  "schema": "tracking_eval/v1",
+  "created_at": "2026-09-25T01:05:35",
+  "wall_s": 4.227,
+  "config": {
+    "label": "template+pose_tracker",
+    "tracker_provider": "template",
+    "tracker3d": "pose_tracker",
+    "cameras": [
+      "head",
+      "wrist"
+    ],
+    "image_size": [
+      256,
+      256
+    ],
+    "track_interval": 1,
+    "lost_penalty_m": 1.0,
+    "recovery_threshold_m": 0.05,
+    "seed_offset_frame": "local",
+    "scene": "grasp_scripted",
+    "n_frames": 30,
+    "objects": [
+      "cube"
+    ],
+    "start": [
+      -0.2,
+      0.4,
+      0.1
+    ],
+    "step_vector": [
+      0.01,
+      0.0,
+      0.003
+    ],
+    "occlusion_window": [
+      12,
+      19
+    ],
+    "occluder_cam": "head"
+  },
+  "seed_offsets": {
+    "cube": {
+      "local": [
+        0.013205,
+        0.051828,
+        0.032345
+      ],
+      "rotating": true
+    }
+  },
+  "objects": {
+    "cube": {
+      "n_frames": 30,
+      "n_valid_frames": 30,
+      "median_l2_m": 0.005410087784027047,
+      "p95_l2_m": 0.029621558698958588,
+      "max_l2_m": 0.030032952594430305,
+      "median_l2_valid_m": 0.005410087784027047,
+      "pct_lost": 0.0,
+      "n_dropped_frames": 0,
+      "err_during_occlusion_m": 0.005725390498338534,
+      "n_occluded_frames": 7,
+      "frames_to_recover": 0,
+      "max_jump_m": 0.022861344756599376,
+      "median_disagreement_m": 0.01361909080924029,
+      "latency_ms_mean": 7.042,
+      "latency_ms_p95": 10.438,
+      "lost_penalty_m": 1.0,
+      "recovery_threshold_m": 0.05
+    }
+  },
+  "aggregate": {
+    "n_objects": 1,
+    "n_frames": 30,
+    "n_valid_frames": 30,
+    "median_l2_m": 0.00541,
+    "median_l2_valid_m": 0.00541,
+    "err_during_occlusion_m": 0.005725,
+    "latency_ms_mean": 7.042,
+    "median_disagreement_m": 0.013619,
+    "p95_l2_m": 0.029622,
+    "max_l2_m": 0.030033,
+    "max_jump_m": 0.022861,
+    "pct_lost": 0.0,
+    "latency_ms_p95": 10.438,
+    "frames_to_recover": 0
+  },
+  "peak_vram_mb": null,
+  "session": {
+    "errors": 0,
+    "lift_errors": 0,
+    "aborted": false,
+    "abort_reason": null
+  },
+  "frames": {
+    "cube": [
+      {
+        "frame": 0,
+        "obj": "cube",
+        "predicted": [
+          -0.183584,
+          0.452508,
+          0.134875
+        ],
+        "expected": [
+          -0.186795,
+          0.451828,
+          0.131323
+        ],
+        "error_m": 0.004837,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.01229,
+        "latency_ms": 10.733,
+        "lift": {
+          "provider": "pose_tracker",
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.54,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "init",
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 1,
+        "obj": "cube",
+        "predicted": [
+          -0.175253,
+          0.451938,
+          0.1381
+        ],
+        "expected": [
+          -0.176795,
+          0.451828,
+          0.134323
+        ],
+        "error_m": 0.004081,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.012565,
+        "latency_ms": 9.76,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.1111,
+          "rejected_jump": {},
+          "epipolar_worst_px": 1.13,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.35,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 2,
+        "obj": "cube",
+        "predicted": [
+          -0.164732,
+          0.451523,
+          0.138943
+        ],
+        "expected": [
+          -0.166795,
+          0.451828,
+          0.137323
+        ],
+        "error_m": 0.002641,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.008819,
+        "latency_ms": 8.724,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0767,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.83,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.72,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 3,
+        "obj": "cube",
+        "predicted": [
+          -0.154978,
+          0.45161,
+          0.142596
+        ],
+        "expected": [
+          -0.156795,
+          0.451828,
+          0.140323
+        ],
+        "error_m": 0.002918,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.013811,
+        "latency_ms": 8.696,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0715,
+          "rejected_jump": {},
+          "epipolar_worst_px": 1.02,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.64,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 4,
+        "obj": "cube",
+        "predicted": [
+          -0.144866,
+          0.451884,
+          0.146087
+        ],
+        "expected": [
+          -0.146795,
+          0.451828,
+          0.143323
+        ],
+        "error_m": 0.003371,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.009957,
+        "latency_ms": 8.309,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0719,
+          "rejected_jump": {},
+          "epipolar_worst_px": 2.5,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.27,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 5,
+        "obj": "cube",
+        "predicted": [
+          -0.134942,
+          0.452923,
+          0.148576
+        ],
+        "expected": [
+          -0.136795,
+          0.451828,
+          0.146323
+        ],
+        "error_m": 0.003116,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.014843,
+        "latency_ms": 11.646,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0734,
+          "rejected_jump": {},
+          "epipolar_worst_px": 1.51,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.93,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 6,
+        "obj": "cube",
+        "predicted": [
+          -0.124614,
+          0.452007,
+          0.152112
+        ],
+        "expected": [
+          -0.126795,
+          0.451828,
+          0.149323
+        ],
+        "error_m": 0.003545,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.013831,
+        "latency_ms": 9.179,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0714,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.99,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.57,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 7,
+        "obj": "cube",
+        "predicted": [
+          -0.114867,
+          0.452226,
+          0.153796
+        ],
+        "expected": [
+          -0.116795,
+          0.451828,
+          0.152323
+        ],
+        "error_m": 0.002459,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.013051,
+        "latency_ms": 8.599,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0709,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 1.8,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.39,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 8,
+        "obj": "cube",
+        "predicted": [
+          -0.105233,
+          0.452022,
+          0.156648
+        ],
+        "expected": [
+          -0.106795,
+          0.451828,
+          0.155323
+        ],
+        "error_m": 0.002058,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.015414,
+        "latency_ms": 9.264,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0708,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 1.64,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.49,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 9,
+        "obj": "cube",
+        "predicted": [
+          -0.095209,
+          0.451894,
+          0.159631
+        ],
+        "expected": [
+          -0.096795,
+          0.451828,
+          0.158323
+        ],
+        "error_m": 0.002057,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.012512,
+        "latency_ms": 7.689,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0729,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 2.24,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.15,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 10,
+        "obj": "cube",
+        "predicted": [
+          -0.085365,
+          0.452188,
+          0.163678
+        ],
+        "expected": [
+          -0.086795,
+          0.451828,
+          0.161323
+        ],
+        "error_m": 0.002778,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.013427,
+        "latency_ms": 7.67,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0708,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 2.54,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.12,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 11,
+        "obj": "cube",
+        "predicted": [
+          -0.075499,
+          0.452339,
+          0.167319
+        ],
+        "expected": [
+          -0.076795,
+          0.451828,
+          0.164323
+        ],
+        "error_m": 0.003305,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.014769,
+        "latency_ms": 10.076,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0725,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 2.07,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "kf": "outside gate",
+          "kf_d2": 106.38,
+          "reacquire": true,
+          "unmeasured_frames": 1,
+          "mode": "red"
+        }
+      },
+      {
+        "frame": 12,
+        "obj": "cube",
+        "predicted": [
+          -0.065632,
+          0.452491,
+          0.170961
+        ],
+        "expected": [
+          -0.066795,
+          0.451828,
+          0.167323
+        ],
+        "error_m": 0.003876,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 5.687,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0885,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "reacquire": true,
+          "unmeasured_frames": 2,
+          "mode": "red"
+        }
+      },
+      {
+        "frame": 13,
+        "obj": "cube",
+        "predicted": [
+          -0.055766,
+          0.452642,
+          0.174603
+        ],
+        "expected": [
+          -0.056795,
+          0.451828,
+          0.170323
+        ],
+        "error_m": 0.004476,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 5.546,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.1079,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "reacquire": true,
+          "unmeasured_frames": 3,
+          "mode": "red"
+        }
+      },
+      {
+        "frame": 14,
+        "obj": "cube",
+        "predicted": [
+          -0.0459,
+          0.452794,
+          0.178245
+        ],
+        "expected": [
+          -0.046795,
+          0.451828,
+          0.173323
+        ],
+        "error_m": 0.005095,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.438,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.13,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "reacquire": true,
+          "unmeasured_frames": 4,
+          "mode": "red"
+        }
+      },
+      {
+        "frame": 15,
+        "obj": "cube",
+        "predicted": [
+          -0.036033,
+          0.452945,
+          0.181887
+        ],
+        "expected": [
+          -0.036795,
+          0.451828,
+          0.176323
+        ],
+        "error_m": 0.005725,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 5.513,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.1544,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "reacquire": true,
+          "unmeasured_frames": 5,
+          "mode": "red"
+        }
+      },
+      {
+        "frame": 16,
+        "obj": "cube",
+        "predicted": [
+          -0.026167,
+          0.453096,
+          0.185528
+        ],
+        "expected": [
+          -0.026795,
+          0.451828,
+          0.179323
+        ],
+        "error_m": 0.006365,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 5.142,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.1811,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "reacquire": true,
+          "unmeasured_frames": 6,
+          "mode": "red"
+        }
+      },
+      {
+        "frame": 17,
+        "obj": "cube",
+        "predicted": [
+          -0.016301,
+          0.453248,
+          0.18917
+        ],
+        "expected": [
+          -0.016795,
+          0.451828,
+          0.182323
+        ],
+        "error_m": 0.00701,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.152,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.2097,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 4,
+          "reacquire": true,
+          "unmeasured_frames": 7,
+          "mode": "red"
+        }
+      },
+      {
+        "frame": 18,
+        "obj": "cube",
+        "predicted": [
+          -0.006435,
+          0.453399,
+          0.192812
+        ],
+        "expected": [
+          -0.006795,
+          0.451828,
+          0.185323
+        ],
+        "error_m": 0.00766,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 4.315,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.2401,
+          "rejected_jump": {
+            "head": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 2,
+          "too_few_points": 2,
+          "reacquire": true,
+          "unmeasured_frames": 8,
+          "mode": "red"
+        }
+      },
+      {
+        "frame": 19,
+        "obj": "cube",
+        "predicted": [
+          -0.006258,
+          0.448699,
+          0.215184
+        ],
+        "expected": [
+          0.003205,
+          0.451828,
+          0.188323
+        ],
+        "error_m": 0.028651,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.022911,
+        "latency_ms": 7.327,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.25,
+          "rejected_jump": {},
+          "epipolar_worst_px": 4.85,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.46,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 20,
+        "obj": "cube",
+        "predicted": [
+          0.004167,
+          0.449036,
+          0.219455
+        ],
+        "expected": [
+          0.013205,
+          0.451828,
+          0.191323
+        ],
+        "error_m": 0.02968,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.015589,
+        "latency_ms": 7.652,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0743,
+          "rejected_jump": {},
+          "epipolar_worst_px": 7.92,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.84,
+          "rotation_observable": true,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow"
+        }
+      },
+      {
+        "frame": 21,
+        "obj": "cube",
+        "predicted": [
+          0.012245,
+          0.449135,
+          0.220603
+        ],
+        "expected": [
+          0.023205,
+          0.451828,
+          0.194323
+        ],
+        "error_m": 0.028601,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 5.21,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0735,
+          "rejected_jump": {},
+          "epipolar_worst_px": 5.48,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.68,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 22,
+        "obj": "cube",
+        "predicted": [
+          0.023289,
+          0.44963,
+          0.224027
+        ],
+        "expected": [
+          0.033205,
+          0.451828,
+          0.197323
+        ],
+        "error_m": 0.02857,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 5.72,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0715,
+          "rejected_jump": {},
+          "epipolar_worst_px": 8.59,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 12.81,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 23,
+        "obj": "cube",
+        "predicted": [
+          0.033511,
+          0.448902,
+          0.227546
+        ],
+        "expected": [
+          0.043205,
+          0.451828,
+          0.200323
+        ],
+        "error_m": 0.029045,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 6.335,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0709,
+          "rejected_jump": {},
+          "epipolar_worst_px": 10.82,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 5.4,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 24,
+        "obj": "cube",
+        "predicted": [
+          0.041812,
+          0.449301,
+          0.230471
+        ],
+        "expected": [
+          0.053205,
+          0.451828,
+          0.203323
+        ],
+        "error_m": 0.02955,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 5.463,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0708,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 5.28,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 25,
+        "obj": "cube",
+        "predicted": [
+          0.052608,
+          0.44992,
+          0.233518
+        ],
+        "expected": [
+          0.063205,
+          0.451828,
+          0.206323
+        ],
+        "error_m": 0.029249,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 5.004,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0708,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 18.13,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 26,
+        "obj": "cube",
+        "predicted": [
+          0.063702,
+          0.449844,
+          0.236736
+        ],
+        "expected": [
+          0.073205,
+          0.451828,
+          0.209323
+        ],
+        "error_m": 0.029081,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 4.814,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0708,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 0.79,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 27,
+        "obj": "cube",
+        "predicted": [
+          0.071968,
+          0.449713,
+          0.240094
+        ],
+        "expected": [
+          0.083205,
+          0.451828,
+          0.212323
+        ],
+        "error_m": 0.030033,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 4.416,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0708,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 9.33,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 28,
+        "obj": "cube",
+        "predicted": [
+          0.081317,
+          0.449456,
+          0.24146
+        ],
+        "expected": [
+          0.093205,
+          0.451828,
+          0.215323
+        ],
+        "error_m": 0.028811,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 4.733,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0708,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "update",
+          "kf_d2": 3.53,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 29,
+        "obj": "cube",
+        "predicted": [
+          0.090585,
+          0.449267,
+          0.243468
+        ],
+        "expected": [
+          0.103205,
+          0.451828,
+          0.218323
+        ],
+        "error_m": 0.02825,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 5.434,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0708,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 5,
+          "kf": "outside gate",
+          "kf_d2": 109.54,
+          "reacquire": true,
+          "unmeasured_frames": 1,
+          "mode": "red"
+        }
+      }
+    ]
+  }
+}

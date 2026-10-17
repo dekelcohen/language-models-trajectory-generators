@@ -391,6 +391,12 @@ def init_agent(args, logger):
     if args.tracking:
         logger.info(OK + f"Rollout tracking enabled (provider={args.tracker_provider}, "
                     f"interval={args.track_interval})." + ENDC)
+        if args.tracker_provider == "remote":
+            # Start (or find) the GPU server now so the model loads while the planner runs;
+            # the env process's RemoteTracker waits for it at the first session.
+            from gpu_server import launcher
+            launcher.configure(getattr(args, "tracking_server", None))
+            launcher.prewarm()
 
     if args.vis_grasp:
         logger.info(OK + "Grasp visualization enabled (--vis-grasp): the sub-task agent is asked "

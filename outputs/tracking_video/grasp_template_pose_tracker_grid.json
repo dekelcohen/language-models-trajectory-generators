@@ -1,0 +1,1218 @@
+{
+  "schema": "tracking_eval/v1",
+  "created_at": "2026-09-25T01:13:25",
+  "wall_s": 3.449,
+  "config": {
+    "label": "template+pose_tracker",
+    "tracker_provider": "template",
+    "tracker3d": "pose_tracker",
+    "cameras": [
+      "head",
+      "wrist"
+    ],
+    "image_size": [
+      256,
+      256
+    ],
+    "track_interval": 1,
+    "lost_penalty_m": 1.0,
+    "recovery_threshold_m": 0.05,
+    "seed_offset_frame": "local",
+    "scene": "grasp_scripted",
+    "n_frames": 30,
+    "objects": [
+      "cube"
+    ],
+    "start": [
+      -0.2,
+      0.4,
+      0.1
+    ],
+    "step_vector": [
+      0.01,
+      0.0,
+      0.003
+    ],
+    "occlusion_window": [
+      12,
+      19
+    ],
+    "occluder_cam": "head"
+  },
+  "seed_offsets": {
+    "cube": {
+      "local": [
+        0.006828,
+        0.027842,
+        0.023728
+      ],
+      "rotating": true
+    }
+  },
+  "objects": {
+    "cube": {
+      "n_frames": 30,
+      "n_valid_frames": 30,
+      "median_l2_m": 0.002985426091676331,
+      "p95_l2_m": 0.04971321857185859,
+      "max_l2_m": 0.05020757466240905,
+      "median_l2_valid_m": 0.002985426091676331,
+      "pct_lost": 0.0,
+      "n_dropped_frames": 0,
+      "err_during_occlusion_m": 0.0028880103196981402,
+      "n_occluded_frames": 7,
+      "frames_to_recover": 0,
+      "max_jump_m": 0.05046447669519728,
+      "median_disagreement_m": 0.011714462934394784,
+      "latency_ms_mean": 17.441,
+      "latency_ms_p95": 26.209,
+      "lost_penalty_m": 1.0,
+      "recovery_threshold_m": 0.05
+    }
+  },
+  "aggregate": {
+    "n_objects": 1,
+    "n_frames": 30,
+    "n_valid_frames": 30,
+    "median_l2_m": 0.002985,
+    "median_l2_valid_m": 0.002985,
+    "err_during_occlusion_m": 0.002888,
+    "latency_ms_mean": 17.441,
+    "median_disagreement_m": 0.011714,
+    "p95_l2_m": 0.049713,
+    "max_l2_m": 0.050208,
+    "max_jump_m": 0.050464,
+    "pct_lost": 0.0,
+    "latency_ms_p95": 26.209,
+    "frames_to_recover": 0
+  },
+  "peak_vram_mb": null,
+  "session": {
+    "errors": 0,
+    "lift_errors": 0,
+    "aborted": false,
+    "abort_reason": null
+  },
+  "frames": {
+    "cube": [
+      {
+        "frame": 0,
+        "obj": "cube",
+        "predicted": [
+          -0.18986,
+          0.428605,
+          0.126293
+        ],
+        "expected": [
+          -0.193172,
+          0.427842,
+          0.122706
+        ],
+        "error_m": 0.004942,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.005006,
+        "latency_ms": 24.05,
+        "lift": {
+          "provider": "pose_tracker",
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.54,
+          "rejected_epipolar": {},
+          "n_fused": 20,
+          "fit_rmse_m": 0.0048,
+          "fit_n": 16,
+          "kf": "init",
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 1,
+        "obj": "cube",
+        "predicted": [
+          -0.18268,
+          0.428242,
+          0.128589
+        ],
+        "expected": [
+          -0.183172,
+          0.427842,
+          0.125706
+        ],
+        "error_m": 0.002952,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.00975,
+        "latency_ms": 26.061,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.112,
+          "rejected_jump": {},
+          "epipolar_worst_px": 2.86,
+          "rejected_epipolar": {},
+          "n_fused": 20,
+          "fit_rmse_m": 0.0056,
+          "fit_n": 20,
+          "kf": "update",
+          "kf_d2": 0.4,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 2,
+        "obj": "cube",
+        "predicted": [
+          -0.171829,
+          0.428275,
+          0.13079
+        ],
+        "expected": [
+          -0.173172,
+          0.427842,
+          0.128706
+        ],
+        "error_m": 0.002517,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.011658,
+        "latency_ms": 25.543,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0855,
+          "rejected_jump": {},
+          "epipolar_worst_px": 1.15,
+          "rejected_epipolar": {},
+          "n_fused": 20,
+          "fit_rmse_m": 0.0055,
+          "fit_n": 20,
+          "kf": "update",
+          "kf_d2": 0.89,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 3,
+        "obj": "cube",
+        "predicted": [
+          -0.162304,
+          0.42742,
+          0.133154
+        ],
+        "expected": [
+          -0.163172,
+          0.427842,
+          0.131706
+        ],
+        "error_m": 0.00174,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.007826,
+        "latency_ms": 28.733,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0772,
+          "rejected_jump": {},
+          "epipolar_worst_px": 1.02,
+          "rejected_epipolar": {},
+          "n_fused": 20,
+          "fit_rmse_m": 0.0049,
+          "fit_n": 20,
+          "kf": "update",
+          "kf_d2": 0.03,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 4,
+        "obj": "cube",
+        "predicted": [
+          -0.152114,
+          0.427335,
+          0.136646
+        ],
+        "expected": [
+          -0.153172,
+          0.427842,
+          0.134706
+        ],
+        "error_m": 0.002267,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.009302,
+        "latency_ms": 26.33,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0737,
+          "rejected_jump": {},
+          "epipolar_worst_px": 2.09,
+          "rejected_epipolar": {},
+          "n_fused": 20,
+          "fit_rmse_m": 0.0054,
+          "fit_n": 20,
+          "kf": "update",
+          "kf_d2": 0.21,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 5,
+        "obj": "cube",
+        "predicted": [
+          -0.142346,
+          0.428525,
+          0.13938
+        ],
+        "expected": [
+          -0.143172,
+          0.427842,
+          0.137706
+        ],
+        "error_m": 0.001988,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.011995,
+        "latency_ms": 26.06,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0747,
+          "rejected_jump": {},
+          "epipolar_worst_px": 1.51,
+          "rejected_epipolar": {},
+          "n_fused": 20,
+          "fit_rmse_m": 0.005,
+          "fit_n": 20,
+          "kf": "update",
+          "kf_d2": 0.1,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 6,
+        "obj": "cube",
+        "predicted": [
+          -0.132217,
+          0.427748,
+          0.141954
+        ],
+        "expected": [
+          -0.133172,
+          0.427842,
+          0.140706
+        ],
+        "error_m": 0.001575,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.012572,
+        "latency_ms": 24.802,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0737,
+          "rejected_jump": {},
+          "epipolar_worst_px": 2.59,
+          "rejected_epipolar": {},
+          "n_fused": 20,
+          "fit_rmse_m": 0.006,
+          "fit_n": 20,
+          "kf": "update",
+          "kf_d2": 0.66,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 7,
+        "obj": "cube",
+        "predicted": [
+          -0.122121,
+          0.427671,
+          0.144817
+        ],
+        "expected": [
+          -0.123172,
+          0.427842,
+          0.143706
+        ],
+        "error_m": 0.001539,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.011771,
+        "latency_ms": 25.099,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.076,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 2.17,
+          "rejected_epipolar": {},
+          "n_fused": 20,
+          "fit_rmse_m": 0.0056,
+          "fit_n": 20,
+          "kf": "update",
+          "kf_d2": 0.04,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 8,
+        "obj": "cube",
+        "predicted": [
+          -0.112594,
+          0.427979,
+          0.148577
+        ],
+        "expected": [
+          -0.113172,
+          0.427842,
+          0.146706
+        ],
+        "error_m": 0.001963,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.015042,
+        "latency_ms": 24.256,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0752,
+          "rejected_jump": {
+            "head": 2
+          },
+          "epipolar_worst_px": 4.57,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 20,
+          "fit_rmse_m": 0.0058,
+          "fit_n": 20,
+          "kf": "update",
+          "kf_d2": 0.23,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 9,
+        "obj": "cube",
+        "predicted": [
+          -0.102292,
+          0.4283,
+          0.151653
+        ],
+        "expected": [
+          -0.103172,
+          0.427842,
+          0.149706
+        ],
+        "error_m": 0.002186,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.014982,
+        "latency_ms": 24.442,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0757,
+          "rejected_jump": {
+            "head": 2,
+            "wrist": 1
+          },
+          "epipolar_worst_px": 8.15,
+          "rejected_epipolar": {
+            "wrist": 2
+          },
+          "n_fused": 20,
+          "fit_rmse_m": 0.0068,
+          "fit_n": 18,
+          "kf": "update",
+          "kf_d2": 0.55,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 10,
+        "obj": "cube",
+        "predicted": [
+          -0.093033,
+          0.429536,
+          0.15499
+        ],
+        "expected": [
+          -0.093172,
+          0.427842,
+          0.152706
+        ],
+        "error_m": 0.002847,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.013748,
+        "latency_ms": 23.067,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0779,
+          "rejected_jump": {
+            "head": 2
+          },
+          "epipolar_worst_px": 5.93,
+          "rejected_epipolar": {
+            "wrist": 2
+          },
+          "n_fused": 20,
+          "fit_rmse_m": 0.0068,
+          "fit_n": 18,
+          "kf": "update",
+          "kf_d2": 0.71,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 11,
+        "obj": "cube",
+        "predicted": [
+          -0.082599,
+          0.429193,
+          0.157676
+        ],
+        "expected": [
+          -0.083172,
+          0.427842,
+          0.155706
+        ],
+        "error_m": 0.002457,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.011258,
+        "latency_ms": 25.341,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0781,
+          "rejected_jump": {
+            "head": 2
+          },
+          "epipolar_worst_px": 10.4,
+          "rejected_epipolar": {
+            "wrist": 3,
+            "head": 1
+          },
+          "n_fused": 19,
+          "fit_rmse_m": 0.0067,
+          "fit_n": 17,
+          "kf": "update",
+          "kf_d2": 1.11,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 12,
+        "obj": "cube",
+        "predicted": [
+          -0.072547,
+          0.429379,
+          0.16064
+        ],
+        "expected": [
+          -0.073172,
+          0.427842,
+          0.158706
+        ],
+        "error_m": 0.002548,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 17.473,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0779,
+          "rejected_jump": {
+            "head": 17,
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 17,
+          "fit_rmse_m": 0.0162,
+          "fit_n": 15,
+          "reacquire": true,
+          "unmeasured_frames": 1,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/20 predicted points depth-verified",
+            "wrist": "ok: 16/20 point(s) from predicted pose (red)"
+          }
+        }
+      },
+      {
+        "frame": 13,
+        "obj": "cube",
+        "predicted": [
+          -0.062494,
+          0.429566,
+          0.163604
+        ],
+        "expected": [
+          -0.063172,
+          0.427842,
+          0.161706
+        ],
+        "error_m": 0.002652,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 15.351,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0944,
+          "rejected_jump": {
+            "head": 17,
+            "wrist": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 10,
+          "fit_rmse_m": 0.0422,
+          "fit_n": 10,
+          "reacquire": true,
+          "unmeasured_frames": 2,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/20 predicted points depth-verified"
+          }
+        }
+      },
+      {
+        "frame": 14,
+        "obj": "cube",
+        "predicted": [
+          -0.052441,
+          0.429752,
+          0.166568
+        ],
+        "expected": [
+          -0.053172,
+          0.427842,
+          0.164706
+        ],
+        "error_m": 0.002765,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 12.241,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.1144,
+          "rejected_jump": {
+            "head": 17
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 11,
+          "fit_rmse_m": 0.0439,
+          "fit_n": 11,
+          "reacquire": true,
+          "unmeasured_frames": 3,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/20 predicted points depth-verified"
+          }
+        }
+      },
+      {
+        "frame": 15,
+        "obj": "cube",
+        "predicted": [
+          -0.042388,
+          0.429938,
+          0.169532
+        ],
+        "expected": [
+          -0.043172,
+          0.427842,
+          0.167706
+        ],
+        "error_m": 0.002888,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 14.03,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.137,
+          "rejected_jump": {
+            "head": 16
+          },
+          "epipolar_worst_px": 6.98,
+          "rejected_epipolar": {
+            "head": 1
+          },
+          "n_fused": 11,
+          "fit_rmse_m": 0.0463,
+          "fit_n": 11,
+          "reacquire": true,
+          "unmeasured_frames": 4,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/20 predicted points depth-verified",
+            "wrist": "ok: 11/20 point(s) from predicted pose (red)"
+          }
+        }
+      },
+      {
+        "frame": 16,
+        "obj": "cube",
+        "predicted": [
+          -0.032336,
+          0.430124,
+          0.172496
+        ],
+        "expected": [
+          -0.033172,
+          0.427842,
+          0.170706
+        ],
+        "error_m": 0.003018,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 19.614,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.162,
+          "rejected_jump": {
+            "head": 16,
+            "wrist": 2
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 7,
+          "fit_rmse_m": 0.0568,
+          "fit_n": 7,
+          "reacquire": true,
+          "unmeasured_frames": 5,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/20 predicted points depth-verified"
+          }
+        }
+      },
+      {
+        "frame": 17,
+        "obj": "cube",
+        "predicted": [
+          -0.022283,
+          0.430311,
+          0.175459
+        ],
+        "expected": [
+          -0.023172,
+          0.427842,
+          0.173706
+        ],
+        "error_m": 0.003156,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.916,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.1891,
+          "rejected_jump": {
+            "head": 16
+          },
+          "epipolar_worst_px": 10.38,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 8,
+          "fit_rmse_m": 0.0636,
+          "fit_n": 8,
+          "reacquire": true,
+          "unmeasured_frames": 6,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/20 predicted points depth-verified"
+          }
+        }
+      },
+      {
+        "frame": 18,
+        "obj": "cube",
+        "predicted": [
+          -0.01223,
+          0.430497,
+          0.178423
+        ],
+        "expected": [
+          -0.013172,
+          0.427842,
+          0.176706
+        ],
+        "error_m": 0.003299,
+        "lost": false,
+        "occluded": true,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 13.597,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.2182,
+          "rejected_jump": {
+            "head": 13,
+            "wrist": 2
+          },
+          "epipolar_worst_px": 55.19,
+          "rejected_epipolar": {
+            "head": 1,
+            "wrist": 1
+          },
+          "n_fused": 8,
+          "fit_rmse_m": 0.0983,
+          "fit_n": 8,
+          "reacquire": true,
+          "unmeasured_frames": 7,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "skip: 0/20 predicted points depth-verified",
+            "wrist": "skip: 7/20 predicted points depth-verified"
+          }
+        }
+      },
+      {
+        "frame": 19,
+        "obj": "cube",
+        "predicted": [
+          -0.003085,
+          0.428062,
+          0.227993
+        ],
+        "expected": [
+          -0.003172,
+          0.427842,
+          0.179706
+        ],
+        "error_m": 0.048287,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.256317,
+        "latency_ms": 17.502,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.2491,
+          "rejected_jump": {
+            "wrist": 1
+          },
+          "epipolar_worst_px": 15.31,
+          "rejected_epipolar": {
+            "head": 1,
+            "wrist": 1
+          },
+          "n_fused": 12,
+          "fit_rmse_m": 0.0057,
+          "fit_n": 8,
+          "kf": "update",
+          "kf_d2": 0.64,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 20,
+        "obj": "cube",
+        "predicted": [
+          0.00453,
+          0.425052,
+          0.232783
+        ],
+        "expected": [
+          0.006828,
+          0.427842,
+          0.182706
+        ],
+        "error_m": 0.050208,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.012772,
+        "latency_ms": 10.721,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0778,
+          "rejected_jump": {
+            "wrist": 4
+          },
+          "epipolar_worst_px": 5.47,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 11,
+          "fit_rmse_m": 0.0204,
+          "fit_n": 10,
+          "kf": "update",
+          "kf_d2": 2.18,
+          "rotation_observable": true,
+          "correct_cams": [
+            "wrist"
+          ],
+          "mode": "yellow",
+          "pose_reseed": {
+            "wrist": "skip: 6/20 predicted points depth-verified"
+          }
+        }
+      },
+      {
+        "frame": 21,
+        "obj": "cube",
+        "predicted": [
+          0.012758,
+          0.425807,
+          0.234626
+        ],
+        "expected": [
+          0.016828,
+          0.427842,
+          0.185706
+        ],
+        "error_m": 0.049131,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 10.376,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0739,
+          "rejected_jump": {
+            "wrist": 4
+          },
+          "epipolar_worst_px": 3.47,
+          "rejected_epipolar": {
+            "wrist": 2
+          },
+          "n_fused": 11,
+          "fit_rmse_m": 0.0017,
+          "fit_n": 8,
+          "kf": "update",
+          "kf_d2": 1.58,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 22,
+        "obj": "cube",
+        "predicted": [
+          0.022085,
+          0.4264,
+          0.237509
+        ],
+        "expected": [
+          0.026828,
+          0.427842,
+          0.188706
+        ],
+        "error_m": 0.049055,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.004032,
+        "latency_ms": 10.623,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.072,
+          "rejected_jump": {
+            "wrist": 4
+          },
+          "epipolar_worst_px": 6.14,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 11,
+          "fit_rmse_m": 0.0021,
+          "fit_n": 8,
+          "kf": "update",
+          "kf_d2": 1.53,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 23,
+        "obj": "cube",
+        "predicted": [
+          0.030422,
+          0.426441,
+          0.24077
+        ],
+        "expected": [
+          0.036828,
+          0.427842,
+          0.191706
+        ],
+        "error_m": 0.049501,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": 0.010325,
+        "latency_ms": 10.262,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0711,
+          "rejected_jump": {
+            "wrist": 4
+          },
+          "epipolar_worst_px": 7.69,
+          "rejected_epipolar": {
+            "wrist": 1
+          },
+          "n_fused": 11,
+          "fit_rmse_m": 0.0037,
+          "fit_n": 8,
+          "kf": "update",
+          "kf_d2": 0.19,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 24,
+        "obj": "cube",
+        "predicted": [
+          0.03898,
+          0.4266,
+          0.243956
+        ],
+        "expected": [
+          0.046828,
+          0.427842,
+          0.194706
+        ],
+        "error_m": 0.049887,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 11.397,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0708,
+          "rejected_jump": {
+            "wrist": 7
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 10,
+          "fit_rmse_m": 0.0264,
+          "fit_n": 10,
+          "reacquire": true,
+          "unmeasured_frames": 1,
+          "mode": "red",
+          "pose_reseed": {
+            "head": "ok: 10/20 point(s) from predicted pose (red)",
+            "wrist": "skip: 3/20 predicted points depth-verified"
+          }
+        }
+      },
+      {
+        "frame": 25,
+        "obj": "cube",
+        "predicted": [
+          0.04869,
+          0.425027,
+          0.246039
+        ],
+        "expected": [
+          0.056828,
+          0.427842,
+          0.197706
+        ],
+        "error_m": 0.049094,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 9.727,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0865,
+          "rejected_jump": {
+            "wrist": 7
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 10,
+          "fit_rmse_m": 0.0075,
+          "fit_n": 9,
+          "kf": "update",
+          "kf_d2": 1.7,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 26,
+        "obj": "cube",
+        "predicted": [
+          0.057979,
+          0.424074,
+          0.24684
+        ],
+        "expected": [
+          0.066828,
+          0.427842,
+          0.200706
+        ],
+        "error_m": 0.047126,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 10.825,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.081,
+          "rejected_jump": {
+            "wrist": 4
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 10,
+          "fit_rmse_m": 0.0091,
+          "fit_n": 9,
+          "kf": "update",
+          "kf_d2": 1.29,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 27,
+        "obj": "cube",
+        "predicted": [
+          0.073027,
+          0.426914,
+          0.25205
+        ],
+        "expected": [
+          0.076828,
+          0.427842,
+          0.203706
+        ],
+        "error_m": 0.048502,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.402,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0829,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 10,
+          "fit_rmse_m": 0.0056,
+          "fit_n": 8,
+          "kf": "update",
+          "kf_d2": 12.89,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 28,
+        "obj": "cube",
+        "predicted": [
+          0.082251,
+          0.425402,
+          0.254598
+        ],
+        "expected": [
+          0.086828,
+          0.427842,
+          0.206706
+        ],
+        "error_m": 0.048172,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.051,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0757,
+          "rejected_jump": {},
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 10,
+          "fit_rmse_m": 0.0093,
+          "fit_n": 9,
+          "kf": "update",
+          "kf_d2": 16.11,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      },
+      {
+        "frame": 29,
+        "obj": "cube",
+        "predicted": [
+          0.093829,
+          0.427421,
+          0.256127
+        ],
+        "expected": [
+          0.096828,
+          0.427842,
+          0.209706
+        ],
+        "error_m": 0.04652,
+        "lost": false,
+        "occluded": false,
+        "dropped": false,
+        "disagreement": null,
+        "latency_ms": 7.352,
+        "lift": {
+          "provider": "pose_tracker",
+          "jump_gate_m": 0.0821,
+          "rejected_jump": {
+            "head": 1
+          },
+          "epipolar_worst_px": 0.0,
+          "rejected_epipolar": {},
+          "n_fused": 9,
+          "fit_rmse_m": 0.0075,
+          "fit_n": 8,
+          "kf": "update",
+          "kf_d2": 9.74,
+          "rotation_observable": true,
+          "mode": "green"
+        }
+      }
+    ]
+  }
+}

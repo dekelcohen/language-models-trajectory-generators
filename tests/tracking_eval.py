@@ -761,6 +761,11 @@ def add_eval_args(parser):
     trackers = parser.add_argument_group("trackers (every 2D x 3D combination is run)")
     trackers.add_argument("--provider", nargs="+", default=[config.tracker_provider_default],
                           help="2D tracker provider(s): template | klt | csrt | cotracker | remote")
+    trackers.add_argument("--tracking-server", default=config.tracking_server_policy_default,
+                          choices=["no-shutdown", "shutdown", "no-launch"],
+                          help="gpu_server lifecycle for --provider remote (gpu_server/launcher.py): "
+                               "start one if none answers and leave it running (default), stop it "
+                               "at exit, or never start one")
     trackers.add_argument("--tracker3d", nargs="+", default=[config.tracker3d_provider_default],
                           help="3D lift provider(s): depth_fusion | triangulate | rigid_refine | "
                                "weighted_triangulate | pose_tracker")

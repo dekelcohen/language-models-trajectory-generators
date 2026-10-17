@@ -130,18 +130,101 @@ python main.py --tracking --tracker-provider template --tracker3d pose_tracker
 ```
 | Flag | Values | Default |
 |---|---|---|
-| `--tracker-provider` | `template`, `klt`, `cotracker`, `csrt` (needs `opencv-contrib-python`) | `template` |
+| `--tracker-provider` | `template`, `klt`, `cotracker` (in-process, CUDA torch), `remote` (CoTracker3 on the GPU server, see 2.), `csrt` (needs `opencv-contrib-python`) | `template` |
+| `--tracking-server` | `no-shutdown`, `shutdown`, `no-launch` (GPU server lifecycle for `remote`) | `no-shutdown` |
 | `--tracker3d` | `depth_fusion`, `pose_tracker` (pose, occlusion modes, re-acquisition, gripper FK), `triangulate`, `rigid_refine` | `depth_fusion` |
 | `--track-cameras` | any of `head wrist shoulder` | `head wrist` |
 | `--track-camera-fps` / `--track-latency` | simulated camera rate / `measured`, `zero`, a latency profile | `30` / `measured` |
 
-**2. CoTracker3 (optional, GPU recommended).** Needs a CUDA build of torch in the active env (the `requirements.txt` torch is CPU-only, and CoTracker is not real time on CPU). The first run downloads `facebookresearch/co-tracker` + weights via `torch.hub` into `TORCH_HOME` (default `<repo>/cache/torch`, git-ignored); later runs work offline:
+**2. CoTracker3 (optional, GPU recommended).** CoTracker3 (online) is the drift-robust 2D tracker: it carries the door handle through an occlusion, which the CPU trackers cannot (`docs/plans/3d_tracking.md` §13.11-13.12). It needs a CUDA build of torch. The `requirements.txt` torch is CPU-only, and CoTracker is not real time on CPU. There are two ways to run it:
+
+- **in-process** (`--tracker-provider cotracker`): the main env itself has CUDA torch;
+- **through the GPU server** (`--tracker-provider remote`, recommended): CoTracker runs in its own env, or on another machine, and the CPU-only main env talks to it over TCP/WebSocket. The server is started automatically on first use (see [`gpu_server/README.md`](gpu_server/README.md)).
+
+*2a. Create the CoTracker env* (`env_lapa_tracking`, the name the auto-launcher looks for):
 ```
-set TORCH_HOME=<repo>\cache\torch
+conda create -n env_lapa_tracking python=3.10 -y
+conda activate env_lapa_tracking
+# CUDA torch. Pick the wheel that matches your driver (nvidia-smi -> "CUDA Version"):
+#   driver >= 520 (CUDA 11.8+): pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cu121
+#   driver 516-519 (CUDA 11.7, e.g. the RTX A1000 laptop here, driver 517.89): only cu117 works
+pip install torch==2.0.1 --index-url https://download.pytorch.org/whl/cu117
+pip install "numpy<2" opencv-python-headless einops timm
+pip install fastapi uvicorn websockets          # the gpu_server (WS + REST); TCP works without them
+python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+- Do not upgrade torch past what the driver supports. cu118/cu121 wheels fail with "driver is too old" on a CUDA 11.7 driver.
+- Keep `numpy<2` with torch 2.0.x.
+- On a GPU with 4 GB of VRAM, CoTracker3 online uses ~100 MB per camera stream (fp16 autocast).
+
+*2b. Download the model once* (`torch.hub` clones `facebookresearch/co-tracker` and fetches the checkpoint into `TORCH_HOME`). Later runs work offline:
+```
+set TORCH_HOME=<repo>\cache\torch                      # PowerShell: $env:TORCH_HOME="$PWD\cache\torch"
+<env_lapa_tracking>\python.exe -c "import torch; torch.hub.load('facebookresearch/co-tracker', 'cotracker3_online')"
+```
+`<repo>/cache/torch` is git-ignored and is the default the tracker and the server use.
+
+*2c. Run.* The remote provider is the recommended way:
+```
+# remote (main env stays CPU-only). The first run starts the server in env_lapa_tracking and leaves it running:
+python main.py --tracking --tracker-provider remote --tracker3d pose_tracker
+#   --tracking-server no-shutdown (default) | shutdown (stop it at exit) | no-launch (never start one)
+# in-process (only if the main env has CUDA torch):
 python main.py --tracking --tracker-provider cotracker --tracker3d pose_tracker
 ```
+- The auto-launcher picks the server's interpreter from `$GPU_SERVER_PYTHON`, then `config.gpu_server_python`, then the conda env `config.gpu_server_conda_env` (`env_lapa_tracking`).
+- The server log is `outputs/gpu_server/server_<port>.log`. A launched server exits after 30 min with no requests.
+- To use a server on another machine, set `GPU_SERVER_URL=ws://<host>:8765/v1/ws`, plus `GPU_SERVER_TOKEN` (required for non-loopback binds).
+- Start a server by hand:
+  ```
+  <env_lapa_tracking>\python.exe -m gpu_server.server --modules cotracker --preload cotracker   # ws :8765, tcp :8766
+  ```
+- Check it works without the simulator: `python -m pytest tests\test_gpu_server.py -q` (main env), or `python -m unittest tests.test_gpu_server` (in `env_lapa_tracking`, which also covers WS).
 
-**3. DINOv3 matcher (optional, study only, separate env).** Used only by the offline re-acquisition study (NCC vs DINOv3, `docs/plans/3d_tracking.md` §13.5). It is **not** wired into tracking and is **not** in `requirements.txt`. It gets its own conda env, like Genesis, because it needs a recent torch/transformers:
+**3. RoMa v2 dense matcher (optional, re-detection, separate env).** [RoMa v2](https://github.com/Parskatt/RoMaV2) re-detects the handle after tracking is lost. It finds where a pre-occlusion view of the handle went in the current frame: 2.2 px median on the door scene, where NCC/SIFT fail (§13.12). It is a large model (DINOv3 ViT-L backbone, ~425 M params). It runs as the `romav2` module of the GPU server, in its own env:
+
+- it needs **torch >= 2.4** (DINOv3 hub code; its package pins `torchvision>=0.23`), so it cannot share the CoTracker env on a CUDA 11.7 driver;
+- matching takes ~5 s on CPU (turbo, fp32), or well under a second on a T4/A10-class GPU.
+
+*3a. Create the RoMa env* (`vlm_roma`; any name works):
+```
+conda create -n vlm_roma python=3.12 -y
+conda activate vlm_roma
+# CPU (works everywhere, ~5 s per match):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# or CUDA (needs a recent driver):  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install numpy opencv-python-headless pillow matplotlib einops rich
+pip install fastapi uvicorn websockets          # the gpu_server
+```
+
+*3b. Get the RoMa v2 code.* Clone it **outside** this repo and do **not** `pip install -e` it: its `torchvision>=0.23` pin may replace your torch. The server adds `<checkout>/src` to `sys.path` itself.
+```
+git clone https://github.com/Parskatt/RoMaV2 D:\Vision\Image_matching\RoMaV2
+```
+RoMa v2 hard-codes bf16, which is unsupported on a T4 and ~100x slow on CPU. The `romav2` module therefore rewrites `torch.bfloat16` in the checkout at load: fp32 on CPU, fp16 below sm80, bf16 otherwise. It keeps `*.py.orig` backups. Force a precision with `--set romav2.amp=fp32|fp16|bf16`.
+
+*3c. Start the server and download the weights* (the first `load` fetches them via `torch.hub` into `TORCH_HOME`):
+```
+set TORCH_HOME=D:\Vision\Image_matching\cache\torch
+<vlm_roma>\python.exe -m gpu_server.server --modules romav2 --ws 127.0.0.1:8775 --tcp 127.0.0.1:8776 ^
+    --set romav2.root=D:\Vision\Image_matching\RoMaV2 --set romav2.setting=turbo --preload romav2
+```
+Run this from the repo root so `gpu_server` is importable. Settings are `turbo` (default, fastest), `fast`, `base` and `precise`. On the door scene, `base` was no more accurate than `turbo` and ~6x slower on CPU.
+
+*3d. Use it.*
+- Render the re-detection on the sim pairs:
+  ```
+  python tests\tracking_tools\render_romav2_redetect.py outputs\tracking_probes\romav2_pairs\head_sweep\manifest.json --url tcp://127.0.0.1:8776
+  ```
+  It writes `outputs/tracking_video/door_redetect_romav2_*`.
+- From Python:
+  ```
+  GpuClient("tcp://127.0.0.1:8776").call("romav2", "match", img_a=..., img_b=..., points_a=..., box=[x0, y0, x1, y1])
+  ```
+  It returns `points_b` and their `overlap` (confidence).
+- No local GPU: run `tests/tracking_tools/romav2_redetect_colab.ipynb` on Colab (T4) or Kaggle (2xT4) with any image pair. `tests/tracking_tools/export_sim_pairs.py --upload` puts sim frames on imgbb; it needs `IMGBB_API_KEY`, from https://api.imgbb.com/ → "Get API key", set in the environment only.
+
+**4. DINOv3 matcher (optional, study only, separate env).** Used only by the offline re-acquisition study (NCC vs DINOv3, `docs/plans/3d_tracking.md` §13.5). It is **not** wired into tracking and is **not** in `requirements.txt`. It gets its own conda env, like Genesis, because it needs a recent torch/transformers:
 ```
 conda create -n vlm_dino python=3.11 -y
 conda activate vlm_dino

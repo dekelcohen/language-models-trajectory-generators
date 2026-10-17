@@ -331,9 +331,11 @@ class TestTrackerProviders(unittest.TestCase):
         with self.assertRaises(ValueError):
             get_tracker("does-not-exist")
 
-    def test_remote_provider_is_an_explicit_stub(self):
-        with self.assertRaises(NotImplementedError):
-            get_tracker("remote")
+    def test_remote_provider_is_lazy_and_fails_loudly_without_a_server(self):
+        # autolaunch=False: the default would start a gpu_server for a local URL.
+        tracker = get_tracker("remote", url="tcp://127.0.0.1:1", timeout=2, autolaunch=False)  # no I/O yet
+        with self.assertRaises(ConnectionError):
+            tracker.init(synthetic_frame(square=(40, 40, 10)), [[40, 40]])
 
     def test_template_tracker_follows_a_moving_patch(self):
         tracker = get_tracker("template", patch_half=8)

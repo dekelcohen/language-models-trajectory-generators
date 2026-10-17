@@ -175,6 +175,31 @@ tracker_cotracker_stale_decay = 0.05
 # fp16 autocast for the CoTracker forward pass on CUDA (ignored on CPU): ~1.7x faster
 # window flushes on an A1000 (0.223 s vs 0.376 s).
 tracker_cotracker_fp16 = True
+# Remote provider (--tracker-provider remote): a tracker session on gpu_server
+# (`python -m gpu_server.server`, see gpu_server/README.md). $GPU_SERVER_URL / $GPU_SERVER_MODULE
+# override these. ws:// = FastAPI server (any machine); tcp:// = stdlib transport (same
+# machine or LAN, no extra deps on the client); inproc:// = no server, same process.
+tracker_remote_url = "ws://127.0.0.1:8765/v1/ws"
+tracker_remote_module = "cotracker"
+tracker_remote_image_codec = "raw"       # raw | png (png only pays off on slow links)
+tracker_remote_timeout_s = 60.0
+# Auto-launch (gpu_server/launcher.py): when the remote provider's URL is on this machine and
+# nothing answers there, a detached `python -m gpu_server.server` is started in the GPU env and
+# left running for later runs (it exits by itself after gpu_server_idle_timeout_s without
+# requests). --tracking-server picks the policy:
+#   no-shutdown - launch if needed, leave it running at exit (default)
+#   shutdown    - launch if needed, stop it when the run exits (refused while other clients
+#                 still hold sessions on it)
+#   no-launch   - never start one; fail if it is not running
+tracking_server_policy_default = "no-shutdown"
+gpu_server_idle_timeout_s = 1800.0
+gpu_server_startup_timeout_s = 300.0     # first run downloads CoTracker (~100 MB) into TORCH_HOME
+# Interpreter for the server: $GPU_SERVER_PYTHON > gpu_server_python > the conda env named
+# gpu_server_conda_env next to the current one > this interpreter.
+gpu_server_python = None
+gpu_server_conda_env = "env_lapa_tracking"
+gpu_server_log_dir = os.path.join("outputs", "gpu_server")   # relative to the repo root
+gpu_server_extra_args = ()               # e.g. ("--set", "cotracker.device=\"cuda:0\"")
 # How the per-camera 2D tracks become one world point.
 #   depth_fusion - deproject through each camera's depth buffer, then weighted-average
 #   triangulate  - multi-view DLT from 2D + calibration only, no depth buffer
@@ -220,8 +245,8 @@ track_latency_profiles = {
 # Minimum sim seconds between accepted tracker frames (0 = as fast as latency allows).
 track_period_s = 0.0
 # 2D trackers that must see every camera frame (a sliding-window model): their frames are
-# queued while they compute instead of dropped.
-track_buffering_providers = ("cotracker",)
+# queued while they compute instead of dropped. "remote" serves CoTracker by default.
+track_buffering_providers = ("cotracker", "remote")
 # Pyramidal Lucas-Kanade provider (--tracker-provider klt, base opencv). A point is visible
 # only if tracking it forward and back again returns within klt_fb_max_px of where it started.
 track_klt_win = 21
