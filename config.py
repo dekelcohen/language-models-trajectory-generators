@@ -200,6 +200,31 @@ gpu_server_python = None
 gpu_server_conda_env = "env_lapa_tracking"
 gpu_server_log_dir = os.path.join("outputs", "gpu_server")   # relative to the repo root
 gpu_server_extra_args = ()               # e.g. ("--set", "cotracker.device=\"cuda:0\"")
+# Per-module launch profiles, used when a module's server is auto-launched. Keys: python |
+# conda_env, env {VAR: value}, args [...] ($VARS are expanded). The process environment can
+# override them: $GPU_SERVER_<MODULE>_PYTHON / _PYTHONPATH / _ARGS, e.g.
+#   GPU_SERVER_ROMAV2_PYTHON=C:\...\envs\stmd\python.exe
+# RoMa v2 needs torch >= 2.4, so it has its own env (README "3D Tracking" step 3) and finds
+# the checkout through $ROMAV2_ROOT.
+gpu_server_module_profiles = {
+    "romav2": {"conda_env": "vlm_roma", "args": ["--set", "romav2.setting=turbo"]},
+}
+# RoMa v2 re-detection (--tracking ... roma / --track-roma, tracking/roma_redetect.py).
+# While the pose is red/black, RoMa matches the last trusted frame against the current one.
+# The matched seed points are lifted with depth and rigidly fitted (same gates as the NCC
+# search), and a hit re-seeds the 2D trackers. $GPU_SERVER_ROMA_URL overrides the URL.
+# A single server that offers both modules (e.g. Kaggle with WITH_ROMA) can use one URL.
+track_roma_enable = False
+track_roma_url = "ws://127.0.0.1:8775/v1/ws"
+track_roma_timeout_s = 120.0
+track_roma_ref_every = 4                 # frames between reference captures while green
+track_roma_after = 1                     # unmeasured frames before the first RoMa try
+track_roma_every = 4                     # frames between RoMa tries while unmeasured
+track_roma_overlap_min = 0.3             # RoMa co-visibility at a seed pixel to use it
+track_roma_min_frac = 0.5                # inliers needed, as a fraction of referenced points
+track_roma_inlier_m = 0.015
+track_roma_iters = 200
+track_roma_max_rmse_m = 0.015
 # How the per-camera 2D tracks become one world point.
 #   depth_fusion - deproject through each camera's depth buffer, then weighted-average
 #   triangulate  - multi-view DLT from 2D + calibration only, no depth buffer

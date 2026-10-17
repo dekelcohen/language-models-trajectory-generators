@@ -390,14 +390,18 @@ def init_agent(args, logger):
 
     if args.tracking:
         logger.info(OK + f"Rollout tracking enabled (provider={args.tracker_provider}, "
-                    f"interval={args.track_interval})." + ENDC)
+                    f"interval={args.track_interval}, roma={getattr(args, 'track_roma', False)})." + ENDC)
         from providers.trackers.factory import uses_gpu_server
-        if uses_gpu_server(args.tracker_provider):
-            # Start (or find) the GPU server now so the model loads while the planner runs;
-            # the env process's RemoteTracker waits for it at the first session.
+        if uses_gpu_server(args.tracker_provider) or getattr(args, "track_roma", False):
+            # Start (or find) the GPU server(s) now so the models load while the planner
+            # runs; the env process's RemoteTracker / RoMa client waits at first use.
             from gpu_server import launcher
             launcher.configure(getattr(args, "tracking_server", None))
-            launcher.prewarm()
+            if uses_gpu_server(args.tracker_provider):
+                launcher.prewarm()
+            if getattr(args, "track_roma", False):
+                from tracking.roma_redetect import roma_url
+                launcher.prewarm(roma_url(), "romav2")
 
     if args.vis_grasp:
         logger.info(OK + "Grasp visualization enabled (--vis-grasp): the sub-task agent is asked "

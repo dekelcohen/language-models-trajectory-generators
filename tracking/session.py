@@ -91,6 +91,11 @@ class _TargetTrackers:
         self.last_bank_frame = None
         self.last_search_frame = None
         self.last_trusted_pose = None
+        # RoMa re-detection (tracking/roma_redetect.py): per camera the newest trusted
+        # full-frame reference, and when it was captured / last searched.
+        self.roma_refs = {}
+        self.last_roma_ref_frame = None
+        self.last_roma_frame = None
 
 
 class TrackingSession:
@@ -100,7 +105,7 @@ class TrackingSession:
                  track_gripper=True, interval=None, logger=None, run_id=None,
                  write_jsonl=True, tracker_kwargs=None, output_dir=None, save_depth=False,
                  tracker3d=None, tracker3d_kwargs=None, camera_fps=None, latency=None,
-                 min_period_s=None):
+                 min_period_s=None, roma=None):
         self.robot = robot
         self.env = env
         self.cameras = tuple(cameras or config.tracking_cameras)
@@ -121,6 +126,17 @@ class TrackingSession:
         self.errors = 0
         # Re-seeds skipped because the tracker keeps memory through occlusion, per reason.
         self.memory_holds = {}
+        # RoMa v2 re-detection: ``roma`` True/False (None = config.track_roma_enable) or a
+        # ready RomaRedetector (tests inject one with a fake client).
+        if roma is None:
+            roma = bool(getattr(config, "track_roma_enable", False))
+        if roma is True:
+            from tracking.roma_redetect import RomaRedetector
+            roma = RomaRedetector()
+            roma.prewarm()
+        self.roma = roma or None
+        if self.roma is not None:
+            self._log(f"[tracking] RoMa re-detection on ({self.roma.url})")
         self.monitor = MonitorRunner.from_spec(monitor, logger=logger)
         self.reporter = TrackingReporter(run_id=run_id, output_dir=output_dir, logger=logger,
                                          write_jsonl=write_jsonl)
@@ -426,6 +442,7 @@ class TrackingSession:
             if pose.trusted:
                 target.last_trusted_pose = pose
                 self._capture_bank(target, views, pose)
+                self._capture_roma_ref(target, views, pose)
         else:
             external = self._external_pose(target, state, views, gripper, meta)
             if external is not None:
@@ -602,6 +619,9 @@ class TrackingSession:
                 # stands - follow the gripper instead of a drifting motion model (predicted,
                 # source "fk": never read as proof of attachment).
                 return "fk_coast", fk_pose
+        roma_hit = self._roma_pose(target, state, views, gripper, meta)
+        if roma_hit is not None:
+            return roma_hit
         if not getattr(config, "track_reacq_enable", False) or not target.ref_banks:
             return None
         if float(meta.get("unmeasured_frames") or 0.0) < float(config.track_reacq_after):
@@ -631,6 +651,51 @@ class TrackingSession:
             return None
         return "search", ObjectPose(R=R, t=t, source="search", mode=state.pose.mode,
                                     rmse_m=info.get("rmse_m"), n_points=int(info.get("inliers", 0)))
+
+    def _capture_roma_ref(self, target, views, pose):
+        """Bank full-frame RoMa references at a green pose (every track_roma_ref_every)."""
+        if self.roma is None or pose.mode != "green":
+            return
+        every = int(getattr(config, "track_roma_ref_every", 4))
+        if target.last_roma_ref_frame is not None and self.frame_idx - target.last_roma_ref_frame < every:
+            return
+        from tracking.roma_redetect import RomaRedetector
+        for cam, view in views.items():
+            ref = RomaRedetector.capture(view, pose, target.seed_points_world, self.frame_idx)
+            if ref is not None:
+                target.roma_refs[cam] = ref
+        target.last_roma_ref_frame = self.frame_idx
+
+    def _roma_pose(self, target, state, views, gripper, meta):
+        """RoMa v2 re-detection while unmeasured: ``("roma", ObjectPose)`` or ``None``."""
+        if self.roma is None or not target.roma_refs:
+            return None
+        unmeasured = float(meta.get("unmeasured_frames") or 0.0)
+        if unmeasured < float(getattr(config, "track_roma_after", 1)):
+            return None
+        if target.last_roma_frame is not None and \
+                self.frame_idx - target.last_roma_frame < int(getattr(config, "track_roma_every", 4)):
+            return None
+        target.last_roma_frame = self.frame_idx
+        hyps = []
+        if state.pose is not None:
+            hyps.append(("predicted", state.pose, 0))
+        if target.grip_rel is not None and gripper is not None and gripper.world_pos is not None \
+                and gripper.world_quat is not None:
+            hyps.append(("fk", self._pose_from_gripper(target, gripper), 0))
+        if target.last_trusted_pose is not None:
+            hyps.append(("last", target.last_trusted_pose, 0))
+        unmeasured_s = unmeasured / float(config.track_kf_ref_hz)
+        max_dev = float(config.track_reacq_max_jump_m) + float(config.track_reacq_max_speed) * unmeasured_s
+        R, t, info = self.roma.redetect(views, target.roma_refs, target.seed_points_world, hyps,
+                                        max_dev_m=max_dev)
+        meta["roma"] = info
+        self._log(f"[tracking] RoMa re-detect '{target.name}' frame {self.frame_idx}: "
+                  f"{'HIT' if R is not None else 'miss'} {info}")
+        if R is None:
+            return None
+        return "roma", ObjectPose(R=R, t=t, source="roma", mode=state.pose.mode,
+                                  rmse_m=info.get("rmse_m"), n_points=int(info.get("inliers", 0)))
 
     def _adopt_external_pose(self, target, state, views, external, meta):
         """Re-seed every camera from an external pose and re-init the pose filter on it."""
@@ -1048,6 +1113,9 @@ class TrackingSession:
                         close()
                     except Exception as exc:  # noqa: BLE001 - teardown is best-effort
                         self._log(f"[tracking] closing {target.name}/{cam} tracker failed: {exc}")
+        if self.roma is not None:
+            self._log(f"[tracking] RoMa re-detection: {self.roma.summary()}")
+            self.roma.close()
 
     def summary(self):
         summary = self.reporter.summary()
@@ -1057,6 +1125,8 @@ class TrackingSession:
         summary["monitor_errors"] = self.monitor.error_count
         if self.memory_holds:
             summary["memory_holds"] = dict(self.memory_holds)
+        if self.roma is not None:
+            summary["roma"] = self.roma.summary()
         if self.pipeline is not None:
             summary["realtime"] = self.pipeline.describe()
         return summary
@@ -1067,6 +1137,46 @@ class TrackingSession:
     def _log(self, msg):
         if self.logger is not None:
             self.logger.info(msg)
+
+
+TRACKING_COMPONENT_ALIASES = {"cotracker": "remote", "cotracker-local": "cotracker",
+                              "cotracker_local": "cotracker"}
+
+
+def _tracking_components_action():
+    import argparse
+
+    class TrackingComponentsAction(argparse.Action):
+        """``--tracking [COMPONENT ...]`` / ``--no-tracking``: enable tracking and, optionally,
+        pick the 2D tracker and add RoMa (``--tracking cotracker roma``). A bare
+        ``--tracking`` keeps the old boolean meaning."""
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            if option_string and option_string.startswith("--no-"):
+                if values:
+                    parser.error(f"{option_string} takes no components")
+                setattr(namespace, self.dest, False)
+                return
+            from providers.trackers.factory import SUPPORTED as tracker_providers
+            providers = []
+            for raw in values or []:
+                for comp in str(raw).replace(",", " ").split():
+                    name = comp.lower()
+                    if name == "roma":
+                        namespace.track_roma = True
+                        continue
+                    name = TRACKING_COMPONENT_ALIASES.get(name, name)
+                    if name not in tracker_providers:
+                        parser.error(f"--tracking: unknown component {comp!r} (use roma, cotracker, "
+                                     f"cotracker-local or one of {sorted(tracker_providers)})")
+                    providers.append(name)
+            if len(providers) > 1:
+                parser.error(f"--tracking: pick one 2D tracker, got {providers}")
+            if providers:
+                namespace.tracker_provider = providers[0]
+            setattr(namespace, self.dest, True)
+
+    return TrackingComponentsAction
 
 
 def add_tracking_args(parser, include_enable=True):
@@ -1081,15 +1191,29 @@ def add_tracking_args(parser, include_enable=True):
     from providers.tracker3d.factory import SUPPORTED as tracker3d_providers
     from providers.trackers.factory import SUPPORTED as tracker_providers
 
+    TrackingComponentsAction = _tracking_components_action()
     group = parser.add_argument_group(
         "rollout tracking (tracking/, providers/trackers/, providers/tracker3d/)")
     if include_enable:
-        group.add_argument("--tracking", action=argparse.BooleanOptionalAction,
+        group.add_argument("--tracking", "--no-tracking", dest="tracking", nargs="*",
+                           action=TrackingComponentsAction, metavar="COMPONENT",
                            default=config.tracking_enabled_default,
                            help="track the affordance object and gripper in 3D during "
                                 "trajectory execution; exposes the track_objects tool to the "
                                 "model and lets a monitor abort a sub-task mid-rollout "
-                                "(default: off)")
+                                "(default: off). Optional components choose the stack: "
+                                "'cotracker' = CoTracker3 on the auto-launched gpu_server "
+                                "(= --tracker-provider remote), 'cotracker-local' = in-process "
+                                "CoTracker3, any --tracker-provider name, and 'roma' = RoMa v2 "
+                                "re-detection when the pose is lost (= --track-roma). "
+                                "E.g. --tracking cotracker roma")
+    group.add_argument("--track-roma", "--no-track-roma", dest="track_roma",
+                       action=argparse.BooleanOptionalAction,
+                       default=bool(getattr(config, "track_roma_enable", False)),
+                       help="RoMa v2 re-detection while the pose is red/black: matches the last "
+                            "trusted frame against the current one on the RoMa gpu_server "
+                            "(config.track_roma_url / $GPU_SERVER_ROMA_URL; auto-launched with "
+                            "the 'romav2' module profile). Off by default")
     group.add_argument("--tracker-provider", dest="tracker_provider",
                        choices=list(tracker_providers), default=config.tracker_provider_default,
                        help="2D point tracker used by --tracking: 'template' (default, base "
@@ -1143,7 +1267,7 @@ def make_session(robot, env, args, targets=None, monitor=None, track_gripper=Tru
                  logger=None, run_id=None):
     """Build a session from parsed CLI ``args`` (the shape ``env.py`` receives)."""
     from providers.trackers.factory import uses_gpu_server
-    if uses_gpu_server(args.tracker_provider):
+    if uses_gpu_server(args.tracker_provider) or getattr(args, "track_roma", False):
         from gpu_server import launcher
         launcher.configure(getattr(args, "tracking_server", None))
     session = TrackingSession(
@@ -1159,6 +1283,7 @@ def make_session(robot, env, args, targets=None, monitor=None, track_gripper=Tru
         run_id=run_id or time.strftime("%Y%m%d_%H%M%S"),
         camera_fps=getattr(args, "track_camera_fps", config.track_camera_fps),
         latency=getattr(args, "track_latency", None),
+        roma=bool(getattr(args, "track_roma", False)),
     )
     session.add_targets(targets)
     return session

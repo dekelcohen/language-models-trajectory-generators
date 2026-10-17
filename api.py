@@ -562,6 +562,7 @@ class API:
             "interval": self.args.track_interval,
             "camera_fps": getattr(self.args, "track_camera_fps", None),
             "latency": getattr(self.args, "track_latency", None),
+            "roma": bool(getattr(self.args, "track_roma", False)),
             "output_dir": self.args.track_log_dir,
             "save_depth": bool(self.args.track_save_depth),
         }

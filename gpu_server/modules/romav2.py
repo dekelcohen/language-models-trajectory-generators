@@ -14,7 +14,8 @@ Method ``match`` - find query points of image A in image B::
 
 Without ``points_a`` the query is the box centre (or the image centre).
 
-Config: ``root`` (RoMaV2 checkout, default ``$ROMAV2_ROOT``), ``setting`` (turbo | fast |
+Config: ``root`` (RoMaV2 checkout, default ``$ROMAV2_ROOT``), ``torch_home`` (weights cache,
+default ``$TORCH_HOME``), ``setting`` (turbo | fast |
 base | precise), ``amp`` (auto | bf16 | fp16 | fp32). RoMa v2 hard-codes ``torch.bfloat16``;
 bf16 is unsupported on a T4 and ~100x slow on CPU, so for ``fp16``/``fp32`` (``auto``: fp32
 on CPU, fp16 below sm80, bf16 otherwise) the checkout's sources are patched in place from
@@ -81,6 +82,8 @@ class RoMaV2Module(GpuModule):
         self.setting = self.config.get("setting", "turbo")
 
     def load(self):
+        if self.config.get("torch_home"):
+            os.environ["TORCH_HOME"] = str(self.config["torch_home"])
         import torch
         root = self.config.get("root") or os.environ.get("ROMAV2_ROOT")
         if not root or not os.path.isdir(os.path.join(root, "src", "romav2")):

@@ -111,11 +111,12 @@ def main():
             label = f"{provider}+{lift}"
             recorder = VideoRecorder(scene, obj, args.cameras,
                                      scale=args.scale,
-                                     extra_lines=[f"{args.scene} | 2D={provider} 3D={lift}"])
+                                     extra_lines=[f"{args.scene} | 2D={provider} 3D={lift}"
+                                                  + (" +RoMa" if args.roma else "")])
             payload = te.run_eval(scene, tracker_provider=provider, tracker3d=lift,
                                   cameras=args.cameras, keep_frames=True,
                                   tracker_kwargs=kwargs_by_provider.get(provider),
-                                  frame_hook=recorder, **timing)
+                                  frame_hook=recorder, roma=args.roma, **timing)
             stem = f"{args.scene}_{provider}_{lift}" + (f"_{args.tag}" if args.tag else "")
             te.write_report(payload, os.path.join(args.out, stem + ".json"))
             path = visualize.write_video(recorder.frames,

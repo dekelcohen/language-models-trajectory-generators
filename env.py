@@ -689,6 +689,8 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                         camera_fps=(spec["camera_fps"] if spec.get("camera_fps") is not None
                                     else getattr(args, "track_camera_fps", config.track_camera_fps)),
                         latency=spec.get("latency") or getattr(args, "track_latency", None),
+                        roma=bool(spec["roma"] if spec.get("roma") is not None
+                                  else getattr(args, "track_roma", False)),
                     )
                     session.add_targets(spec.get("targets"))
                     robot.tracking_session = session

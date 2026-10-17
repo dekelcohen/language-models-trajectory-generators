@@ -133,34 +133,71 @@ def _addresses(url):
     return f"{h}:{p}", f"{h}:{p + 1}"
 
 
-def resolve_python():
+def _find_conda_env(name):
+    roots = []
+    prefix = os.path.abspath(sys.prefix)
+    if os.path.basename(os.path.dirname(prefix)).lower() == "envs":
+        roots.append(os.path.dirname(prefix))             # .../envs/<current>
+    roots.append(os.path.join(prefix, "envs"))            # base env
+    conda_exe = os.environ.get("CONDA_EXE")
+    if conda_exe:
+        roots.append(os.path.join(os.path.dirname(os.path.dirname(conda_exe)), "envs"))
+    for root in roots:
+        for cand in (os.path.join(root, name, "python.exe"), os.path.join(root, name, "bin", "python")):
+            if os.path.isfile(cand):
+                return cand
+    return None
+
+
+def module_profile(module):
+    """Launch profile of ``module``: ``config.gpu_server_module_profiles[module]`` overlaid
+    with ``$GPU_SERVER_<MODULE>_PYTHON`` / ``_PYTHONPATH`` / ``_ARGS`` (e.g. RoMa v2 needs
+    torch >= 2.4 and so its own env)."""
+    prof = dict((_cfg("gpu_server_module_profiles", {}) or {}).get(module) or {})
+    key = f"GPU_SERVER_{str(module).upper()}_"
+    if os.environ.get(key + "PYTHON"):
+        prof["python"] = os.environ[key + "PYTHON"]
+    if os.environ.get(key + "PYTHONPATH"):
+        prof.setdefault("env", {})
+        prof["env"] = dict(prof["env"], PYTHONPATH=os.environ[key + "PYTHONPATH"])
+    if os.environ.get(key + "ARGS"):
+        import shlex
+        prof["args"] = list(prof.get("args") or []) + shlex.split(os.environ[key + "ARGS"], posix=False)
+    return prof
+
+
+def resolve_python(module=None):
+    prof = module_profile(module) if module else {}
+    if prof.get("python"):
+        return prof["python"]
+    if prof.get("conda_env"):
+        found = _find_conda_env(prof["conda_env"])
+        if found:
+            return found
+        logger.warning("[launcher] conda env %r of module %s not found; using the default "
+                       "gpu_server python", prof["conda_env"], module)
     exe = os.environ.get("GPU_SERVER_PYTHON") or _cfg("gpu_server_python", None)
     if exe:
         return exe
     name = _cfg("gpu_server_conda_env", None)
     if name:
-        roots = []
-        prefix = os.path.abspath(sys.prefix)
-        if os.path.basename(os.path.dirname(prefix)).lower() == "envs":
-            roots.append(os.path.dirname(prefix))             # .../envs/<current>
-        roots.append(os.path.join(prefix, "envs"))            # base env
-        conda_exe = os.environ.get("CONDA_EXE")
-        if conda_exe:
-            roots.append(os.path.join(os.path.dirname(os.path.dirname(conda_exe)), "envs"))
-        for root in roots:
-            for cand in (os.path.join(root, name, "python.exe"), os.path.join(root, name, "bin", "python")):
-                if os.path.isfile(cand):
-                    return cand
+        found = _find_conda_env(name)
+        if found:
+            return found
     return sys.executable
 
 
 # -- launching --------------------------------------------------------------
 def _spawn(url, module, idle_timeout_s):
     ws, tcp = _addresses(url)
-    python = resolve_python()
+    prof = module_profile(module)
+    python = resolve_python(module)
     cmd = [python, "-u", "-m", "gpu_server.server", "--ws", ws, "--tcp", tcp,
            "--preload", module, "--idle-timeout-s", str(float(idle_timeout_s))]
     cmd += [str(a) for a in _cfg("gpu_server_extra_args", ())]
+    cmd += [os.path.expandvars(str(a)) for a in (prof.get("args") or ())]
+    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    env.update({k: os.path.expandvars(str(v)) for k, v in (prof.get("env") or {}).items()})
     log_dir = _cfg("gpu_server_log_dir", os.path.join("outputs", "gpu_server"))
     log_dir = log_dir if os.path.isabs(log_dir) else os.path.join(REPO_ROOT, log_dir)
     os.makedirs(log_dir, exist_ok=True)
@@ -170,7 +207,7 @@ def _spawn(url, module, idle_timeout_s):
               f"{' '.join(cmd)}\n")
     log.flush()
     kw = dict(cwd=REPO_ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-              close_fds=True, env=dict(os.environ, PYTHONUNBUFFERED="1"))
+              close_fds=True, env=env)
     try:
         if os.name == "nt":
             flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP

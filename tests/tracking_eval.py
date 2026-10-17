@@ -767,6 +767,9 @@ def add_eval_args(parser):
                           help="gpu_server lifecycle for --provider remote (gpu_server/launcher.py): "
                                "start one if none answers and leave it running (default), stop it "
                                "at exit, or never start one")
+    trackers.add_argument("--roma", action="store_true",
+                          help="RoMa v2 re-detection while the pose is red/black "
+                               "(tracking/roma_redetect.py; server at config.track_roma_url)")
     trackers.add_argument("--tracker3d", nargs="+", default=[config.tracker3d_provider_default],
                           help="3D lift provider(s): depth_fusion | triangulate | rigid_refine | "
                                "weighted_triangulate | pose_tracker")
@@ -1090,7 +1093,7 @@ class TrackingEvalRunner:
                  tracker_kwargs=None, tracker3d_kwargs=None, monitor=None,
                  lost_penalty_m=LOST_PENALTY_M, recovery_threshold_m=RECOVERY_THRESHOLD_M,
                  keep_frames=True, label=None, frame_hook=None, camera_fps=None,
-                 latency=None, motion_rate_hz=None):
+                 latency=None, motion_rate_hz=None, roma=False):
         self.scene = scene
         self.tracker_provider = tracker_provider or config.tracker_provider_default
         self.tracker3d = tracker3d or getattr(config, "tracker3d_provider_default", "depth_fusion")
@@ -1109,6 +1112,7 @@ class TrackingEvalRunner:
         self.camera_fps = float(camera_fps) if camera_fps else 0.0
         self.latency = latency
         self.motion_rate_hz = float(motion_rate_hz or DEFAULT_MOTION_RATE_HZ)
+        self.roma = roma
         #: Optional ``fn(frame_idx, views, report, samples)`` observer, called after every
         #: frame with the *rendered* views and the session's report. Used by the video
         #: renderer; it never affects scoring and its exceptions are swallowed.
@@ -1150,7 +1154,7 @@ class TrackingEvalRunner:
                                        tracker3d_kwargs=self.tracker3d_kwargs,
                                        monitor=self.monitor, write_jsonl=False,
                                        camera_fps=self.camera_fps or None,
-                                       latency=self.latency)
+                                       latency=self.latency, roma=self.roma)
         for obj in self.scene.objects:
             points = np.asarray(self.scene.seed_points(obj), dtype=float).reshape(-1, 3)
             position, quat = self.scene.ground_truth(obj)
@@ -1371,6 +1375,8 @@ class TrackingEvalRunner:
                 "aborted": bool(getattr(self.session, "aborted", False)),
                 "abort_reason": getattr(self.session, "abort_reason", None),
                 "memory_holds": dict(getattr(self.session, "memory_holds", {}) or {}),
+                "roma": (self.session.roma.summary()
+                         if getattr(self.session, "roma", None) is not None else None),
             },
         }
         pipe = getattr(self.session, "pipeline", None)

@@ -526,5 +526,82 @@ class TestMemoryTrackerReseedPolicy(unittest.TestCase):
             config.track_memory_skip_reseed_reasons = saved
 
 
+class _FakeRomaClient:
+    """Stands in for GpuClient: maps the reference seed pixels to ``points_b``."""
+
+    def __init__(self, points_b, overlap):
+        self.points_b, self.overlap, self.calls = points_b, overlap, 0
+
+    def call(self, module, method, **kw):
+        assert (module, method) == ("romav2", "match")
+        self.calls += 1
+        n = len(kw["points_a"])
+        return {"match_s": 0.01}, {"points_b": self.points_b[:n].copy(),
+                                   "overlap": np.full(n, self.overlap)}
+
+
+class TestRomaRedetector(unittest.TestCase):
+    # Fronto-parallel camera looking at the plane y=0, 1 m away, so depth is constant.
+    SEEDS = np.array([[x, 0.0, z] for x in (-0.05, 0.0, 0.05) for z in (-0.04, 0.04)])
+    SHIFT = np.array([0.03, 0.0, 0.02])
+
+    def setUp(self):
+        from tracking.types import ObjectPose
+        self.view = make_view(eye=(0.0, -1.0, 0.0), target=(0.0, 0.0, 0.0), depth_fill=1.0)
+        self.identity = ObjectPose(R=np.eye(3), t=np.zeros(3))
+        self.moved_px = np.array([geometry.project_world_to_pixel(self.view, p + self.SHIFT)[0]
+                                  for p in self.SEEDS])
+
+    def redetect(self, overlap=0.9, max_dev_m=0.2):
+        from tracking.roma_redetect import RomaRedetector
+        ref = RomaRedetector.capture(self.view, self.identity, self.SEEDS, frame=0)
+        self.assertIsNotNone(ref)
+        self.assertEqual(len(ref.indices), len(self.SEEDS))
+        roma = RomaRedetector(client=_FakeRomaClient(self.moved_px, overlap))
+        out = roma.redetect({"head": self.view}, {"head": ref}, self.SEEDS,
+                            [("last", self.identity, 0.0)], max_dev_m=max_dev_m)
+        return roma, out
+
+    def test_hit_recovers_the_moved_pose(self):
+        roma, (R, t, info) = self.redetect()
+        self.assertIsNotNone(R, info)
+        np.testing.assert_allclose(t, self.SHIFT, atol=5e-3)
+        self.assertEqual(roma.summary()["hits"], 1)
+
+    def test_low_overlap_is_a_miss(self):
+        _roma, (R, _t, info) = self.redetect(overlap=0.1)
+        self.assertIsNone(R)
+        self.assertIn("no rigid consensus", info["why"])
+
+    def test_implausible_jump_is_rejected(self):
+        _roma, (R, _t, info) = self.redetect(max_dev_m=0.01)
+        self.assertIsNone(R)
+        self.assertIn("implausible jump", info["why"])
+
+
+class TestTrackingComponentsCli(unittest.TestCase):
+    def parse(self, *argv):
+        import argparse
+        from tracking import session as ts
+        parser = argparse.ArgumentParser()
+        ts.add_tracking_args(parser)
+        return parser.parse_args(list(argv))
+
+    def test_cotracker_and_roma(self):
+        args = self.parse("--tracking", "cotracker", "roma")
+        self.assertTrue(args.tracking)
+        self.assertEqual(args.tracker_provider, "remote")
+        self.assertTrue(args.track_roma)
+
+    def test_bare_tracking_keeps_defaults(self):
+        args = self.parse("--tracking")
+        self.assertTrue(args.tracking)
+        self.assertFalse(args.track_roma)
+
+    def test_two_trackers_is_an_error(self):
+        with self.assertRaises(SystemExit):
+            self.parse("--tracking", "cotracker", "ncc")
+
+
 if __name__ == "__main__":
     unittest.main()

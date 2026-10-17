@@ -41,10 +41,14 @@ def main():
     args = build_arg_parser().parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     from providers.trackers.factory import uses_gpu_server
-    if any(uses_gpu_server(p) for p in args.provider):
+    if any(uses_gpu_server(p) for p in args.provider) or args.roma:
         from gpu_server import launcher
         launcher.configure(args.tracking_server)
-        launcher.prewarm()            # the model loads while the scene boots
+        if any(uses_gpu_server(p) for p in args.provider):
+            launcher.prewarm()            # the model loads while the scene boots
+        if args.roma:
+            from tracking.roma_redetect import roma_url
+            launcher.prewarm(roma_url(), "romav2")
     scene, kwargs_by_provider = te.build_scene(args)
 
     payloads = []
@@ -53,7 +57,7 @@ def main():
             payload = te.run_eval(scene, tracker_provider=provider, tracker3d=lift,
                                   cameras=args.cameras, keep_frames=not args.no_frames_trace,
                                   tracker_kwargs=kwargs_by_provider.get(provider),
-                                  **te.timing_kwargs(args))
+                                  roma=args.roma, **te.timing_kwargs(args))
             stem = f"{args.scene}_{provider}_{lift}" + (f"_{args.tag}" if args.tag else "")
             te.write_report(payload, os.path.join(args.out, stem + ".json"))
             payloads.append(payload)
