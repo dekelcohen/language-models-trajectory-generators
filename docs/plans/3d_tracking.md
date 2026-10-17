@@ -73,6 +73,7 @@ list, §9 the pipeline as built, §10 the decision log; this is the orientation.
 | HybridTracker (CoTracker anchor + KLT similarity bridge) `--tracker-provider hybrid / hybrid_remote` | **built, opt-in** - removes coast between flushes (frames 1-11 ≤ 0.02 m) but end-to-end not better yet: pose gate rejects non-rigid fits after the door swings | §13.14 |
 | GPU server on Kaggle/Colab (cloudflared tunnel) + `jpeg` codec | **done** - D4 through a public tunnel = local accuracy (0.027 / 0.072 m), 0.9 s mean step; fixed per-connection session owners | `gpu_server/expose.py`, `gpu_server/kaggle_gpu_server.ipynb` (§13.15) |
 | Tracking → agent integration (events, articulation, monitors, tool API) | **researched, plan P0-P5** - `MotionBuffer` not yet wired into the session | [`tracking_agent_integration.md`](tracking_agent_integration.md) (§13.15) |
+| RoMa v2 gated re-seed `--tracking cotracker roma` / `--track-roma` | **done, opt-in** - template (NCC) D4: median 0.036 → 0.029 m, p95 0.118 → 0.088, recovers at f35 (never without); CoTracker D4 unchanged (it self-recovers at f32 before RoMa can) | `tracking/roma_redetect.py` (§13.16) |
 
 ### 0.2 Environment (the part that is easy to lose)
 
@@ -2302,3 +2303,85 @@ BIC selection), code-as-monitor functions, the LLM tool API, and a P0–P5 plan.
 2. A pose gate for memory trackers (§13.14), so the hybrid pays off.
 3. Re-check A1000 throttling.
 4. P0 of the integration plan: wire `MotionBuffer`.
+
+### 13.16 RoMa v2 gated re-seed + `--tracking` components CLI (2026-10-18)
+
+**Brief.** RoMa v2 is wired in as an *optional* re-detector. It runs only while the pose is
+red/black. `--tracking cotracker` = CoTracker only (remote gpu_server); `--tracking cotracker roma`
+adds RoMa. On D4 it rescues the CPU `template` tracker (it never recovered before). It does
+not change CoTracker, which re-finds the handle by itself one RoMa period earlier.
+
+**How it works** (`tracking/roma_redetect.py`, `TrackingSession(roma=...)`):
+
+1. At green (trusted) poses, every `track_roma_ref_every` frames, bank one reference per
+   camera: the full RGB frame plus the pixels of the depth-verified seed points.
+2. When the pose has been unmeasured for ≥ `track_roma_after` frames (then every
+   `track_roma_every`), RoMa matches ref (A, full frame) → current (B). It reads the warp at
+   the seed pixels (the §13.12 "full frame A, warp read at the point" mode). Points with
+   overlap ≥ `track_roma_overlap_min` (0.3) are lifted with the current depth.
+3. RANSAC rigid fit of the seed template (`reacquire.ransac_pose`), with gates:
+   - inliers ≥ max(3, `track_roma_min_frac` × banked);
+   - rmse ≤ `track_roma_max_rmse_m`;
+   - jump ≤ `track_reacq_max_jump_m` + speed × unmeasured time;
+   - free-space (`track_reacq_max_contra_frac`).
+4. A hit is adopted like the NCC search: an external pose `source="roma"`, filter re-init,
+   and a re-seed of *all* 2D trackers (reason `reacquire_roma`), CoTracker included.
+5. If the RoMa server cannot be reached, RoMa is disabled for the session with one warning.
+   `meta["roma"]` per call, and `session.roma.summary()` in the eval payload.
+
+**Server.** RoMa needs torch ≥ 2.4, so it runs on its own gpu_server
+(`config.track_roma_url`, default `ws://127.0.0.1:8775/v1/ws`, env `GPU_SERVER_ROMA_URL`).
+The launcher now has **per-module profiles**: `config.gpu_server_module_profiles["romav2"]`
+gives `conda_env`, `args`, `env`, and `GPU_SERVER_ROMAV2_PYTHON` / `_PYTHONPATH` / `_ARGS`
+override them. CoTracker (py3.10/torch 2.0) and RoMa (py3.12/torch 2.12) can thus be
+auto-started side by side. The `romav2` module also takes `torch_home`.
+
+**CLI**
+
+| command line | effect |
+|---|---|
+| `--tracking` | as before (config defaults) |
+| `--tracking cotracker` | 2D = CoTracker3 on the gpu_server (`remote`) |
+| `--tracking cotracker-local` | in-process CoTracker3 |
+| `--tracking template roma` | CPU tracker + RoMa re-detection |
+| `--tracking cotracker roma` / `--track-roma` | add RoMa |
+
+Eval: `run_tracking_eval.py` / `render_tracking_video.py --roma`.
+
+**Results (D4: door, head occluded f15-25, region seeding 12 pts, lock-step, RoMa turbo on CPU ≈ 5 s per match)**
+
+| 2D tracker | RoMa | median m | p95 m | recovery | notes |
+|---|---|---|---|---|---|
+| template (NCC) | off | 0.0361 | 0.1177 | never | error grows to 0.099 m at f34 |
+| template (NCC) | **on** | **0.0293** | **0.0881** | f35 (10 f) | 12 calls, 1 hit: err 0.099 → 0.035 m; inliers 6, rmse 9.7 mm, jump 0.094 m |
+| CoTracker (remote, no reset) | off | 0.0297 | 0.0751 | f32 | §13.14 |
+| CoTracker (remote, no reset) | on | 0.0297 | 0.0751 | f32 | 6 calls (f16/24/28), 0 hits: RoMa was still gated out when CoTracker came back |
+
+**Diagnostic: is the RoMa warp right on the eval frames?** Head camera; A seeded with the GT
+seed pixels, error is the warped point vs the GT pixel in B:
+
+| A → B | err px median / max | overlap median | GT motion px |
+|---|---|---|---|
+| 8 → 28 | 37.2 / 39.9 | 0.10 | 31.6 |
+| 8 → 32 | **3.9** / 28.4 | 0.44 | 37.6 |
+| 4 → 28 | 6.9 / 15.8 | 0.32 | 38.0 |
+| 20 → 28 (A occluded) | 13.8 / 16.4 | 0.00 | 12.4 |
+
+- Low overlap marks the wrong warps well (8→28: overlap 0.10 at 37 px), so the 0.3 gate is
+  right. Relaxing it to 0.05 gave the same D4 result: the points were not rigidly consistent.
+- The reference is stale. The last green pose of the run is f8 (coast/yellow after), so
+  every call matches against f8 even with `track_roma_ref_every=1`. Est-vs-GT drift at the
+  reference is small (1.5 px at f8, 4.5 px at f4).
+
+**Takeaways / next**
+
+- RoMa is the re-detector for CPU-only trackers, and the safety net for long occlusions or
+  out-of-view that CoTracker cannot bridge. For CoTracker on short occlusions it is redundant.
+- Cost: 2 cameras × 5 s on CPU per call (A1000 GPU: ~0.2-0.4 s turbo, untested here). Calls
+  are rate-limited by `track_roma_every`. In real time it should run asynchronously (TODO;
+  it blocks the frame now).
+- Options:
+  - also bank references at yellow poses with small rmse, for fresher refs;
+  - try `track_roma_every=2`, which would have caught f31 earlier;
+  - use a per-camera rigid fit when one camera is still occluded.
+- Video: `outputs/tracking_video/door_template_pose_tracker_d4_roma.mp4`.

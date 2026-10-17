@@ -130,7 +130,9 @@ python main.py --tracking --tracker-provider template --tracker3d pose_tracker
 ```
 | Flag | Values | Default |
 |---|---|---|
+| `--tracking [components]` | bare `--tracking` = config defaults; components pick the 2D tracker and add-ons: `cotracker` (= `remote`), `cotracker-local` (= in-process `cotracker`), any `--tracker-provider` value, `roma` (RoMa v2 re-detection, see 3.). Example: `--tracking cotracker roma` | off |
 | `--tracker-provider` | `template`, `klt`, `cotracker` (in-process, CUDA torch), `remote` (CoTracker3 on the GPU server, see 2.), `hybrid` / `hybrid_remote` (CoTracker3 + a KLT bridge between window flushes, experimental, see docs/plans/3d_tracking.md §13.14), `csrt` (needs `opencv-contrib-python`) | `template` |
+| `--track-roma` / `--no-track-roma` | RoMa v2 re-detection while the pose is lost (same as the `roma` component) | off |
 | `--tracking-server` | `no-shutdown`, `shutdown`, `no-launch` (GPU server lifecycle for `remote`) | `no-shutdown` |
 | `--tracker3d` | `depth_fusion`, `pose_tracker` (pose, occlusion modes, re-acquisition, gripper FK), `triangulate`, `rigid_refine` | `depth_fusion` |
 | `--track-cameras` | any of `head wrist shoulder` | `head wrist` |
@@ -213,6 +215,12 @@ set TORCH_HOME=D:\Vision\Image_matching\cache\torch
 Run this from the repo root so `gpu_server` is importable. Settings are `turbo` (default, fastest), `fast`, `base` and `precise`. On the door scene, `base` was no more accurate than `turbo` and ~6x slower on CPU.
 
 *3d. Use it.*
+- In tracking: `python main.py --tracking cotracker roma --tracker3d pose_tracker`, or `--tracking template roma` on CPU.
+  - RoMa runs only while the pose is red/black. It matches a banked pre-occlusion frame to the current one, then does a gated rigid re-fit and re-seeds the 2D trackers (§13.16).
+  - The launcher auto-starts the RoMa server on `ws://127.0.0.1:8775/v1/ws` (`GPU_SERVER_ROMA_URL` to change) in the `vlm_roma` conda env. Point it elsewhere with `GPU_SERVER_ROMAV2_PYTHON=<python.exe>`, `GPU_SERVER_ROMAV2_PYTHONPATH` and `ROMAV2_ROOT=<RoMaV2 checkout>`, or start the server by hand as in 3c.
+  - An unreachable server disables RoMa with one warning.
+  - D4 door eval: it rescues the CPU `template` tracker (p95 0.118 → 0.088 m) and is neutral for CoTracker.
+  - Eval flag: `run_tracking_eval.py --roma`.
 - Render the re-detection on the sim pairs:
   ```
   python tests\tracking_tools\render_romav2_redetect.py outputs\tracking_probes\romav2_pairs\head_sweep\manifest.json --url tcp://127.0.0.1:8776

@@ -80,6 +80,18 @@ When tracking uses `--provider remote`, the client starts the server itself:
   requests and loads block the exit; open idle connections do not.
 - **Python:** `$GPU_SERVER_PYTHON` > `config.gpu_server_python` > the conda env
   `config.gpu_server_conda_env` (`env_lapa_tracking`) > the current interpreter.
+- **Per-module profiles** (`config.gpu_server_module_profiles`): a module that needs a
+  different env gets its own server, spawned with that profile's python, args and env.
+  This is how CoTracker (py3.10/torch 2.0, port 8765) and RoMa v2 (torch ≥ 2.4, port 8775,
+  `config.track_roma_url`) run side by side. Default:
+  `{"romav2": {"conda_env": "vlm_roma", "args": ["--set", "romav2.setting=turbo"]}}`.
+  The environment overrides it:
+  - `GPU_SERVER_<MODULE>_PYTHON`: interpreter;
+  - `GPU_SERVER_<MODULE>_PYTHONPATH`: the server's `PYTHONPATH`;
+  - `GPU_SERVER_<MODULE>_ARGS`: extra server args, e.g. `--set romav2.root=D:\RoMaV2`.
+
+  `ROMAV2_ROOT` / `TORCH_HOME` are read by the `romav2` module (or use `--set romav2.root=`,
+  `--set romav2.torch_home=`).
 - **Ports:** a `ws://...:p` URL binds ws `p` + tcp `p+1`; a `tcp://...:p` URL binds ws
   `p-1` + tcp `p`. Bind-first plus background preload means a second launcher finds the
   server already listening instead of starting a duplicate.
