@@ -4,8 +4,9 @@ One message = ``MAGIC | u32 header_len | header JSON (utf-8) | array blobs``.
 
 The header is a JSON object. Arrays travel as raw bytes after it and are described in
 ``header["_arrays"]`` as ``{"name", "dtype", "shape", "enc", "nbytes"}`` in blob order.
-``enc`` is ``"raw"`` (C-order bytes, no copy beyond ``tobytes``) or ``"png"`` (lossless,
-for ``uint8`` images over slow links). Raw is the default: a 256x256 RGB frame is 192 KB,
+``enc`` is ``"raw"`` (C-order bytes, no copy beyond ``tobytes``), ``"png"`` (lossless,
+for ``uint8`` images over slow links) or ``"jpeg"`` (lossy, quality ``JPEG_QUALITY``; for
+internet tunnels such as a Kaggle-hosted server). Raw is the default: a 256x256 RGB frame is 192 KB,
 which costs well under a millisecond on localhost or a LAN, while PNG costs ~2-3 ms to
 encode. There is no base64 anywhere.
 
@@ -21,7 +22,8 @@ import numpy as np
 PROTOCOL_VERSION = 1
 MAGIC = b"GS1"
 _HDR = struct.Struct(">I")
-IMAGE_CODECS = ("raw", "png")
+IMAGE_CODECS = ("raw", "png", "jpeg")
+JPEG_QUALITY = 90
 
 
 class ProtocolError(ValueError):
@@ -52,11 +54,21 @@ def _png_encode(arr):
     return buf.tobytes()
 
 
-def _png_decode(blob, shape):
+def _jpeg_encode(arr):
+    import cv2
+    img = arr[..., ::-1] if arr.ndim == 3 else arr
+    ok, buf = cv2.imencode(".jpg", np.ascontiguousarray(img),
+                           [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    if not ok:
+        raise ProtocolError("JPEG encoding failed")
+    return buf.tobytes()
+
+
+def _img_decode(blob, shape):
     import cv2
     img = cv2.imdecode(np.frombuffer(blob, np.uint8), cv2.IMREAD_UNCHANGED)
     if img is None:
-        raise ProtocolError("PNG decoding failed")
+        raise ProtocolError("image decoding failed")
     if img.ndim == 3:
         img = img[..., ::-1]
     return np.ascontiguousarray(img).reshape(shape)
@@ -74,8 +86,16 @@ def pack(header, arrays=None, image_codec="raw"):
     descs, blobs = [], []
     for name, arr in (arrays or {}).items():
         arr = np.asarray(arr)
-        enc = "png" if image_codec == "png" and _is_image(arr) else "raw"
-        blob = _png_encode(arr) if enc == "png" else np.ascontiguousarray(arr).tobytes()
+        # JPEG has no alpha / single-channel-3D variant: those images go lossless instead.
+        enc = image_codec if image_codec != "raw" and _is_image(arr) else "raw"
+        if enc == "jpeg" and not (arr.ndim == 2 or arr.shape[2] == 3):
+            enc = "png"
+        if enc == "png":
+            blob = _png_encode(arr)
+        elif enc == "jpeg":
+            blob = _jpeg_encode(arr)
+        else:
+            blob = np.ascontiguousarray(arr).tobytes()
         descs.append({"name": str(name), "dtype": arr.dtype.str, "shape": list(arr.shape),
                       "enc": enc, "nbytes": len(blob)})
         blobs.append(blob)
@@ -103,8 +123,8 @@ def unpack(buf):
             raise ProtocolError(f"truncated message (array {d['name']!r})")
         blob = mv[off:end]
         shape = tuple(d["shape"])
-        if d.get("enc", "raw") == "png":
-            arrays[d["name"]] = _png_decode(bytes(blob), shape)
+        if d.get("enc", "raw") in ("png", "jpeg"):
+            arrays[d["name"]] = _img_decode(bytes(blob), shape)
         else:
             arrays[d["name"]] = np.frombuffer(blob, dtype=np.dtype(d["dtype"])).reshape(shape).copy()
         off = end

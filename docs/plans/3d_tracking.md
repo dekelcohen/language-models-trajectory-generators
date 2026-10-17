@@ -71,6 +71,8 @@ list, §9 the pipeline as built, §10 the decision log; this is the orientation.
 | **Generic GPU model server** (CoTracker3, RoMa v2; VLM-ready plug-ins) + `--provider remote` | **done** - TCP/WS/inproc; remote CoTracker is bit-identical to local in lock-step; auto-launched when tracking needs it, left running by default (`--tracking-server`), idle exit after 30 min | `gpu_server/`, `gpu_server/README.md`, `tests/test_gpu_server.py` (§13.13) |
 | No CoTracker reset on occlusion (memory trackers) | **done, default** - D4 median 0.038 → 0.030 m; re-finds the handle itself after occlusion | `config.track_memory_skip_reseed_reasons` (§13.14) |
 | HybridTracker (CoTracker anchor + KLT similarity bridge) `--tracker-provider hybrid / hybrid_remote` | **built, opt-in** - removes coast between flushes (frames 1-11 ≤ 0.02 m) but end-to-end not better yet: pose gate rejects non-rigid fits after the door swings | §13.14 |
+| GPU server on Kaggle/Colab (cloudflared tunnel) + `jpeg` codec | **done** - D4 through a public tunnel = local accuracy (0.027 / 0.072 m), 0.9 s mean step; fixed per-connection session owners | `gpu_server/expose.py`, `gpu_server/kaggle_gpu_server.ipynb` (§13.15) |
+| Tracking → agent integration (events, articulation, monitors, tool API) | **researched, plan P0-P5** - `MotionBuffer` not yet wired into the session | [`tracking_agent_integration.md`](tracking_agent_integration.md) (§13.15) |
 
 ### 0.2 Environment (the part that is easy to lose)
 
@@ -2240,3 +2242,63 @@ Tests: `tests/test_tracking_unit.py`:
   Every frame is current, the bridge is exact to 0.5 px, flushes are forwarded and the
   anchor is never re-initialised.
 - `TestMemoryTrackerReseedPolicy`.
+
+### 13.15 GPU server on Kaggle/Colab (cloudflared tunnel), JPEG codec, agent-integration research (2026-10-18)
+
+**Why.** Kaggle has no automation API: you cannot start a notebook or open a port from
+outside. The notebook therefore runs the server on loopback, and a **cloudflared quick
+tunnel** publishes it. The tunnel needs no account, and WebSockets pass through.
+
+**What was added.**
+- `gpu_server/expose.py`:
+  - `ensure_cloudflared`, `Tunnel`, `start_server`, `check_public`, `client_instructions`,
+    `keep_alive`;
+  - a CLI: `python -m gpu_server.expose --modules cotracker echo --preload cotracker`.
+- [`gpu_server/kaggle_gpu_server.ipynb`](../../gpu_server/kaggle_gpu_server.ipynb). It does:
+  secrets → clone and install → optional RoMa v2 → server → tunnel and self-check → URL
+  (also written to `/kaggle/working/gpu_server_url.txt`) → keep-alive for ≤ 11.5 h. With
+  *Save & Run All* it runs headless.
+- `protocol.py`: a `jpeg` image codec; `RemoteTracker` reads `$GPU_SERVER_CODEC`.
+- **Bug fix, `server.py`.** The session owner is now unique per connection
+  (`ws:<peer>#<n>`).
+  - Behind the tunnel every connection reports the same `<ip>:0`. So when the launcher's
+    short ping disconnected, the server closed the tracker's CoTracker sessions.
+  - First tunnel D4 run: **97.5 % lost**. After the fix: as accurate as local.
+  - Any reverse proxy would have hit the same bug.
+
+**Codec bench** (door clip, head cam, 15 CoTracker windows through the server):
+
+| codec | KB/frame | encode | CoTracker error median / p95 (px) |
+|---|---|---|---|
+| raw | 192 | 0.4 ms | 3.76 / 5.65 |
+| png | 26 | 58–93 ms | identical |
+| jpeg q90 | 14.5 | 2.6 ms | 3.36 / 6.74 |
+
+**D4 through a public tunnel** (this laptop → Cloudflare → back, `jpeg`, lock-step,
+`--provider remote`):
+
+| run | median m | p95 m | % lost | mean step latency | p95 latency |
+|---|---|---|---|---|---|
+| local ws, raw (§13.14) | 0.0297 | 0.0751 | 0 | – | – |
+| tunnel wss, jpeg | **0.0274** | **0.0723** | 0 | 0.87 s | 3.1 s |
+
+- Ping through the tunnel is 64–148 ms.
+- Flush steps send two cameras sequentially, hence the 3 s p95.
+- Verdict: good for lock-step evals, for RoMa re-detection, and for development on a
+  CPU-only laptop. Too slow for real-time tracking.
+
+JSON: `outputs/tracking_probes/kaggle_tunnel/door_remote_pose_tracker_d4_wss_jpeg.json`.
+
+**Agent-integration research.** See
+[`tracking_agent_integration.md`](tracking_agent_integration.md): track features → events
+(grasp-slip, stuck door, wrong object), articulation estimation (line / circle / screw fit,
+BIC selection), code-as-monitor functions, the LLM tool API, and a P0–P5 plan.
+- Key gap found: `tracking/motion.py` (MotionBuffer, screw estimation) is built but not
+  wired into `tracking/session.py`.
+- The SKILL docs never call `track_objects`.
+
+**Open (next).**
+1. RoMa gated re-seed in the session (`--tracking cotracker roma`).
+2. A pose gate for memory trackers (§13.14), so the hybrid pays off.
+3. Re-check A1000 throttling.
+4. P0 of the integration plan: wire `MotionBuffer`.

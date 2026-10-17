@@ -50,7 +50,8 @@ class RemoteTracker(PointTracker):
         self.module = (module or os.environ.get("GPU_SERVER_MODULE")
                        or getattr(config, "tracker_remote_module", "cotracker"))
         self.token = token
-        self.image_codec = image_codec or getattr(config, "tracker_remote_image_codec", "raw")
+        self.image_codec = (image_codec or os.environ.get("GPU_SERVER_CODEC")
+                            or getattr(config, "tracker_remote_image_codec", "raw"))
         self.timeout = float(timeout or getattr(config, "tracker_remote_timeout_s", 60.0))
         self.session_params = dict(session_params or {})
         # None = follow gpu_server.launcher's policy (launch a local server when none answers,

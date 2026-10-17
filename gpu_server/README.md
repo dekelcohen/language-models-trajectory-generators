@@ -40,8 +40,19 @@ WS needs `fastapi` and `uvicorn`. Without them the server serves TCP only and lo
 | `ws://127.0.0.1:8765/v1/ws` | 1.61 ms | default; proxy- and firewall-friendly |
 
 All of these are negligible next to model time (CoTracker flush 0.2-1.2 s, RoMa 0.1-5 s), so
-shared memory was not worth adding. `image_codec="png"` only helps on slow links.
-Benchmark: `tests/tracking_tools/bench_gpu_server.py`.
+shared memory was not worth adding. Benchmark: `tests/tracking_tools/bench_gpu_server.py`.
+
+**Image codec** (client `image_codec=`, or `$GPU_SERVER_CODEC` for `RemoteTracker`). Use it only
+over slow links. Door clip, head cam, 15 CoTracker windows through the server:
+
+| codec | bytes / 256x256 frame | encode | CoTracker error median / p95 (px) |
+|---|---|---|---|
+| `raw` (default) | 192 KB | 0.4 ms | 3.76 / 5.65 |
+| `png` (lossless) | 26 KB | 58-93 ms | identical to raw |
+| `jpeg` (q=90) | 14.5 KB | 2.6 ms | 3.36 / 6.74 (equivalent) |
+
+`jpeg` applies only to uint8 gray/RGB images. RGBA and other images fall back to `png`, and
+non-image arrays are always raw.
 
 ## Auto-launch and lifecycle (`gpu_server/launcher.py`)
 
@@ -128,10 +139,55 @@ Then add it to `BUILTIN_MODULES` in `host.py`, or pass
 - Different modules run concurrently.
 - Keep heavy imports inside `load()`.
 
+## Kaggle / Colab: expose the server to a CPU-only client (`gpu_server/expose.py`)
+
+Kaggle has no API to start a notebook or to open a port. So the notebook itself runs the
+server on loopback, and a **cloudflared quick tunnel** publishes it. The tunnel needs no
+account and no inbound port: `wss://<random>.trycloudflare.com/v1/ws`. WebSockets pass
+through; raw TCP does not.
+
+1. Open [`kaggle_gpu_server.ipynb`](kaggle_gpu_server.ipynb) on Kaggle and set it up:
+   - Accelerator: **GPU T4**;
+   - Internet: **On**;
+   - Secrets: `GPU_SERVER_TOKEN` (recommended), plus `GITHUB_TOKEN` if the repo is private.
+
+   Then run all cells. To keep it running with the browser closed, use *Save Version → Save &
+   Run All*, which runs for up to 12 h. The URL is printed in the log and written to
+   `/kaggle/working/gpu_server_url.txt`.
+2. On the client:
+   ```powershell
+   $env:GPU_SERVER_URL   = "wss://<random>.trycloudflare.com/v1/ws"
+   $env:GPU_SERVER_TOKEN = "<same token>"
+   $env:GPU_SERVER_CODEC = "jpeg"
+   python main.py --tracking --tracker-provider remote --tracking-server no-launch ...
+   ```
+   The launcher never spawns for a non-local URL. Do not use `--tracking-server shutdown`
+   against a shared remote server.
+
+The same flow as a CLI, on any Linux or Windows GPU box:
+`python -m gpu_server.expose --modules cotracker echo --preload cotracker --hours 11.5`.
+`--no-server --port P` tunnels an already-running server instead. The CLI does the following:
+- downloads `cloudflared` into `~/.cache/gpu_server` if it is not on PATH;
+- checks the public URL (ping, plus a JPEG frame round trip through `echo`);
+- prints the client lines;
+- restarts a dead tunnel (the URL changes).
+
+**Measured** (tunnel from this laptop through Cloudflare and back, D4 door eval, `jpeg`):
+- ping 64-148 ms;
+- D4 accuracy is the same as local: median 0.027 m, p95 0.072 m;
+- mean step latency 0.87 s, p95 3.1 s on flush steps (two cameras, sequential).
+
+That is fine for lock-step runs and RoMa re-detection. It is too slow for real-time tracking.
+
+Session owners are per connection (`ws:<peer>#<n>`). Behind a tunnel every connection
+reports the same peer (`<ip>:0`). Before this fix, the launcher's ping disconnect closed the
+tracker's CoTracker sessions (97% lost).
+
 ## Security
 
 Bind to loopback by default. A non-loopback bind requires `--token`, and clients pass
-`token=` or set `$GPU_SERVER_TOKEN`. The launcher spawns only loopback servers.
+`token=` or set `$GPU_SERVER_TOKEN`. The launcher spawns only loopback servers. A tunnel is
+public, so `expose` always sets a token (generated if not given).
 
 ## Tests
 

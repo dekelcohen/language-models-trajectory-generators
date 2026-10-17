@@ -32,6 +32,7 @@ lists them under ``loading``). The server stops on Ctrl+C, on a ``shutdown`` req
 
 import argparse
 import asyncio
+import itertools
 import json
 import logging
 import os
@@ -51,6 +52,10 @@ _LEN = struct.Struct(">Q")
 MAX_MESSAGE = 512 * 2**20
 DEFAULT_WS = "127.0.0.1:8765"
 DEFAULT_TCP = "127.0.0.1:8766"
+# Session owner = one connection. The peer address alone is not unique: behind a tunnel or
+# reverse proxy every connection reports the same "<ip>:0", so one client's disconnect would
+# close another client's sessions.
+_CONN_IDS = itertools.count(1)
 
 
 # -- TCP -------------------------------------------------------------------
@@ -67,7 +72,7 @@ def _write_msg(writer, payload):
 
 async def _tcp_client(host, reader, writer):
     peer = writer.get_extra_info("peername")
-    owner = f"tcp:{peer[0]}:{peer[1]}" if peer else f"tcp:{id(writer)}"
+    owner = (f"tcp:{peer[0]}:{peer[1]}" if peer else "tcp") + f"#{next(_CONN_IDS)}"
     sock = writer.get_extra_info("socket")
     if sock is not None:
         import socket
@@ -164,7 +169,7 @@ def create_app(host):
     async def ws(websocket: WebSocket):
         await websocket.accept()
         c = websocket.client
-        owner = f"ws:{c.host}:{c.port}" if c else f"ws:{id(websocket)}"
+        owner = (f"ws:{c.host}:{c.port}" if c else "ws") + f"#{next(_CONN_IDS)}"
         logger.info("[ws] %s connected", owner)
         try:
             while True:

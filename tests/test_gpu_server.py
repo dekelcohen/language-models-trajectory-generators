@@ -60,6 +60,17 @@ class TestProtocol(unittest.TestCase):
                 self.assertEqual(out[k].dtype, v.dtype)
             self.assertTrue(out["frame"].flags.writeable)
 
+    def test_jpeg_is_lossy_only_for_rgb_images(self):
+        smooth = np.repeat((np.indices((48, 64)).sum(0) * 2).astype(np.uint8)[..., None], 3, axis=2)
+        rgba = np.dstack([FRAME, np.full(FRAME.shape[:2], 7, np.uint8)])
+        arrays = {"frame": smooth, "rgba": rgba, "pts": np.array([[1.5, 2.25]])}
+        _h, out = unpack(pack({"op": "x"}, arrays, image_codec="jpeg"))
+        for k, v in arrays.items():
+            self.assertEqual((out[k].shape, out[k].dtype), (v.shape, v.dtype))
+        self.assertLess(np.abs(out["frame"].astype(int) - smooth).mean(), 3.0)
+        np.testing.assert_array_equal(out["rgba"], rgba)      # alpha images fall back to png
+        np.testing.assert_array_equal(out["pts"], arrays["pts"])
+
     def test_garbage_is_a_protocol_error(self):
         with self.assertRaises(ProtocolError):
             unpack(b"not a message")
