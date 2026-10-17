@@ -58,6 +58,8 @@ class RemoteTracker(PointTracker):
         self.autolaunch = autolaunch
         self._client = client
         self._own_client = client is None
+        # The server-side CoTracker keeps its window memory across occlusions too.
+        self.keeps_memory_through_occlusion = self.module in ("cotracker",)
         self._session = None
         self._updates = 0
         self._rtt_sum = 0.0

@@ -760,7 +760,8 @@ def add_eval_args(parser):
 
     trackers = parser.add_argument_group("trackers (every 2D x 3D combination is run)")
     trackers.add_argument("--provider", nargs="+", default=[config.tracker_provider_default],
-                          help="2D tracker provider(s): template | klt | csrt | cotracker | remote")
+                          help="2D tracker provider(s): template | klt | csrt | cotracker | remote "
+                               "| hybrid | hybrid_remote")
     trackers.add_argument("--tracking-server", default=config.tracking_server_policy_default,
                           choices=["no-shutdown", "shutdown", "no-launch"],
                           help="gpu_server lifecycle for --provider remote (gpu_server/launcher.py): "
@@ -1369,6 +1370,7 @@ class TrackingEvalRunner:
                 "lift_errors": getattr(self.session, "lift_errors", None),
                 "aborted": bool(getattr(self.session, "aborted", False)),
                 "abort_reason": getattr(self.session, "abort_reason", None),
+                "memory_holds": dict(getattr(self.session, "memory_holds", {}) or {}),
             },
         }
         pipe = getattr(self.session, "pipeline", None)

@@ -159,6 +159,7 @@ class CoTrackerTracker(PointTracker):
     """One instance per camera. See the module docstring for the window semantics."""
 
     name = "cotracker"
+    keeps_memory_through_occlusion = True
 
     def __init__(self, device=None, variant=None, torch_home=None, model=None, step=None,
                  vis_threshold=None, stale_decay=None, warm_start=True, fp16=None, **kwargs):

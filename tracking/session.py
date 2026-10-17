@@ -119,6 +119,8 @@ class TrackingSession:
         self.active = True
         self.last_report = None
         self.errors = 0
+        # Re-seeds skipped because the tracker keeps memory through occlusion, per reason.
+        self.memory_holds = {}
         self.monitor = MonitorRunner.from_spec(monitor, logger=logger)
         self.reporter = TrackingReporter(run_id=run_id, output_dir=output_dir, logger=logger,
                                          write_jsonl=write_jsonl)
@@ -342,6 +344,10 @@ class TrackingSession:
         # 3. cross-camera repair
         for cam, reason, donor, world_point in decide_reseeds(
                 target.name, state.cams, target.health, self.frame_idx, fallback):
+            if self._memory_holds(target, cam, reason):
+                # The tracker is expected to carry the occluded points itself: no reset and
+                # no "rejected" (its visibility flags already keep occluded points out).
+                continue
             event = self._reseed(target, cam, views.get(cam), world_point, reason, donor,
                                  pose=state.pose or target.last_pose)
             state.reseeds.append(event)
@@ -452,6 +458,9 @@ class TrackingSession:
             view = views.get(cam)
             health = target.health.get(cam)
             if view is None or health is None:
+                continue
+            if self._memory_holds(target, cam, reason):
+                meta.setdefault("pose_reseed", {})[cam] = "skip: tracker keeps memory"
                 continue
             if health.last_reseed_frame is not None and \
                     self.frame_idx - health.last_reseed_frame < cooldown:
@@ -770,6 +779,17 @@ class TrackingSession:
             pts.append(R.T @ (np.asarray(surf, dtype=float).reshape(3) - t))
         return (pixels, np.asarray(pts)) if pts else None
 
+    def _memory_holds(self, target, cam, reason):
+        """True when ``cam``'s re-seed for ``reason`` is skipped to keep tracker memory."""
+        if reason not in getattr(config, "track_memory_skip_reseed_reasons", ()):
+            return False
+        tracker = target.trackers.get(cam)
+        if tracker is None or not getattr(tracker, "keeps_memory_through_occlusion", False) \
+                or not target.seeded.get(cam, False):
+            return False
+        self.memory_holds[reason] = self.memory_holds.get(reason, 0) + 1
+        return True
+
     def _install_seed(self, target, cam, view, pixels, indices):
         """(Re-)initialise ``cam``'s tracker on ``pixels`` (seed ids ``indices``).
 
@@ -1035,6 +1055,8 @@ class TrackingSession:
         summary["abort_reason"] = self.abort_reason or summary.get("abort_reason")
         summary["frames"] = self.frame_idx
         summary["monitor_errors"] = self.monitor.error_count
+        if self.memory_holds:
+            summary["memory_holds"] = dict(self.memory_holds)
         if self.pipeline is not None:
             summary["realtime"] = self.pipeline.describe()
         return summary
@@ -1120,7 +1142,8 @@ def add_tracking_args(parser, include_enable=True):
 def make_session(robot, env, args, targets=None, monitor=None, track_gripper=True,
                  logger=None, run_id=None):
     """Build a session from parsed CLI ``args`` (the shape ``env.py`` receives)."""
-    if args.tracker_provider == "remote":
+    from providers.trackers.factory import uses_gpu_server
+    if uses_gpu_server(args.tracker_provider):
         from gpu_server import launcher
         launcher.configure(getattr(args, "tracking_server", None))
     session = TrackingSession(

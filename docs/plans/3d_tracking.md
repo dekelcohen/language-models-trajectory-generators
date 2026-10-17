@@ -69,6 +69,8 @@ list, §9 the pipeline as built, §10 the decision log; this is the orientation.
 | Door recovery after a long occlusion | **open** - CoTracker3 alone passes the occlusion; template+search stays black; NCC/SIFT re-detection fails (twin lever, wood edges); RoMa v2 re-detects it (15/15 frames < 6 px, offline/remote only); integration plan in §13.12 | §11.3, §13.11, §13.12 |
 | **VLM re-detection** (re-find the object when tracking is lost; for G1/G3) | **TODO (large)** | §13.8 |
 | **Generic GPU model server** (CoTracker3, RoMa v2; VLM-ready plug-ins) + `--provider remote` | **done** - TCP/WS/inproc; remote CoTracker is bit-identical to local in lock-step; auto-launched when tracking needs it, left running by default (`--tracking-server`), idle exit after 30 min | `gpu_server/`, `gpu_server/README.md`, `tests/test_gpu_server.py` (§13.13) |
+| No CoTracker reset on occlusion (memory trackers) | **done, default** - D4 median 0.038 → 0.030 m; re-finds the handle itself after occlusion | `config.track_memory_skip_reseed_reasons` (§13.14) |
+| HybridTracker (CoTracker anchor + KLT similarity bridge) `--tracker-provider hybrid / hybrid_remote` | **built, opt-in** - removes coast between flushes (frames 1-11 ≤ 0.02 m) but end-to-end not better yet: pose gate rejects non-rigid fits after the door swings | §13.14 |
 
 ### 0.2 Environment (the part that is easy to lose)
 
@@ -2156,9 +2158,85 @@ was validated locally in `stmd` (CPU, setting `base`, fp32), 15 pairs:
 default.
 
 **Open (next)**
-1. Session policy: do not reset CoTracker on red/black (§13.12 (4)).
+1. Session policy: do not reset CoTracker on red/black (§13.12 (4)). → **done, §13.14**
 2. HybridTracker: CoTracker flushes + a KLT bridge with delayed-measurement timestamps.
+   → **built (opt-in), §13.14**
 3. Wire RoMa `match` into `reacquire` as a gated re-seed (overlap ≥ 0.5, KF gate, depth
    protrusion).
 4. Re-check A1000 throttling (1.24 s per flush vs the earlier 0.223 s profile) before
    quoting real-time numbers.
+
+### 13.14 No reset for memory trackers (default) + HybridTracker (opt-in) (2026-10-18)
+
+**Brief.** CoTracker is no longer reset on occlusion, which improves D4 median 0.038 → **0.030 m**.
+After the occlusion, head CoTracker re-finds the handle by itself at 0.025 m; the old reset
+put it at 0.05–0.09 m. `--tracker-provider hybrid | hybrid_remote` adds a per-frame KLT bridge
+between CoTracker flushes:
+- Frames 0–11: green and ≤ 0.02 m instead of coasting up to 0.055 m.
+- Whole run: not better yet (0.036 / 0.109) because the pose gate (green RMSE ≤ 1.5 cm)
+  rejects most frames after frame 12, including pure-anchor frames.
+
+So the hybrid stays opt-in.
+
+**No-reset policy.**
+- `PointTracker.keeps_memory_through_occlusion` is `True` for `cotracker`, for `remote`
+  with module `cotracker`, and for the hybrids.
+- For those trackers the session skips the reseed reasons in
+  `config.track_memory_skip_reseed_reasons = ("lost", "low_confidence", "reacquire")`:
+  - in `_process_target` (the health policy);
+  - in `_pose_repairs`, the red/black re-seed at a *predicted* pose.
+- A skipped camera is not marked `rejected`. CoTracker's own visibility flags already keep
+  occluded points out.
+- Verified repairs still apply: `unseeded`, `jumped`, `disagreement`, `pose_correction`
+  and `reacquire_{search,roma,fk}`.
+- Counts are reported as `session.memory_holds` (also in the eval JSON `session` block).
+- Set the tuple to `()` to restore the old behaviour.
+
+**HybridTracker** (`providers/trackers/hybrid_tracker.py`).
+- *Anchor*: CoTracker, in-process or `remote`.
+- *Bridge*: KLT.
+- Fresh anchor frame: output the anchor points and restart the bridge there.
+- Stale frame: output a measurement for *this* frame (`stale_frames = 0`).
+  `tracker_hybrid_motion = "similarity"` (the default) fits one RANSAC 2D similarity to the
+  KLT tracks and moves every anchor point with it. With raw per-point KLT (`"points"`),
+  points slid on the weak texture: the fit RMSE went 0.02 → 0.03 m in 3 frames and the
+  pose went red from frame 8 (p95 0.163).
+- Flushes are forwarded (`_flushes`, `meta["flushes"]`), so the latency model still
+  charges them.
+- The anchor is never re-initialised by the bridge.
+- `config.track_buffering_providers` includes both hybrids (frames are queued, not dropped).
+
+D4 (door, head occluded 15–25, region12, lock-step, `pose_tracker`, anchor via gpu_server):
+
+| run | median / p95 / max (m) | occlusion err | frames 1–7 | after occlusion |
+|---|---|---|---|---|
+| remote CoTracker, old reset policy (§13.13) | 0.038 / 0.076 / 0.087 | 0.031 | coast ≤ 0.055 | reset at frame 25, 0.05–0.09 |
+| remote CoTracker, **no reset** | **0.030** / 0.075 / 0.088 | 0.031 | coast ≤ 0.055 | red 25–31 (no fresh window), then **0.025** at 32 |
+| hybrid_remote, per-point bridge | 0.030 / 0.163 / 0.180 | 0.086 | green ≤ 0.015 | red from 8 (non-rigid bridge) |
+| hybrid_remote, similarity bridge | 0.036 / 0.109 / 0.122 | 0.056 | **green ≤ 0.013** | red 12–31, 0.025 at 32 |
+
+JSONs: `outputs/tracking_probes/no_reset/`. Videos:
+`outputs/tracking_video/door_{remote,hybrid_remote}_pose_tracker_d4_noreset.mp4`.
+The median per-tracked-point error (`point_err_m`) is lower with the hybrid: **0.032** m
+vs 0.050 m. So the 2D tracks are better, and the loss is in the pose stage (below).
+
+**Why the hybrid is not better end-to-end (open).**
+- After frame ~12 the door has swung far enough that the 12 region points no longer fit
+  rigidly within 1.5 cm, *even on fresh CoTracker frames*. Example: frame 16 has fit RMSE
+  0.021 m in both runs.
+- With plain CoTracker those frames simply coast on the KF velocity learned at frame 8,
+  which happens to extrapolate the constant door swing well.
+- The hybrid's extra measurements instead feed the KF fits that then go red, so it coasts
+  from a worse state.
+- The lever is the lift and gate, not the 2D tracker. Next options:
+  1. per-point depth-edge rejection (points on the handle silhouette lift onto the door);
+  2. a robust (Huber/IRLS) rigid fit with a 2–2.5 cm gate *only* for memory trackers,
+     since they are never re-seeded from the pose, which is what made the earlier
+     "degraded" level fail (§9 note);
+  3. seed only the handle part.
+
+Tests: `tests/test_tracking_unit.py`:
+- `TestHybridTracker`: a fake windowed anchor plus real KLT on a translating texture.
+  Every frame is current, the bridge is exact to 0.5 px, flushes are forwarded and the
+  anchor is never re-initialised.
+- `TestMemoryTrackerReseedPolicy`.

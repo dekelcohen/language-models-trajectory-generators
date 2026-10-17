@@ -6,7 +6,13 @@ lookup, lazy import so an optional dependency never breaks startup).
 
 import config
 
-SUPPORTED = ("template", "klt", "csrt", "cotracker", "remote")
+SUPPORTED = ("template", "klt", "csrt", "cotracker", "remote", "hybrid", "hybrid_remote")
+# Providers whose model runs in gpu_server (the launcher starts / attaches to it).
+REMOTE_PROVIDERS = ("remote", "hybrid_remote")
+
+
+def uses_gpu_server(name):
+    return str(name or "").lower() in REMOTE_PROVIDERS
 
 
 def get_tracker(name=None, **kwargs):
@@ -33,4 +39,8 @@ def get_tracker(name=None, **kwargs):
     if name == "remote":
         from providers.trackers.remote_tracker import RemoteTracker
         return RemoteTracker(**kwargs)
+    if name in ("hybrid", "hybrid_remote"):
+        # CoTracker anchor (in-process or gpu_server) + per-frame KLT bridge between flushes.
+        from providers.trackers.hybrid_tracker import HybridTracker
+        return HybridTracker(anchor="remote" if name == "hybrid_remote" else None, **kwargs)
     raise ValueError(f"Unknown tracker provider {name!r}. Supported: {SUPPORTED}")

@@ -130,7 +130,7 @@ python main.py --tracking --tracker-provider template --tracker3d pose_tracker
 ```
 | Flag | Values | Default |
 |---|---|---|
-| `--tracker-provider` | `template`, `klt`, `cotracker` (in-process, CUDA torch), `remote` (CoTracker3 on the GPU server, see 2.), `csrt` (needs `opencv-contrib-python`) | `template` |
+| `--tracker-provider` | `template`, `klt`, `cotracker` (in-process, CUDA torch), `remote` (CoTracker3 on the GPU server, see 2.), `hybrid` / `hybrid_remote` (CoTracker3 + a KLT bridge between window flushes, experimental, see docs/plans/3d_tracking.md §13.14), `csrt` (needs `opencv-contrib-python`) | `template` |
 | `--tracking-server` | `no-shutdown`, `shutdown`, `no-launch` (GPU server lifecycle for `remote`) | `no-shutdown` |
 | `--tracker3d` | `depth_fusion`, `pose_tracker` (pose, occlusion modes, re-acquisition, gripper FK), `triangulate`, `rigid_refine` | `depth_fusion` |
 | `--track-cameras` | any of `head wrist shoulder` | `head wrist` |

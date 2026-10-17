@@ -415,5 +415,116 @@ class TestCSRTProvider(unittest.TestCase):
         self.assertEqual(result.n_visible, 1)
 
 
+class _FakeWindowAnchor:
+    """A windowed tracker stand-in: exact points every ``step`` frames, the old ones between."""
+
+    name = "fake_anchor"
+    keeps_memory_through_occlusion = True
+
+    def __init__(self, truth, step=4):
+        self.truth, self.step = truth, step
+        self.t = 0
+        self._flushes = 0
+        self.inits = 0
+        self.n_points = 0
+        self.last = None
+
+    def init(self, frame, points, obj_id=None):
+        self.inits += 1
+        self.n_points = len(points)
+        self.last = np.asarray(points, dtype=float)
+
+    def reset(self):
+        pass
+
+    def update(self, frame):
+        from providers.trackers.base import TrackResult
+        self.t += 1
+        stale = self.t % self.step
+        if stale == 0:
+            self._flushes += 1
+            self.last = self.truth(self.t)
+        n = len(self.last)
+        return TrackResult(points=self.last.copy(), visible=np.ones(n, bool), scores=np.ones(n),
+                           meta={"stale_frames": stale, "flushes": self._flushes})
+
+
+class TestHybridTracker(unittest.TestCase):
+    SEEDS = np.array([[40.0, 40.0], [60.0, 45.0], [50.0, 70.0], [70.0, 65.0]])
+
+    @staticmethod
+    def frame_at(t):
+        rng = np.random.RandomState(3)
+        tex = (rng.rand(128, 128, 3) * 255).astype(np.uint8)
+        import cv2 as cv
+        tex = cv.GaussianBlur(tex, (5, 5), 1.0)
+        return np.roll(tex, shift=2 * t, axis=1)       # 2 px/frame to the right
+
+    def make(self, motion_model="similarity"):
+        from providers.trackers.hybrid_tracker import HybridTracker
+        truth = lambda t: self.SEEDS + [2.0 * t, 0.0]   # noqa: E731
+        anchor = _FakeWindowAnchor(truth)
+        tracker = HybridTracker(anchor=anchor, bridge="klt", motion_model=motion_model)
+        tracker.init(self.frame_at(0), self.SEEDS)
+        return tracker, anchor, truth
+
+    def test_bridge_measures_the_frames_between_anchor_flushes(self):
+        for model in ("similarity", "points"):
+            tracker, anchor, truth = self.make(model)
+            for t in range(1, 10):
+                result = tracker.update(self.frame_at(t))
+                # Every frame is a current measurement, not a stale window.
+                self.assertEqual(result.meta["stale_frames"], 0, (model, t))
+                self.assertEqual(result.meta["source"], "anchor" if t % 4 == 0 else "bridge")
+                np.testing.assert_allclose(result.points, truth(t), atol=0.5, err_msg=f"{model} t={t}")
+                self.assertTrue(np.all(result.visible))
+            # Flushes are forwarded for the latency model; the anchor is never re-initialised.
+            self.assertEqual(tracker._flushes, anchor._flushes)
+            self.assertEqual(result.meta["flushes"], 2)
+            self.assertEqual(anchor.inits, 1)
+
+    def test_factory_and_memory_flag(self):
+        from providers.trackers.factory import SUPPORTED, uses_gpu_server
+        self.assertIn("hybrid", SUPPORTED)
+        self.assertTrue(uses_gpu_server("hybrid_remote"))
+        self.assertFalse(uses_gpu_server("hybrid"))
+        tracker, _anchor, _truth = self.make()
+        self.assertTrue(tracker.keeps_memory_through_occlusion)
+        self.assertFalse(get_tracker("klt").keeps_memory_through_occlusion)
+
+
+class TestMemoryTrackerReseedPolicy(unittest.TestCase):
+    """A tracker that keeps memory through occlusion (CoTracker) is not reset on occlusion."""
+
+    def holds(self, tracker, reason, seeded=True):
+        from types import SimpleNamespace
+
+        from tracking.session import TrackingSession
+        session = SimpleNamespace(memory_holds={})
+        target = SimpleNamespace(trackers={"head": tracker}, seeded={"head": seeded})
+        return TrackingSession._memory_holds(session, target, "head", reason), session.memory_holds
+
+    def test_occlusion_reasons_are_skipped_only_for_memory_trackers(self):
+        memory = _FakeWindowAnchor(lambda t: TestHybridTracker.SEEDS)
+        for reason in ("lost", "low_confidence", "reacquire"):
+            held, counts = self.holds(memory, reason)
+            self.assertTrue(held, reason)
+            self.assertEqual(counts, {reason: 1})
+            self.assertFalse(self.holds(get_tracker("klt"), reason)[0])
+        # Verified repairs and first seeding still go through.
+        for reason in ("unseeded", "jumped", "disagreement", "pose_correction", "reacquire_roma"):
+            self.assertFalse(self.holds(memory, reason)[0], reason)
+        self.assertFalse(self.holds(memory, "lost", seeded=False)[0])
+
+    def test_policy_can_be_disabled(self):
+        memory = _FakeWindowAnchor(lambda t: TestHybridTracker.SEEDS)
+        saved = config.track_memory_skip_reseed_reasons
+        config.track_memory_skip_reseed_reasons = ()
+        try:
+            self.assertFalse(self.holds(memory, "lost")[0])
+        finally:
+            config.track_memory_skip_reseed_reasons = saved
+
+
 if __name__ == "__main__":
     unittest.main()

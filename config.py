@@ -159,7 +159,7 @@ CLEAR_GRASP_MARKERS = 26
 # Tracking is opt-in (--tracking). When disabled nothing in the capture path changes,
 # so the PyBullet regression goldens stay bit-identical.
 tracking_enabled_default = False
-tracker_provider_default = "template"   # template | klt | csrt | cotracker | remote
+tracker_provider_default = "template"   # template | klt | csrt | cotracker | remote | hybrid | hybrid_remote
 # CoTracker3 provider (--tracker-provider cotracker). The online model is fetched once via
 # torch.hub into TORCH_HOME and reused offline afterwards; None honours the environment
 # and falls back to <repo>/cache/torch.
@@ -245,8 +245,16 @@ track_latency_profiles = {
 # Minimum sim seconds between accepted tracker frames (0 = as fast as latency allows).
 track_period_s = 0.0
 # 2D trackers that must see every camera frame (a sliding-window model): their frames are
-# queued while they compute instead of dropped. "remote" serves CoTracker by default.
-track_buffering_providers = ("cotracker", "remote")
+# queued while they compute instead of dropped. "remote" serves CoTracker by default; the
+# hybrid providers wrap CoTracker and their KLT bridge needs consecutive frames too.
+track_buffering_providers = ("cotracker", "remote", "hybrid", "hybrid_remote")
+# --tracker-provider hybrid: the windowed anchor and the per-frame bridge between its flushes.
+tracker_hybrid_anchor = "cotracker"
+tracker_hybrid_bridge = "klt"
+# How bridged frames move the anchor's points: "similarity" = one RANSAC 2D similarity over the
+# bridge's tracks (rigid, robust to KLT sliding on weak texture); "points" = raw bridge points.
+tracker_hybrid_motion = "similarity"
+tracker_hybrid_ransac_px = 2.0
 # Pyramidal Lucas-Kanade provider (--tracker-provider klt, base opencv). A point is visible
 # only if tracking it forward and back again returns within klt_fb_max_px of where it started.
 track_klt_win = 21
@@ -281,6 +289,12 @@ track_health_min = 0.12
 track_reseed_patience = 2
 # ... and never more often than this many tracked frames.
 track_reseed_cooldown = 5
+# Re-seed reasons skipped for trackers that keep memory through occlusion (CoTracker,
+# remote CoTracker): "lost"/"low_confidence" are the occlusion itself and "reacquire" is the
+# red/black re-seed at a *predicted* pose. Resetting there wipes the window that re-finds the
+# object on reappearance (docs/plans/3d_tracking.md §13.14). Verified repairs (jumped,
+# disagreement, pose_correction, reacquire_search/roma/fk) still apply. () = old behaviour.
+track_memory_skip_reseed_reasons = ("lost", "low_confidence", "reacquire")
 # Per-camera world points further apart than this (metres) are a "disagreement".
 track_disagree_m = 0.08
 # Fused world point may not jump more than this (metres) between consecutive tracked

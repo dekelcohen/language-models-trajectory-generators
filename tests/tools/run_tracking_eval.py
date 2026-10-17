@@ -40,7 +40,8 @@ def build_arg_parser():
 def main():
     args = build_arg_parser().parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    if "remote" in args.provider:
+    from providers.trackers.factory import uses_gpu_server
+    if any(uses_gpu_server(p) for p in args.provider):
         from gpu_server import launcher
         launcher.configure(args.tracking_server)
         launcher.prewarm()            # the model loads while the scene boots

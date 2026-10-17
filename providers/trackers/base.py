@@ -49,6 +49,11 @@ class PointTracker(ABC):
     """Tracks a set of 2D points across frames for one camera."""
 
     name = "abstract"
+    # True for trackers that keep tracking an occluded point internally and re-find it on
+    # reappearance (CoTracker's window memory). A re-seed (reset + init) would wipe exactly
+    # that memory, so the session skips occlusion-driven re-seeds for them
+    # (config.track_memory_skip_reseed_reasons).
+    keeps_memory_through_occlusion = False
 
     def __init__(self, **kwargs):
         self.options = dict(kwargs)
