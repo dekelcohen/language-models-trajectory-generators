@@ -64,13 +64,21 @@ for %%P in ("%PYTHONPATH:;=" "%") do (
 REM --- Activate conda environment ---
 call conda activate vlm_traj
 
-REM --- Optional git pull ---
+REM --- Optional git pull: ask only if the upstream branch has new commits ---
 echo.
-set /p gitchoice=Do you want to run git pull? (y/n): 
-
-if /i "%gitchoice%"=="y" (
-    git pull
+set gitbehind=0
+set gitchoice=
+git fetch --quiet 2>nul
+for /f %%N in ('git rev-list --count "HEAD..@{u}" 2^>nul') do set gitbehind=%%N
+if "%gitbehind%"=="0" (
+    echo No git pull needed - up to date with upstream ^(or no upstream^).
+    goto after_pull
 )
+echo %gitbehind% new upstream commit^(s^):
+git --no-pager log --oneline -n 10 "HEAD..@{u}"
+set /p gitchoice=Do you want to run git pull? (y/n): 
+if /i "%gitchoice%"=="y" git pull
+:after_pull
 
 echo.
 echo Git status:
