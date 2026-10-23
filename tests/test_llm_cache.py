@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Unit tests for the LLM response cache (providers/llms/llm_cache.py) and the
+Unit tests for the LLM response cache (llm_providers/llm_cache.py) and the
 caching wrapper (models.call_llm_cached).
 
 No real LLM or simulator is used:
@@ -22,7 +22,7 @@ import unittest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import models
-from providers.llms.llm_cache import LLMCache
+from llm_providers.llm_cache import LLMCache
 
 
 class FakeConn:

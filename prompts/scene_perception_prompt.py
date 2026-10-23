@@ -23,7 +23,7 @@ Answer the following, concisely:
 # Appended to SCENE_PERCEPTION_PROMPT only when --affordance-points is enabled (default).
 # COORDINATES_FORMAT_PLACEHOLDER is replaced at runtime by one of
 # config.affordance_coords_format_by_key, selected via the perception VLM's
-# ModelInfo.pointing_coords_format (see providers.llms.model_registry).
+# ModelInfo.pointing_coords_format (see llm_providers.model_registry).
 AFFORDANCE_POINTING_SECTION = """
 After the free-text answer above, output a separate block, delimited exactly as:
 AFFORDANCE_POINTS:

@@ -231,7 +231,7 @@ def main():
 
     cache = None
     if not args.no_llm_cache:
-        from providers.llms.llm_cache import LLMCache
+        from llm_providers.llm_cache import LLMCache
         cache = LLMCache(cache_dir=config.llm_cache_dir,
                          float_tolerance=config.llm_cache_float_tolerance,
                          logger=models.logger)

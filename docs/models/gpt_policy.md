@@ -441,7 +441,7 @@ VLM from fresh observations. No automatic success labelling.
 ## 14. Reusable takeaways for this repo
 
 - **Never send raw video to the policy model.** Digest to text plus a few labelled keyframes. Our
-  `providers/llms/message_media.py` can already carry both, but the digest is what keeps it cheap.
+  `llm_providers/message_media.py` can already carry both, but the digest is what keeps it cheap.
 - **Two-pass select then review** is the cheap way to get a globally coherent story out of a long
   video without a long-context model.
 - **Force a strict JSON schema and validate host side.** Bounds, duplicates, empty reasons and

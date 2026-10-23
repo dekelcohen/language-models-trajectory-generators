@@ -66,6 +66,12 @@ mkdir -p images/trajectory
 
 The XMem steps (`mkdir XMem/saves` + downloading `XMem.pth`) are **optional** — see [XMem (Optional)](#xmem-optional).
 
+**LLM providers live in a separate repo.** The OpenRouter / Bedrock / Azure / Gemini / Copilot CLI clients, the message builder and the LLM cache are in [`llm_providers`](https://github.com/dekelcohen/llm_providers), checked out one level above the `Robotics` folder (e.g. `D:\NLP\llm_providers`). Code imports them as `from llm_providers.openrouter import call_openrouter`. `setup_env\setup_everytime.bat` adds it to `PYTHONPATH` and prints a red `ERROR` for any `PYTHONPATH` repo folder that is missing. Without the `.bat` file, use `pip install -e <path>\llm_providers` or add it to `PYTHONPATH` yourself.
+
+```
+git clone https://github.com/dekelcohen/llm_providers.git   # next to the Robotics folder
+```
+
 Before running, set the API keys required by the providers you select on the command line — see [API Keys and Environment Variables](#api-keys-and-environment-variables).
 
 ### Step-By-Step Installation Guide
@@ -259,7 +265,7 @@ The system talks to several third-party APIs. **Which keys you need depends enti
 
 Using `--seg-provider langsam` runs locally and needs no key.
 
-**GitHub Copilot CLI (no API key).** Any model prefixed with `copilot-` — e.g. `-lm copilot-claude-opus-5`, `--review-provider vlm:copilot-gpt-5.4` — is served by the locally installed [`copilot` CLI](https://docs.github.com/copilot/how-tos/copilot-cli) using your existing `copilot` login, so no environment variable is needed (set `COPILOT_CLI_PATH` only if `copilot` is not on `PATH`). The suffix is passed straight to `copilot --model`, and `--reasoning-effort` maps to `--effort`; `--max-tokens` has no CLI equivalent and is ignored. Because the CLI takes a single prompt rather than a messages array, the conversation is replayed into a `copilot` session (`--session-id` / `--resume`) and images are attached as files (`--attachment`); see `providers/llms/copilot_cli.py`. Video is not supported on this path, so reviewers fall back to key frames.
+**GitHub Copilot CLI (no API key).** Any model prefixed with `copilot-` — e.g. `-lm copilot-claude-opus-5`, `--review-provider vlm:copilot-gpt-5.4` — is served by the locally installed [`copilot` CLI](https://docs.github.com/copilot/how-tos/copilot-cli) using your existing `copilot` login, so no environment variable is needed (set `COPILOT_CLI_PATH` only if `copilot` is not on `PATH`). The suffix is passed straight to `copilot --model`, and `--reasoning-effort` maps to `--effort`; `--max-tokens` has no CLI equivalent and is ignored. Because the CLI takes a single prompt rather than a messages array, the conversation is replayed into a `copilot` session (`--session-id` / `--resume`) and images are attached as files (`--attachment`); see `llm_providers/copilot_cli.py`. Video is not supported on this path, so reviewers fall back to key frames.
 
 Keys are read from the process environment; `main.py` calls `load_dotenv()` on startup, so the simplest option is a local `.env` file in the project root:
 ```

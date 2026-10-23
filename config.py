@@ -563,7 +563,7 @@ scene_analysis_image_path = images_folder + "/scene_analysis_head_{step}.png"
 
 # Affordance-pointing coordinate format text injected into SCENE_PERCEPTION_PROMPT
 # (replaces COORDINATES_FORMAT_PLACEHOLDER). Selected by the perception VLM's
-# ModelInfo.pointing_coords_format (see providers.llms.model_registry).
+# ModelInfo.pointing_coords_format (see llm_providers.model_registry).
 affordance_coords_format_by_key = {
     "yx_norm_1000": "The points are in [y, x] format normalized to 0-1000",
     "xy_pixels": "The points are in [x, y] pixel coordinates",

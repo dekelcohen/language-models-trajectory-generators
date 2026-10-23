@@ -60,8 +60,8 @@ The infrastructure is already here; what is missing is the digest step and one p
 | Self-history already works | `helpers/main_utils.py:141` `[INSERT PAST TRAJS]`, `prompts/learn_in_context_examples_from_past_attempts.py`, CLI `--learn-from-trajs` |
 | Video already reaches a VLM | review pipeline `api.py:808-838` (`[INSERT VIDEO LIST]`, `[INSERT FRAME PATHS]`, `[INSERT SCENE ANALYSIS]`), fed by `helpers/video_utils.py:build_review_clips` |
 | ffmpeg wrappers | `helpers/video_utils.py`: `ffmpeg_available`, `concat_videos`, `build_attempt_clip`, `update_full_video`, `build_review_clips` |
-| Multimodal message assembly | `providers/llms/message_media.py` (image and video parts) |
-| LLM response cache | `providers/llms/llm_cache.py` |
+| Multimodal message assembly | `llm_providers/message_media.py` (image and video parts) |
+| LLM response cache | `llm_providers/llm_cache.py` |
 | Relevant flags | `main.py`: `--lm-images/--no-lm-images` (54), `--llm-cache` (57), `--planner-perception-vlm` default `gemini-3.7-flash` (88), `--affordance-points` (89), `--prepend-prompt` (100), `--attempts` (102), `--skills`/`--skills-dir` (114-115) |
 | Placeholder hygiene is tested | `tests/test_skill_registry.py:256-286`, `tests/test_vis_grasp.py:241-255` assert no unfilled `[INSERT ...]` remains |
 

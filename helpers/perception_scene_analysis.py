@@ -21,7 +21,7 @@ from PIL import Image
 import config
 import models
 from config import OK, PROGRESS, WARNING, ENDC
-from providers.llms.model_registry import get_model_info
+from llm_providers.model_registry import get_model_info
 
 
 def _capture_fresh_head_image(ctx):

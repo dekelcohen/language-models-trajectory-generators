@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Unit tests for the Copilot CLI provider (providers/llms/copilot_cli.py).
+"""Unit tests for the Copilot CLI provider (llm_providers/copilot_cli.py).
 
 The `copilot` binary is never launched: `_run` and `_resolve_cli` are patched, so
 the tests assert on the argv/prompt the provider *would* have used. What matters
@@ -17,8 +17,8 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from providers.llms import copilot_cli
-from providers.llms.message_media import append_to_messages
+from llm_providers import copilot_cli
+from llm_providers.message_media import append_to_messages
 
 
 class CopilotCliTestBase(unittest.TestCase):

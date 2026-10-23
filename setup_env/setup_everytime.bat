@@ -49,8 +49,17 @@ echo Using ROBOTICS_HOME=%ROBOTICS_HOME%
 REM --- Navigate to project ---
 cd /d "%ROBOTICS_HOME%\VLM_Robotics\language-models-trajectory-generators"
 
-REM --- robotic_perception repo py path ---
-set PYTHONPATH=%ROBOTICS_HOME%\VLM_Robotics\robotic_perception;%ROBOTICS_HOME%\VLM_Robotics\language-models-trajectory-generators
+REM --- llm_providers repo lives one level above Robotics (e.g. D:\NLP\llm_providers) ---
+for %%I in ("%ROBOTICS_HOME%\..") do set NLP_HOME=%%~fI
+
+REM --- robotic_perception + llm_providers repos py path ---
+set PYTHONPATH=%ROBOTICS_HOME%\VLM_Robotics\robotic_perception;%ROBOTICS_HOME%\VLM_Robotics\language-models-trajectory-generators;%NLP_HOME%\llm_providers
+
+REM --- Red ERROR for every PYTHONPATH repo folder that is missing ---
+for /F %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
+for %%P in ("%PYTHONPATH:;=" "%") do (
+    if not exist "%%~P\" echo %ESC%[91mERROR: PYTHONPATH repo folder not found: %%~P%ESC%[0m
+)
 
 REM --- Activate conda environment ---
 call conda activate vlm_traj

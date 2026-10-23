@@ -186,7 +186,7 @@ Replay/learn paths run **before** the interactive loop and return early. In repl
 | `helpers/main_utils.py` | `get_exec_locals` (subtask tool injection), `execute_blocks_from_log`, `learn_from_past_trajs`. |
 | `helpers/perception_scene_analysis.py` | `run_scene_perception` (fresh head capture + perception VLM call + prompt assembly) and affordance pointing: `_capture_fresh_head_image`, `_parse_affordance_points_block`, `_process_affordance_points` (2D→3D + text splice). |
 | `helpers/video_utils.py` | Per-attempt review clip encoding + incremental `ffmpeg -c copy` growth of the per-camera full session video. |
-| `providers/llms/message_media.py` | Provider-agnostic multimodal message building: `encode_media`, `append_images`, `append_videos`, `append_to_messages` (canonical `image_url` / `video_url` parts each provider converts). |
+| `llm_providers/message_media.py` (llm_providers repo) | Provider-agnostic multimodal message building: `encode_media`, `append_images`, `append_videos`, `append_to_messages` (canonical `image_url` / `video_url` parts each provider converts). |
 | `segmentation_adapter.py` | Provider-agnostic 2D segmentation dispatch. |
 | `utils.py` | Point-cloud → bounding cube, 3D↔2D projection, intrinsics/extrinsics. |
 | `tracking/` | Rollout tracking (§13): `session.py` (orchestrator), `geometry.py` (project/deproject, occlusion test, fusion), `health.py` (per-camera health + re-seed policy), `monitor.py` (monitor contract), `monitors.py` (built-in invariants), `report.py` (JSONL + summary), `types.py`. |

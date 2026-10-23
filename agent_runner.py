@@ -479,7 +479,7 @@ def init_agent(args, logger):
     api = API(args, main_connection, logger, client, langsam_model, xmem_model, device)
     llm_cache = None
     if args.llm_cache_enabled:
-        from providers.llms.llm_cache import LLMCache
+        from llm_providers.llm_cache import LLMCache
         llm_cache = LLMCache(cache_dir=config.llm_cache_dir, float_tolerance=config.llm_cache_float_tolerance, logger=logger)
     api.llm_cache = llm_cache
     api.sim_state = sim_state

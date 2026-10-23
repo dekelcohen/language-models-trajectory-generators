@@ -4,7 +4,7 @@ import sys
 import torch
 import config
 import utils
-from providers.llms.model_registry import get_model_info
+from llm_providers.model_registry import get_model_info
 from PIL import Image
 from torchvision import transforms
 from torchvision.utils import draw_bounding_boxes, draw_segmentation_masks
@@ -174,26 +174,26 @@ CHATGPT_DEFAULT_OPTIONS = {
 def call_llm_provider(client, model, messages, max_tokens, reasoning_effort, conversation_key=None):
     """Dispatch to the correct provider and return the assistant response string"""
     if model.startswith("azure-"):
-        from providers.llms.azure_openai import call_llm
+        from llm_providers.azure_openai import call_llm
         deployment = model[len("azure-"):]
         new_output = call_llm(messages, azure_deployment_model=deployment, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
     elif model.startswith("or-"):
-        from providers.llms.openrouter import call_openrouter
+        from llm_providers.openrouter import call_openrouter
         openrouter_model = model[len("or-"):]
         new_output = call_openrouter(messages, model=openrouter_model, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
     elif model.startswith("copilot-"):
         # GitHub Copilot CLI: it takes no messages array - the conversation is replayed
-        # into a copilot session instead (see providers/llms/copilot_cli.py).
-        from providers.llms.copilot_cli import call_copilot
+        # into a copilot session instead (see llm_providers/copilot_cli.py).
+        from llm_providers.copilot_cli import call_copilot
         copilot_model = model[len("copilot-"):]
         new_output = call_copilot(messages, model=copilot_model, max_tokens=max_tokens,
                                   reasoning_effort=reasoning_effort, conversation_key=conversation_key)
     elif model.startswith("aws-"):
-        from providers.llms.aws_bedrock import call_llm as call_bedrock
+        from llm_providers.aws_bedrock import call_llm as call_bedrock
         bedrock_model_id = model[len("aws-"):]
         new_output = call_bedrock(messages, bedrock_model_id=bedrock_model_id, max_tokens=max_tokens, temperature=0, reasoning_effort=reasoning_effort)
     elif model.startswith("gemini-"):
-        from providers.llms.gemini import call_gemini
+        from llm_providers.gemini import call_gemini
         new_output = call_gemini(messages, model=model, max_tokens=max_tokens, temperature=0, reasoning_effort=reasoning_effort)
     else:
         completion = client.chat.completions.create(
@@ -238,7 +238,7 @@ def _call_llm_provider_wrapper(client, model, new_prompt, messages, role, file=N
     
     logger.info(f"{role}:\n{new_prompt}")    
     
-    from providers.llms.message_media import append_to_messages
+    from llm_providers.message_media import append_to_messages
     messages = append_to_messages(new_prompt, image_paths, messages, role, attach_videos=video_paths)
     # Media files in prompt order (append_to_messages appends images, then videos).
     media_paths = list(image_paths or []) + list(video_paths or [])
@@ -304,7 +304,7 @@ def model_supports_video(model):
     """True if `model` can take an inline video part in its request.
 
     Video support is transport-constrained on top of the model family's own
-    capability (see providers.llms.model_registry.ModelInfo.supports_video):
+    capability (see llm_providers.model_registry.ModelInfo.supports_video):
       - azure-* : NO  - Azure OpenAI chat completions accept images only.
       - aws-*   : NO  - Bedrock's Converse video blocks only exist for Amazon Nova,
                   which this repo does not use (Claude on Bedrock has no video modality).
