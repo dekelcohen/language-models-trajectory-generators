@@ -151,6 +151,28 @@ class PoseBuilders(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pose_euler(bad)
 
+    def test_pour_pose_tilts_about_the_closing_axis_and_dips_the_pour_side(self):
+        tilt = math.radians(45)
+        for rotation in (0.0, 0.7, -1.2):
+            for pour_yaw in (rotation + math.pi / 2, rotation - math.pi / 2):
+                pose = common_utils.pour_pose(0.4, 0.5, 1.8, rotation, tilt, pour_yaw)
+                self.assertEqual(len(pose), 6)
+                np.testing.assert_allclose(pose[:3], [0.4, 0.5, 1.8])
+                upright = common_utils.top_down_euler(rotation)
+                # The pinch axis is unchanged: the held object cannot roll between the fingers.
+                np.testing.assert_allclose(_closing_axis(pose[3:]), _closing_axis(upright), atol=1e-9)
+                # Rigidly attached points on the pour side go down by sin(tilt).
+                pour_dir = np.array([math.cos(pour_yaw), math.sin(pour_yaw), 0.0])
+                tilted = _matrix(pose[3:]) @ _matrix(upright).T @ pour_dir
+                self.assertAlmostEqual(tilted[2], -math.sin(tilt), places=9)
+        np.testing.assert_allclose(
+            _matrix(common_utils.pour_pose(0, 0, 1, 0.3, 0.0, 0.3 + math.pi / 2)[3:]),
+            _matrix(common_utils.top_down_euler(0.3)), atol=1e-9)
+
+    def test_pour_pose_rejects_tilting_about_the_pinch_axis_normal(self):
+        with self.assertRaisesRegex(ValueError, "closing direction"):
+            common_utils.pour_pose(0.4, 0.5, 1.8, 0.0, 0.8, 0.0)
+
 
 class InterpreterNamespace(unittest.TestCase):
     """What the generated code can actually call.
@@ -193,7 +215,7 @@ class InterpreterNamespace(unittest.TestCase):
         cache and perturbs behaviour on tasks this feature was never meant to touch.
         """
         from prompts.main_prompt import MAIN_PROMPT
-        for leaked in ("side_grasp_pose", "side approach", "horizontal (side)"):
+        for leaked in ("side_grasp_pose", "side approach", "horizontal (side)", "pour_pose"):
             self.assertNotIn(leaked, MAIN_PROMPT)
 
 

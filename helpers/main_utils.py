@@ -32,6 +32,8 @@ def get_exec_locals(api, logger):
         # prompt's own worked examples bind the name `grasp_pose` to a list. Only the side
         # approach gets a builder, and only a loaded SKILL tells the model it exists.
         "side_grasp_pose": common_utils.side_grasp_pose,
+        # Tilt-to-pour pose for a held object; documented only by the pour skill.
+        "pour_pose": common_utils.pour_pose,
         "api": api,
         "math": math,
         "np": np,

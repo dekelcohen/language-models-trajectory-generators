@@ -578,6 +578,10 @@ class API:
             self.logger.info(FAIL + f"track_objects: no response from the environment: {e}" + ENDC)
             self.tracking_active = False
             return
+        if self.tracking_active:
+            # seed points per target: carried by the tracked pose to rebuild the object's
+            # points for the reviewer's tracking evidence (see _tracking_review_evidence)
+            self.tracking_targets = {t["name"]: t["world_points"] for t in spec_targets}
         for target in spec_targets:
             print(f"Tracking '{target['name']}' with {len(target['world_points'])} points.")
 
@@ -738,6 +742,119 @@ class API:
         self.main_connection.send([CLOSE_GRIPPER])
 
 
+    def _tracking_review_evidence(self, start_idx):
+        """Measured pull facts for this attempt -> ``(facts, prompt_text)`` or ``(None, None)``.
+
+        Only for articulated pull/open tasks with an active tracking session (the agent
+        called ``track_objects``). Nothing about the hinge is assumed: the opening direction
+        comes from the handle's own tracked motion, or from the door front's measured normal
+        when the door did not move (see ``tracking.review_evidence.summarize_pull``).
+        """
+        from tracking.review_evidence import ARTICULATED_TASK_RE, evidence_from_tracking_frames
+        if not getattr(config, "review_tracking_evidence", True):
+            return None, None
+        targets = getattr(self, "tracking_targets", None) or {}
+        if not getattr(self, "tracking_active", False) or not targets:
+            return None, None
+        name = next((n for n in targets if ARTICULATED_TASK_RE.search(n)), None)
+        if name is None and ARTICULATED_TASK_RE.search(str(self.task.command or "")):
+            name = next(iter(targets))
+        if name is None:
+            self.logger.info(PROGRESS + f"Review: tracking evidence skipped (not an articulated "
+                             f"pull task; targets={list(targets)})" + ENDC)
+            return None, None
+        try:
+            report = self.get_tracking_report(include_frames=True) or {}
+            out = evidence_from_tracking_frames(
+                report.get("frames") or [], targets[name], name, start_step=start_idx,
+                logger=lambda m: self.logger.info(PROGRESS + m + ENDC))
+        except Exception as e:                  # evidence is optional; never break the review
+            self.logger.info(WARNING + f"Review: tracking evidence failed: {type(e).__name__}: {e}" + ENDC)
+            return None, None
+        if out is None:
+            return None, None
+        facts, text = out
+        self.logger.info(PROGRESS + f"Review: tracking evidence for '{name}': flags={facts['flags']} "
+                         f"angle={facts['angle_deg']} rec={facts.get('recommended_pull_dir')}" + ENDC)
+        return facts, text
+
+    @staticmethod
+    def _carried_since_close(state):
+        """How far the hand - and so the held object - moved since the gripper closed, or None.
+
+        Joint encoders measure this exactly; the VLM, judging a 256 px clip, has called a
+        kettle lifted 15 cm "still on the stovetop, the arm never moved".
+        """
+        at_close, now = state.get("eef_pos_at_close"), state.get("eef_pos")
+        if not at_close or not now:
+            return None
+        dz = (float(now[2]) - float(at_close[2])) * 100
+        dxy = math.hypot(float(now[0]) - float(at_close[0]), float(now[1]) - float(at_close[1])) * 100
+        if abs(dz) < 2 and dxy < 2:
+            return ("the hand has NOT moved since the fingers closed on it (measured by the arm's joint "
+                    "encoders): the held object is still where it was grasped.")
+        direction = "UP" if dz > 0 else "DOWN"
+        return (f"the fingers closed on it with the hand at z={float(at_close[2]):.3f} m; the hand is now at "
+                f"z={float(now[2]):.3f} m (measured by the arm's joint encoders), so the held object has been "
+                f"carried {direction} by ~{abs(dz):.0f} cm and {dxy:.0f} cm horizontally since it was grasped. "
+                "Judge from the clips whether that motion achieved the task, not whether the arm moved.")
+
+    @staticmethod
+    def _tilt_while_held(state):
+        """Sentence on the largest measured hand tilt while holding (a pour), or None if it stayed ~upright."""
+        tilt = state.get("max_tilt_since_close")
+        if not tilt or tilt.get("deg") is None or float(tilt["deg"]) < 15:
+            return None
+        dip = tilt.get("dip_dir")
+        side = ""
+        if dip:
+            dx, dy = float(dip[0]), float(dip[1])
+            axis = (("+x" if dx > 0 else "-x") if abs(dx) >= abs(dy) else ("+y" if dy > 0 else "-y"))
+            side = (f", lowering its world {axis} side (direction [{dx:+.2f}, {dy:+.2f}]): the held object was "
+                    f"tipped toward {axis}")
+        return (f"while holding it, the hand was tilted up to ~{float(tilt['deg']):.0f} deg from upright "
+                f"(measured by the arm's joint encoders){side}. Use the clips to judge whether the tipped "
+                "object's opening/spout was over the target.")
+
+    def _gripper_review_evidence(self):
+        """End-of-attempt gripper proprioception for the reviewer, or None.
+
+        A real gripper reports its finger opening; "closed but stalled short of fully
+        closed" means an object is between the fingers. Small low-res clips mislead the
+        VLM both ways (a lifted kettle judged "still on the stove", or an empty gripper
+        judged holding), so this measured fact is stated explicitly.
+        """
+        try:
+            self.main_connection.send([config.GET_ROBOT_STATE, {}])
+            state = self.main_connection.recv() or {}
+        except Exception as e:
+            self.logger.info(WARNING + f"Review: gripper state query failed: {e}" + ENDC)
+            return None
+        width = state.get("gripper_width")
+        if width is None or state.get("gripper_open") is None:
+            return None
+        width_cm = float(width) * 100
+        if state.get("gripper_open"):
+            verdict = f"commanded OPEN, finger opening {width_cm:.1f} cm: the gripper is not holding anything."
+        elif state.get("gripper_holding"):
+            verdict = (f"commanded CLOSED, but the fingers stalled at {width_cm:.1f} cm (fully closed is ~0.1 cm): "
+                       "they are blocked by an object, so the gripper IS HOLDING something between its fingers "
+                       "right now. Use the clips to judge WHICH object it is and where it is - do not conclude "
+                       "that the gripper is empty or that the grasp missed.")
+            carried = self._carried_since_close(state)
+            if carried:
+                verdict += "\n  - " + carried
+            tilted = self._tilt_while_held(state)
+            if tilted:
+                verdict += "\n  - " + tilted
+        else:
+            verdict = (f"commanded CLOSED and the fingers are fully closed ({width_cm:.1f} cm): NOTHING is held "
+                       "between them (the grasp missed, or the object slipped out).")
+        self.logger.info(PROGRESS + f"Review: gripper evidence -> {verdict}" + ENDC)
+        return ("GRIPPER PROPRIOCEPTION (measured by the gripper's width sensor at the END of this attempt - a "
+                "direct physical measurement, more reliable than small details in the low-resolution clips):\n"
+                "  - " + verdict)
+
     def run_vlm_review(self):
         """Ask a VLM to judge whether the attempt achieved the task goal.
 
@@ -836,6 +953,13 @@ class API:
         else:
             scene_section = ""
 
+        tracking_facts, tracking_text = self._tracking_review_evidence(start_idx)
+        if tracking_text:
+            media_section = media_section + "\n\n" + tracking_text + "\n"
+        gripper_text = self._gripper_review_evidence()
+        if gripper_text:
+            media_section = media_section + "\n\n" + gripper_text + "\n"
+
         # Build prompt with placeholders
         prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.task.command)) \
                               .replace("[INSERT 3D COORDINATES PROMPT SECTION]", self.coords_section) \
@@ -874,6 +998,16 @@ class API:
         success = bool(resp.get("success") is True)
         reason = resp.get("reasoning", "")
         improvement_steps = resp.get("improvement_steps", "")
+        if not success and tracking_facts:
+            from tracking.review_evidence import recommendation_text
+            rec = recommendation_text(tracking_facts)
+            if rec:
+                rec = "Tracking-based fix: " + rec
+                if isinstance(improvement_steps, list):
+                    improvement_steps = improvement_steps + [rec]
+                else:
+                    improvement_steps = (str(improvement_steps) + "\n" + rec).strip()
+                self.logger.info(PROGRESS + f"Review: added to improvement steps -> {rec}" + ENDC)
         self.task.review_reason = reason
         self.task.review_improvement_steps = improvement_steps
         self.logger.info((OK if success else FAIL) + f"Review: success={success} | task=\"{self.task.title()}\". See details in above json" + ENDC)

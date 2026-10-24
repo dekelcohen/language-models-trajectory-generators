@@ -560,7 +560,7 @@ def main():
                 elif cmd == config.GET_ROBOT_STATE:
                     try:
                         eef = env.get_endeff_pos().copy()
-                        await websocket.send(json.dumps({"eef_pos": eef.tolist()}))
+                        await websocket.send(json.dumps({"eef_pos": eef.tolist(), "gripper_open": bool(gripper_open)}))
                     except Exception:
                         await websocket.send(json.dumps({}))
                 elif cmd == config.GET_CAMERA_INFO:

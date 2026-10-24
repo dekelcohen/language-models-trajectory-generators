@@ -43,6 +43,7 @@ from prompts.main_prompt import (
     CODE_BLOCK_CONVENTIONS,
     INITIAL_PLANNING_1,
     INITIAL_PLANNING_2,
+    gripper_state_text,
 )
 from prompts.error_correction_prompt import ERROR_CORRECTION_PROMPT
 from prompts.print_output_prompt import PRINT_OUTPUT_PROMPT, NO_TOOL_CALL_PROMPT, BLOCKS_NOT_EXECUTED_PROMPT
@@ -99,6 +100,79 @@ def prepend_to_initial_command(command, args, logger):
 
 
 # --- LLM context helper -------------------------------------------------
+def query_robot_state(main_connection, logger):
+    """GET_ROBOT_STATE round-trip -> {"eef_pos": [x,y,z] | None, "gripper_open": bool | None}.
+
+    `gripper_open` is None when the backend does not report it.
+    """
+    state = {"eef_pos": None, "gripper_open": None, "gripper_width": None, "gripper_holding": None,
+             "base_pos": None}
+    if main_connection is None:
+        return state
+    try:
+        main_connection.send([config.GET_ROBOT_STATE, {}])
+        resp = main_connection.recv()
+        state["eef_pos"] = list(map(float, resp["eef_pos"]))
+        if resp.get("gripper_open") is not None:
+            state["gripper_open"] = bool(resp["gripper_open"])
+        if resp.get("gripper_width") is not None:
+            state["gripper_width"] = float(resp["gripper_width"])
+        if resp.get("gripper_holding") is not None:
+            state["gripper_holding"] = bool(resp["gripper_holding"])
+        if resp.get("base_pos") is not None:
+            state["base_pos"] = [round(float(v), 3) for v in resp["base_pos"]]
+    except Exception as e:
+        logger.info(PROGRESS + f"Warning: GET_ROBOT_STATE for LLM context failed: {e}" + ENDC)
+    return state
+
+
+def robot_state_sentence(state):
+    """Measured end-of-subtask gripper state, phrased for the planner, or None if unknown.
+
+    The planner otherwise only sees the reviewer's verdict; when that verdict is a false
+    negative ("the kettle was never lifted") it re-dispatched a grasp, and the subtask agent
+    opened the gripper and dropped the kettle it was holding.
+    """
+    if not state or state.get("gripper_open") is None:
+        return None
+    if state["gripper_open"]:
+        return "gripper OPEN (measured): nothing is held."
+    if state.get("gripper_holding"):
+        width = state.get("gripper_width")
+        width_text = f" (fingers stalled at {width * 100:.1f} cm)" if width is not None else ""
+        return (f"gripper CLOSED and HOLDING an object (measured{width_text}): whatever was grasped is still "
+                "in the hand, even if the review judged the subtask failed. Do not dispatch a new grasp of "
+                "that object - continue from holding it, and tell the subtask agent it is already held.")
+    if state.get("gripper_holding") is False:
+        return "gripper CLOSED on nothing (measured fingers fully closed): no object is held."
+    return None
+
+
+def log_world_state(main_connection, logger, tag):
+    """Log EE pose, gripper state and every tracked object position (sim_state '*_pos'
+    entries, e.g. the Franka Kitchen kettle) - used at subtask boundaries, where a held
+    object must not move. Returns the query_robot_state() dict."""
+    if main_connection is None:
+        return {"eef_pos": None, "gripper_open": None, "gripper_width": None, "gripper_holding": None,
+                "base_pos": None}
+    robot_state = query_robot_state(main_connection, logger)
+    env_state = models.fetch_env_state(main_connection)
+    sim_state = env_state.get("sim_state") if isinstance(env_state, dict) else None
+    poses = {}
+    if isinstance(sim_state, dict):
+        for key, value in sim_state.items():
+            if key.endswith("_pos") and isinstance(value, (list, tuple)) and len(value) == 3:
+                try:
+                    poses[key] = [round(float(v), 3) for v in value]
+                except (TypeError, ValueError):
+                    pass
+    eef = [round(v, 3) for v in robot_state["eef_pos"]] if robot_state["eef_pos"] else None
+    logger.info(PROGRESS + f"[world-state] {tag}: eef_pos={eef} gripper_open={robot_state['gripper_open']} "
+                f"gripper_width={robot_state['gripper_width']} holding={robot_state['gripper_holding']} "
+                f"objects={poses}" + ENDC)
+    return robot_state
+
+
 def build_llm_context_images_and_pose(main_connection, trajectory_step, logger):
     """Collect current trajectory frames and EE pose.
 
@@ -115,15 +189,7 @@ def build_llm_context_images_and_pose(main_connection, trajectory_step, logger):
     _maybe_add(config.rgb_image_trajectory_path.format(step=trajectory_step))
     _maybe_add(config.wrist_rgb_image_trajectory_path.format(step=trajectory_step))
 
-    eef_pos = None
-    if main_connection is not None:
-        try:
-            main_connection.send([config.GET_ROBOT_STATE, {}])
-            resp = main_connection.recv()
-            eef_pos = list(map(float, resp["eef_pos"]))
-        except Exception as e:
-            logger.info(PROGRESS + f"Warning: GET_ROBOT_STATE for LLM context failed: {e}" + ENDC)
-
+    eef_pos = query_robot_state(main_connection, logger)["eef_pos"]
     return image_paths, eef_pos
 
 
@@ -527,9 +593,17 @@ def teardown_agent(ctx):
 
 def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section, in_context_example,
                        scene_analysis="", skills_index="", loaded_skills="", detect_object_available=True,
-                       tracking=False, vis_grasp=False):
+                       tracking=False, vis_grasp=False, gripper_open=None, gripper_holding=None,
+                       gripper_width=None, base_pos=None):
     """Fill all placeholders of the subtask MAIN_PROMPT.
 
+    `gripper_open` is the live gripper state (GET_ROBOT_STATE). Only an explicit False
+    renders the CLOSED text; None (unknown) or True keeps the historical "open" wording,
+    so the prompt - and its LLM-cache key - is unchanged whenever the gripper is open.
+    `gripper_holding` / `gripper_width` (measured finger opening, m) refine a closed
+    gripper into HOLDING an object vs EMPTY (see prompts.main_prompt.gripper_state_text).
+    `base_pos` (the arm's mount point, when the backend reports it) follows the EE position
+    so skills can bound reach relative to it.
     `skills_index` is the level-1 catalog of subtask-scoped skills (empty when skills are
     disabled). `loaded_skills` re-injects skill bodies already loaded for this task, so a
     retry attempt - which starts a brand-new conversation - keeps the know-how it earned.
@@ -552,7 +626,9 @@ def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section
         .replace("[INSERT INITIAL PLANNING 1]", INITIAL_PLANNING_1)
         .replace("[INSERT INITIAL PLANNING 2]", INITIAL_PLANNING_2)
         .replace("[INSERT SCENE ANALYSIS]", scene_analysis)
-        .replace("[INSERT EE POSITION]", str(ee_pos))
+        .replace("[INSERT EE POSITION]", str(ee_pos) + (
+            f" (the robot arm's base is mounted at {base_pos})" if base_pos else ""))
+        .replace("[INSERT GRIPPER STATE]", gripper_state_text(gripper_open, gripper_holding, gripper_width))
         .replace("[INSERT TASK]", task)
         .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
         .replace("[INSERT IN CONTEXT EXAMPLE]", in_context_example)
@@ -570,7 +646,8 @@ class TaskResult:
     """Outcome of a single execute_task run."""
 
     def __init__(self, success, attempts, summaries, messages=None,
-                 reviewer_reason="", improvement_steps="", accepted_without_review=False):
+                 reviewer_reason="", improvement_steps="", accepted_without_review=False,
+                 robot_state_after=None):
         self.success = success
         self.attempts = attempts
         self.summaries = summaries
@@ -579,10 +656,12 @@ class TaskResult:
         self.improvement_steps = improvement_steps
         # True when the loop ended by accepting the final attempt without a passing VLM review.
         self.accepted_without_review = accepted_without_review
+        # Measured gripper/EE state when the subtask ended (sentence for the planner), or None.
+        self.robot_state_after = robot_state_after
 
     def as_summary_dict(self):
         """Compact, LLM-friendly view (excludes the full message transcript)."""
-        return {
+        summary = {
             "success": self.success,
             "attempts": self.attempts,
             "accepted_without_review": self.accepted_without_review,
@@ -590,6 +669,9 @@ class TaskResult:
             "improvement_steps": self.improvement_steps,
             "summaries": self.summaries,
         }
+        if self.robot_state_after:
+            summary["robot_state_after"] = self.robot_state_after
+        return summary
 
     def __repr__(self):
         return f"TaskResult(success={self.success}, attempts={self.attempts}, accepted_without_review={self.accepted_without_review})"
@@ -758,7 +840,8 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
     # cluttered with the markers of the attempt that just failed.
     api.clear_grasp_markers()
 
-    _, eef_pos = build_llm_context_images_and_pose(ctx.main_connection, api.trajectory_step, logger)
+    robot_state = query_robot_state(ctx.main_connection, logger)
+    eef_pos = robot_state["eef_pos"]
     skills = task.skills
     retry_prompt = _build_main_prompt(
         NO_DETECT_OBJECT_TOOL, NO_DETECT_OBJECT_TOOL_INITIAL_PLANNING,
@@ -769,6 +852,10 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
         detect_object_available=False,
         tracking=args.tracking,
         vis_grasp=args.vis_grasp,
+        gripper_open=robot_state["gripper_open"],
+        gripper_holding=robot_state["gripper_holding"],
+        gripper_width=robot_state["gripper_width"],
+        base_pos=robot_state["base_pos"],
     )
     try:
         logger.info(PROGRESS + f"Env state: {json.dumps(ctx.sim_state)}" + ENDC)
@@ -897,11 +984,13 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     if args.reset_eef:
         logger.info(PROGRESS + "--reset-eef: re-homing arm (RESET_EEF) before subtask..." + ENDC)
         api.reset_eef()
-        
-    _, _eef = build_llm_context_images_and_pose(main_connection, api.trajectory_step, logger)
+
+    robot_state = log_world_state(main_connection, logger, "subtask start")
+    _eef = robot_state["eef_pos"]
     if _eef is not None:
         ee_pos_for_prompt = _eef
-        logger.info(PROGRESS + f"Updated EE start pose for task: {ee_pos_for_prompt}" + ENDC)
+        logger.info(PROGRESS + f"Updated EE start pose for task: {ee_pos_for_prompt} "
+                    f"(gripper_open={robot_state['gripper_open']})" + ENDC)
     new_prompt = _build_main_prompt(
         DETECT_OBJECT_TOOL, DETECT_OBJECT_TOOL_INITIAL_PLANNING,
         ee_pos_for_prompt, first_command, coords_section, ic,
@@ -909,6 +998,10 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
         skills_index=task.skills.index_text(),
         tracking=args.tracking,
         vis_grasp=args.vis_grasp,
+        gripper_open=robot_state["gripper_open"],
+        gripper_holding=robot_state["gripper_holding"],
+        gripper_width=robot_state["gripper_width"],
+        base_pos=robot_state["base_pos"],
     )
 
     try:
@@ -930,6 +1023,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     messages = run_task_agent_loop(ctx, task, prompt, scene_analysis, attempt_summaries)
 
     logger.info(OK + "FINISHED TASK!" + ENDC)
+    end_state = log_world_state(main_connection, logger, "subtask end")
     api.clear_grasp_markers()
     return TaskResult(
         success=bool(task.review_succeeded),
@@ -939,6 +1033,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
         reviewer_reason=task.review_reason,
         improvement_steps=task.review_improvement_steps,
         accepted_without_review=bool(task.accepted_without_review),
+        robot_state_after=robot_state_sentence(end_state),
     )
 
 

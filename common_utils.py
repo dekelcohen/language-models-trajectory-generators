@@ -7,7 +7,7 @@ import numpy as np
 
 import config
 from config import images_folder, trajectory_folder, overlay_folder, video_folder
-from sim_adapter.transforms import ee_euler_from_approach, matrix_from_euler
+from sim_adapter.transforms import ee_euler_from_approach, euler_from_matrix, matrix_from_euler
 
 class Trajectory:
     """An end-effector trajectory, guaranteed to be transport-safe by construction.
@@ -134,6 +134,48 @@ def top_down_euler(rotation):
     """The orientation a length-4 pose stands for, as ``robot.move`` consumes it."""
     start = config.ee_start_orientation_e
     return [float(start[0]), float(start[1]), float(start[2]) + float(rotation)]
+
+
+# Tilting about the fingers' closing axis lets gravity act along the pinch instead of twisting
+# the object between the pads: with the original round kettle handle, any other horizontal axis
+# rolled it out of the fingers (measured in the Franka Kitchen kettle pour).
+POUR_MAX_AXIS_MISALIGNMENT = math.radians(30)
+
+
+def pour_pose(x, y, z, rotation, tilt, pour_yaw):
+    """Top-down grasp pose tilted to pour: the held object's ``pour_yaw`` side dips by ``tilt``.
+
+    Args:
+        x, y, z: end-effector position, metres (keep the current one to tilt in place).
+        rotation: the top-down rotation value the object was grasped with (unchanged).
+        tilt: pour angle in radians (0 = upright; ~0.8-1.2 pours).
+        pour_yaw: world azimuth (radians, ``atan2(dy, dx)``) of the horizontal direction
+            the spout / opening points to - that side goes down.
+
+    The tilt is about the horizontal axis perpendicular to ``pour_yaw``; it must be close to
+    the gripper's closing direction (``rotation``), i.e. the spout must point along the
+    fingers - otherwise the object rotates out of the grasp and ``ValueError`` explains how
+    to re-grasp. Returns a length-6 ``[x, y, z, roll, pitch, yaw]`` pose.
+    """
+    rotation, tilt, pour_yaw = float(rotation), float(tilt), float(pour_yaw)
+    d = np.array([math.cos(pour_yaw), math.sin(pour_yaw), 0.0])
+    axis = np.cross([0.0, 0.0, 1.0], d)  # right-hand rotation about it tips +d downward
+    closing = np.array([math.cos(rotation), math.sin(rotation), 0.0])
+    misalignment = math.acos(min(1.0, abs(float(np.dot(axis, closing)))))
+    if misalignment > POUR_MAX_AXIS_MISALIGNMENT:
+        raise ValueError(
+            f"pour_pose: pouring toward yaw {pour_yaw:.2f} rad tilts about an axis "
+            f"{math.degrees(misalignment):.0f} deg away from the gripper's closing direction "
+            f"(rotation {rotation:.2f} rad). The object would rotate out of the fingers. Pour "
+            f"toward yaw {rotation + math.pi / 2:.2f} or {rotation - math.pi / 2:.2f} rad "
+            "(perpendicular to the closing direction), or re-grasp so that the spout points "
+            "along the fingers.")
+    c, s = math.cos(tilt), math.sin(tilt)
+    k = np.array([[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]])
+    r_tilt = np.eye(3) + s * k + (1.0 - c) * (k @ k)
+    r_base = np.array(matrix_from_euler(top_down_euler(rotation))).reshape(3, 3)
+    euler = euler_from_matrix((r_tilt @ r_base).flatten().tolist())
+    return [float(x), float(y), float(z), float(euler[0]), float(euler[1]), float(euler[2])]
 
 
 def pose_euler(pose):

@@ -38,10 +38,14 @@
                 <color rgba=".9 .9 .9 1"/>
             </material>
         </visual>
+        <!-- Grip: flat-sided (was a round capsule r=0.032). Parallel-jaw fingers close on two flat
+             faces, so each finger gets a multi-point contact patch whose lateral friction resists
+             the kettle rotating about the pinch axis (tilting / pouring). A round bar gives a line
+             contact that only torsional friction resists. Same length and similar size. -->
         <collision>
-            <origin xyz="0 0 0.259" rpy="0 1.57 0"/>
+            <origin xyz="0 0 0.259" rpy="0 0 0"/>
             <geometry>
-                <capsule radius="0.032" length="0.2"/>
+                <box size="0.2 0.04 0.05"/>
             </geometry>
         </collision>
         <visual>
@@ -82,9 +86,9 @@
 			<inertia ixx="0.25414" ixy="0" ixz="0" iyy="0.28423" iyz="0" izz="0.21677"/>
 		</inertial>
         <visual>
-            <origin xyz="0 0 0.259" rpy="0 1.57 0"/>
+            <origin xyz="0 0 0.259" rpy="0 0 0"/>
             <geometry>
-                <capsule radius="0.032" length="0.2"/>
+                <box size="0.2 0.04 0.05"/>
             </geometry>
             <material name="T_kettle_wood">
                 <texture filename="../textures/wood1.png"/>

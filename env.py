@@ -413,6 +413,61 @@ class Environment:
         self.sim.step()
         time.sleep(config.control_dt)
     
+
+def _gripper_proprio(sim, robot):
+    """Measured finger opening, as a real gripper's width sensor reports it.
+
+    ``gripper_holding`` is True when the gripper was commanded closed but the fingers
+    stalled clearly short of fully closed - i.e. something is between them. Franka only;
+    other grippers report None (unknown). ``eef_pos_at_close`` is where the hand was when
+    the gripper last closed (None while open): with ``gripper_holding`` it tells how far the
+    held object has been carried since it was grasped.
+    """
+    at_close = getattr(robot, "eef_pos_at_close", None)
+    tilt = getattr(robot, "max_tilt_since_close", None)
+    if robot.robot != "franka":
+        return {"gripper_width": None, "gripper_holding": None, "eef_pos_at_close": at_close,
+                "max_tilt_since_close": tilt}
+    width = float(sum(sim.get_joint_state(robot.id, j).position for j in robot.gripper_joint_indices))
+    holding = (not robot.gripper_open) and width > config.gripper_holding_min_width_franka
+    return {"gripper_width": round(width, 4), "gripper_holding": bool(holding), "eef_pos_at_close": at_close,
+            "max_tilt_since_close": tilt}
+
+
+def _hand_tilt(sim, robot):
+    """Measured hand tilt from upright: (degrees, unit [dx, dy] of the side that went DOWN).
+
+    The hand's local z is its approach axis (straight down when upright). Tilting the hand
+    lowers one horizontal side d and swings the approach axis toward -d, so the lowered side
+    is minus the approach axis' horizontal part (None when the hand is ~upright).
+    """
+    _, q = sim.get_link_pose(robot.id, robot.ee_index)
+    x, y, z, w = map(float, q)
+    approach = np.array([2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)])
+    tilt = float(np.degrees(np.arccos(np.clip(-approach[2], -1.0, 1.0))))
+    horizontal = -approach[:2]
+    norm = float(np.linalg.norm(horizontal))
+    dip = [round(float(v), 3) for v in horizontal / norm] if norm > 1e-6 else None
+    return tilt, dip
+
+
+def _record_tilt_while_holding(sim, robot):
+    """Keep the largest measured hand tilt since the gripper closed (pour evidence for the review).
+
+    Sampled at the end of every executed trajectory, so a pour that is held and then tilted back
+    upright (the end-of-attempt pose) is still reported.
+    """
+    if robot.gripper_open or getattr(robot, "eef_pos_at_close", None) is None:
+        return
+    try:
+        tilt, dip = _hand_tilt(sim, robot)
+    except Exception:
+        return
+    best = getattr(robot, "max_tilt_since_close", None)
+    if best is None or tilt > best["deg"]:
+        robot.max_tilt_since_close = {"deg": round(tilt, 1), "dip_dir": dip}
+
+
 def step_env_and_record_loop(env, robot):
     for _ in range(100):
         robot.step_env_and_record(env, force_record=False)
@@ -647,7 +702,8 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                                     f"{session.abort_reason}" + ENDC)
                         break
 
-                step_env_and_record_loop(env, robot)                
+                step_env_and_record_loop(env, robot)
+                _record_tilt_while_holding(sim, robot)
 
                 if aborted_by_tracking:
                     session = robot.tracking_session
@@ -736,6 +792,8 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 robot.move(env, ee_current_position, ee_current_orientation_e, gripper_open=True, is_trajectory=False)
 
                 robot.gripper_open = True
+                robot.eef_pos_at_close = None
+                robot.max_tilt_since_close = None
 
                 logger.info(OK + "Finished opening gripper!" + ENDC)
 
@@ -747,6 +805,8 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 robot.move(env, ee_current_position, ee_current_orientation_e, gripper_open=False, is_trajectory=False)
 
                 robot.gripper_open = False
+                robot.eef_pos_at_close = [round(float(v), 4) for v in ee_current_position]
+                robot.max_tilt_since_close = None
 
                 logger.info(OK + "Finished closing gripper!" + ENDC)
 
@@ -761,6 +821,8 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 # trajectory image frames from previous subtasks are preserved.
                 robot.move(env, robot.ee_start_position, robot.ee_start_orientation_e, gripper_open=True, is_trajectory=False)
                 robot.gripper_open = True
+                robot.eef_pos_at_close = None
+                robot.max_tilt_since_close = None
 
                 step_env_and_record_loop(env, robot)
 
@@ -773,7 +835,17 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 except Exception:
                     eef_pos = list(map(float, config.ee_start_position))
                 try:
-                    env_connection.send({"eef_pos": eef_pos})
+                    # gripper_open lets the next (sub)task prompt state the real gripper
+                    # state instead of assuming "open" while an object is still held.
+                    reply = {"eef_pos": eef_pos, "gripper_open": bool(robot.gripper_open),
+                             **_gripper_proprio(sim, robot)}
+                    try:
+                        # The arm's mount point (URDF placement, not the base link's inertial
+                        # frame): lets prompts/skills bound reach (e.g. the pour height).
+                        reply["base_pos"] = [round(float(v), 3) for v in robot.base_start_position]
+                    except Exception:
+                        reply["base_pos"] = None
+                    env_connection.send(reply)
                 except Exception:
                     env_connection.send({})
 

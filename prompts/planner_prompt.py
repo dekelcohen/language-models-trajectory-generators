@@ -16,10 +16,11 @@
 # return value of execute_subtasks(...).
 RECOVERY_FROM_FAILURE = """RECOVERY FROM FAILURE:
 execute_subtasks(...) runs ONLY the next subtask and returns a summary containing:
-{executed, success, result: {success, attempts, accepted_without_review, reviewer_reason, improvement_steps, summaries}, remaining}.
+{executed, success, result: {success, attempts, accepted_without_review, reviewer_reason, improvement_steps, summaries, robot_state_after}, remaining}.
+`robot_state_after` (when present) is MEASURED by the robot's sensors (gripper width): it beats the reviewer's visual verdict on whether something is held.
 After EVERY subtask (success or failure) perception re-runs and you are re-invoked with an UPDATED SCENE ANALYSIS. On each turn:
 1. Read the UPDATED SCENE ANALYSIS and the printed result of the last subtask.
-2. If the last subtask FAILED: read result.reviewer_reason and improvement_steps to understand WHY, then decide how to recover (retry the failed subtask with a clearer/modified prompt, or insert a new subtask that first removes a blocker/dependency).
+2. If the last subtask FAILED: read result.reviewer_reason and improvement_steps to understand WHY, then decide how to recover (retry the failed subtask with a clearer/modified prompt, or insert a new subtask that first removes a blocker/dependency). If robot_state_after says the gripper is HOLDING an object, a failed grasp/pick-up subtask may have actually succeeded: do not re-dispatch a grasp of it - continue with the next step while holding it.
 3. If it SUCCEEDED: check whether the next intended subtask is still valid given the new scene. Watch for NEW occlusions/blockers created by the last subtask - e.g. the robot arm itself now hiding or blocking the next target's affordance. If so, insert a prep subtask first (e.g. "move the arm clear of the target so it is visible/reachable").
 4. Dispatch exactly the NEXT subtask via another execute_subtasks([...]) call, then re-evaluate.
 5. When the overall goal is satisfied, call plan_completed(); if it becomes unreachable, call plan_failed()."""

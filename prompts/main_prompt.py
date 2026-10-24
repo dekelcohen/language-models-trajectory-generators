@@ -72,6 +72,44 @@ Tasks:
   
 """
 
+# [INSERT GRIPPER STATE] in MAIN_PROMPT. Filled from the env's live gripper state, so a
+# subtask that starts while a previous subtask is still holding an object is not told the
+# gripper is open (it would then re-grasp, i.e. carry the held object back down).
+GRIPPER_STATE_OPEN = "open"
+GRIPPER_STATE_CLOSED = (
+    "CLOSED. If it is holding an object (e.g. one grasped by a previous step - check the images and the "
+    "scene analysis), it must keep holding it: do not descend to grasp that object again and only call "
+    "open_gripper() when the task requires releasing it. If it holds nothing, call open_gripper() before "
+    "approaching an object to grasp"
+)
+# Closed gripper + measured finger opening (a real gripper's width sensor).
+GRIPPER_STATE_HOLDING = (
+    "CLOSED and HOLDING an object: the measured finger opening is [WIDTH] cm (fully closed is ~0.1 cm), "
+    "so the fingers are blocked by an object between them - e.g. the one grasped by a previous step or "
+    "attempt, even if a review said that grasp failed. Keep holding it: do NOT call open_gripper() and do "
+    "not descend to grasp it again; continue the task from the current pose with the object in hand. "
+    "Only call open_gripper() when the task requires releasing the object"
+)
+GRIPPER_STATE_CLOSED_EMPTY = (
+    "CLOSED and EMPTY: the measured finger opening is [WIDTH] cm (fully closed), so nothing is held. "
+    "Call open_gripper() before approaching an object to grasp"
+)
+
+
+def gripper_state_text(gripper_open, gripper_holding=None, gripper_width=None):
+    """Prompt wording for the live gripper state (GET_ROBOT_STATE).
+
+    Only an explicit ``gripper_open is False`` renders a CLOSED text; True / None keep the
+    historical "open" wording (LLM-cache keys unchanged). A measured width selects the
+    HOLDING / EMPTY variant; without one the generic CLOSED text is used.
+    """
+    if gripper_open is not False:
+        return GRIPPER_STATE_OPEN
+    if gripper_holding is None or gripper_width is None:
+        return GRIPPER_STATE_CLOSED
+    template = GRIPPER_STATE_HOLDING if gripper_holding else GRIPPER_STATE_CLOSED_EMPTY
+    return template.replace("[WIDTH]", f"{gripper_width * 100:.1f}")
+
 MAIN_PROMPT = """
 You are a sentient AI that can control a robot arm by generating Python code which outputs a list of trajectory points for the robot arm end-effector to follow to complete a given user command.
 Each element in the trajectory list is an end-effector pose, and should be of length 4, comprising a 3D position and a rotation value.
@@ -96,7 +134,7 @@ You are, however, able to call any of the following Python functions, if require
 ENVIRONMENT SET-UP:
 [INSERT 3D COORDINATES PROMPT SECTION]
 
-The robot arm end-effector is currently positioned at [INSERT EE POSITION], with the rotation value at 0, and the gripper open.
+The robot arm end-effector is currently positioned at [INSERT EE POSITION], with the rotation value at 0, and the gripper [INSERT GRIPPER STATE].
 The robot arm is in a top-down set-up, with the end-effector facing down onto a floor. The end-effector is therefore able to rotate about the z-axis, from -pi to pi radians.
 The end-effector gripper has two fingers, and they are currently parallel to the x-axis.
 The gripper can only grasp objects along sides which are shorter than 0.08.

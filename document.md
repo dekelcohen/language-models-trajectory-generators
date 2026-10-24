@@ -384,6 +384,35 @@ retry vs. done.
   `trajectory_step`. Default off; when on it makes a later subtask start from the same
   canonical arm pose as subtask #1 (addresses "open-door as subtask #2 starts far from the
   door" — the carried-over EE pose otherwise seeds a bad first-attempt trajectory).
+- **Carried-over robot state**: the start pose and gripper state come from `GET_ROBOT_STATE`
+  (`{"eef_pos", "gripper_open", "gripper_width", "gripper_holding", "eef_pos_at_close", "max_tilt_since_close", "base_pos"}`) and fill `MAIN_PROMPT`'s
+  `[INSERT EE POSITION]` / `[INSERT GRIPPER STATE]` via `gripper_state_text()`.
+  `gripper_width` is the measured finger opening (sum of the finger joints - the same signal a
+  real Franka reports); `gripper_holding` = commanded closed AND the fingers stalled wider than
+  `config.gripper_holding_min_width_franka` (5 mm), i.e. something is between them. Closed +
+  holding renders `GRIPPER_STATE_HOLDING` ("keep holding it, do NOT call open_gripper(), even
+  if a review said that grasp failed"); closed on nothing renders `GRIPPER_STATE_CLOSED_EMPTY`;
+  open/unknown renders the original "open" wording, so the prompt (and LLM-cache keys) are
+  unchanged. Previously "gripper open" was hard-coded, so after a "pick up the kettle" subtask
+  the next subtask re-grasped: it descended with the held kettle onto the stove. Later, a
+  reviewer false negative ("empty gripper") made the retry's improvement steps call
+  `open_gripper()` and drop a correctly held kettle - the measured HOLDING text (and the same
+  evidence given to the reviewer, see `_gripper_review_evidence` in §VLM review) fixes that.
+  `CLOSE_GRIPPER` also records `robot.eef_pos_at_close` (cleared by open/reset); the reviewer
+  evidence adds how far the hand carried the held object since the grasp ("carried UP by ~15 cm
+  ...", or "has NOT moved since the fingers closed"), because a 256 px clip review still claimed
+  "kettle not lifted" with the HOLDING text alone. The env also keeps `max_tilt_since_close`
+  (`{"deg", "dip_dir"}`: the largest measured hand tilt while holding, sampled after every
+  executed trajectory, so a pour that tilts back upright still counts); the reviewer is told
+  "tilted up to ~47 deg ..., lowering its world +y side". Run 5 needed it: a physically correct
+  pour (spout tip over the microwave) was rejected as "spout points toward the sink", and the
+  retry spun the held kettle 180 deg and dropped it. The planner gets the same measurement:
+  `TaskResult.robot_state_after` (`robot_state_sentence()`, from the `subtask end` world state)
+  is in `execute_subtasks`' result, and `RECOVERY_FROM_FAILURE` says it beats the reviewer's
+  verdict - otherwise a false-negative "pick up" made the planner re-dispatch a grasp, and that
+  subtask opened the gripper and dropped the held kettle.
+  `[world-state] subtask start|end` log lines record eef/gripper width/holding and every
+  sim-state `*_pos` object (e.g. `kettle_pos`) at each boundary.
 - **Scene analysis (reused, not re-run)**: the planner passes its already-computed
   `scene_analysis` (from `run_scene_perception`) down through `execute_subtasks`; it fills
   `MAIN_PROMPT`'s `[INSERT SCENE ANALYSIS]` section and is reused across this task's
@@ -576,7 +605,7 @@ Pose **length is the discriminator** — there is no mode flag anywhere in the p
 | Length | Format | Orientation |
 |---|---|---|
 | 4 | `[x, y, z, rotation]` | top-down: `config.ee_start_orientation_e + [0,0,rotation]`. The historical format, and the default for essentially every task. |
-| 6 | `[x, y, z, roll, pitch, yaw]` | absolute Euler (repo-wide PyBullet convention). Produced only by `side_grasp_pose`. |
+| 6 | `[x, y, z, roll, pitch, yaw]` | absolute Euler (repo-wide PyBullet convention). Produced by `side_grasp_pose` and `pour_pose`. |
 
 The len-4 path is deliberately byte-identical to what it always was, so the side approach
 cannot perturb existing top-down tasks. Both lengths are accepted by
@@ -590,6 +619,11 @@ cannot perturb existing top-down tasks. Both lengths are accepted by
   targets with no graspable top face (**vertical bar handles**). `approach_yaw` is the
   azimuth the gripper points *toward* the target (a door's inward face normal);
   `rotation` is roll about that axis, `0` = fingers close horizontally across a vertical bar.
+- `pour_pose(x, y, z, rotation, tilt, pour_yaw)` → len-6 top-down grasp tilted by `tilt` so
+  the held object's `pour_yaw` side dips. The tilt axis must be within 30 deg of the fingers'
+  closing direction (`pour_yaw = rotation ± π/2`), else `ValueError`: measured on the kitchen
+  kettle, tilting about any other axis rolls the pinched handle out of the fingers. Documented
+  only by `prompts/skills/pour-from-held-container/SKILL.md` (same skill-only gating).
 
 Top-down poses stay plain `[x, y, z, rotation]` lists, exactly as every prompt example
 already teaches. `common_utils.grasp_pose()` exists as the documented counterpart and is
@@ -1104,6 +1138,32 @@ URDFs + meshes + textures); implementation in `sim_envs/pybullet/franka_kitchen/
 - `step_hook()` ports upstream's `updateFrankaKitchen()`: knob angle → burner-plate
   prismatic target, light-switch angle → light block position + link colour. Purely
   cosmetic, but must run every step or it desyncs.
+- **Kettle grasp: physics only** (no weld / attach constraint). The kettle's grip (`item_assets/kettle.urdf`,
+  the wooden bar on top) is a flat-sided box `0.2 x 0.04 x 0.05` (x0.75 at load), replacing
+  the original round capsule `r=0.032`. Parallel-jaw fingers then close on two flat faces and
+  get multi-point contact patches whose lateral friction resists the kettle rotating about the
+  pinch axis; the round bar gave a line contact resisted only by torsional friction. Measured
+  in the probe: 45 deg tilt about the bar axis lost the round-grip kettle but holds the flat
+  one (1.1 cm slip); 70 deg spout-down holds with 0.5 cm slip.
+  The friction pinch holds:
+  measured with the real control loop, a lifted kettle drifts ~1 mm over 300 s of idle (the
+  env keeps stepping during LLM/VLM calls) and drops on `OPEN_GRIPPER`. An earlier "ejected
+  ~13 s after the lift" report did not reproduce - the kettle that "jumped onto a burner" was
+  released by a retry's `open_gripper()` after a reviewer false negative (see carried-over
+  robot state / gripper proprioception). An earlier opt-in weld assist was removed as
+  unnecessary.
+- **Kettle pour geometry** (for "pour onto the microwave"): tilts about the fingers' closing
+  axis are the robust ones (`pour_pose`). The microwave top (z 1.484) sits under
+  the wall cabinets (z ~1.83) and the light switch (x 0.47-0.55, y 0.28-0.33, z ~1.7), so the
+  pour works only at its near corner: commanded hand ≈ (0.38-0.42, 0.43-0.44, 1.77-1.78), 45 deg
+  spout-down → spout tip over the microwave, kettle slip ~1 cm, no contacts. Aiming at the
+  microwave's centre is out of reach, and carrying the kettle past the switch knocks it out.
+  Height is reach-limited: at that xy the hand holds the tilt up to ~1.75 (base z 1.25 + 0.50;
+  slip <1 cm), slips 6 cm at 1.80 and drops the kettle at 1.84 with no contacts. Perception put
+  the microwave top at 1.57 (true 1.484), so the skill's `top + 0.29` gave 1.84 and dropped it
+  (run 4); the skill now caps the hand at `base z + 0.50`, using the base position that
+  `GET_ROBOT_STATE["base_pos"]` (the URDF mount, `robot.base_start_position`) adds to the
+  subtask prompt's EE line ("(the robot arm's base is mounted at [...])").
 - Success uses MuJoCo's `OBS_ELEMENT_GOALS` + `BONUS_THRESH = 0.3` (kettle: a `0.12 m`
   position threshold — see below).
 
@@ -1247,7 +1307,7 @@ constants, not `config.*`.
 | Test | Covers |
 |------|--------|
 | `tests/test_2d_pixel_coords_to_3d_world_coords.py` | Parametrized over `door` + all 7 kitchen tasks. Runs the **production** path (`env.Environment` → `Robot.get_camera_image` → `utils.project_3d_world_pos_to_2d_pixel` → `utils.get_world_point_world_frame`) against ground-truth link positions. Two-tier assertion: reprojection round-trip ≤ 1 px always; distance-to-target ≤ 0.12 m **unless** the depth sample is ≥ 0.05 m nearer the camera than the target (occlusion), in which case the task must be listed in `KNOWN_OCCLUDED_TASKS`. Kitchen: 7/7 at 2–5 cm, 0 px. |
-| `tests/test_franka_kitchen_ipc.py` | Walks every IPC message for kitchen semantics: handshake (coords + task state + EEF above the counter), `CAPTURE_IMAGES` (head cam on `-x`), `RESET_EEF` (re-home above the counter — this is the assertion that caught the bug above), gripper commands, `EXECUTE_TRAJECTORY`, `ADD_BOUNDING_CUBES` / `ADD_TRAJECTORY_POINTS` / `GET_ROBOT_STATE`. Passes `robot = "sawyer"` deliberately, to prove the sim-env forces franka. |
+| `tests/test_franka_kitchen_ipc.py` | Walks every IPC message for kitchen semantics: handshake (coords + task state + EEF above the counter), `CAPTURE_IMAGES` (head cam on `-x`), `RESET_EEF` (re-home above the counter — this is the assertion that caught the bug above), gripper commands, `EXECUTE_TRAJECTORY`, `ADD_BOUNDING_CUBES` / `ADD_TRAJECTORY_POINTS` / `GET_ROBOT_STATE`. Passes `robot = "sawyer"` deliberately, to prove the sim-env forces franka. `TestKettleHeldAcrossSubtaskBoundary` grasps + lifts the kettle (no LLM), then runs the subtask-boundary path (`log_world_state` + `_build_main_prompt`) and asserts the next prompt says the gripper is CLOSED and the kettle stays in hand through a 20 s idle (the review window, plain contact physics), that a `pour_pose` tilt is recorded as `max_tilt_since_close`, then that `open_gripper` drops it. |
 | `tests/test_franka_kitchen_head_camera.py` | 21 tests (3 × 7 tasks). Scores head-camera framing with `tests/tools/tune_kitchen_head_camera.py`: target must be in frame, ≤ 15 % occluded by the arm, ≤ 0.35 off frame centre and ≥ 60 px. Guards against the arm creeping back in front of a target when camera params are touched. |
 
 `KNOWN_OCCLUDED_TASKS = ["door"]`: in the door scene's head view a free-standing pole sits

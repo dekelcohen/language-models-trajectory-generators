@@ -37,6 +37,9 @@ gripper_goal_position_open_franka = 0.04
 gripper_goal_position_closed_franka = 0.0005
 arm_movement_force_franka = 5 * 240
 gripper_movement_force_franka = 1000
+# Commanded closed but both fingers together still this far apart (m) => an object is held.
+# Fully closed is 2 * gripper_goal_position_closed_franka = 1 mm.
+gripper_holding_min_width_franka = 0.005
 ee_index_franka = 11
 
 robotiq_motor_joint = 1
@@ -160,6 +163,10 @@ CLEAR_GRASP_MARKERS = 26
 # so the PyBullet regression goldens stay bit-identical.
 tracking_enabled_default = False
 tracker_provider_default = "template"   # template | klt | csrt | cotracker | remote | hybrid | hybrid_remote
+# Paste measured pull facts (tracking.review_evidence) into the VLM review prompt for
+# articulated pull/open tasks, and add the recommended next pull direction to the retry's
+# improvement steps when the review fails. Needs an active track_objects session.
+review_tracking_evidence = True
 # CoTracker3 provider (--tracker-provider cotracker). The online model is fetched once via
 # torch.hub into TORCH_HOME and reused offline afterwards; None honours the environment
 # and falls back to <repo>/cache/torch.
