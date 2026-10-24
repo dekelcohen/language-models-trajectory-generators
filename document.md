@@ -1544,7 +1544,14 @@ available prediction** — never an extrapolation — and reports its age in
 `TrackResult.meta["stale_frames"]` (`0` = computed from this frame) alongside `fresh`,
 `window`, `step`, `flushes` and `device`. Per-point scores are decayed by
 `tracker_cotracker_stale_decay` per stale frame so `TrackResult.confidence` degrades while a
-camera coasts, which is what lets `tracking/health.py` down-weight or re-seed it. `init`
+camera coasts, which is what lets `tracking/health.py` down-weight or re-seed it. A flush is
+not only the newest frame: the window also holds fresh tracks for every frame that arrived
+since the previous flush, so a fresh result carries `meta["window_rows"]`
+(`points/visible/scores` stacked oldest first, `frames_back` per row; last row = this frame).
+`TrackingSession` keeps the last `BACKFILL_VIEWS` (32) views per camera and lifts each row with
+**that frame's** depth into `CamTrack.backfill` (`[{"frame_idx", "points_world"}]`,
+seed-indexed `(n_seed, 3)`, `nan` = unseen) - a per-frame record for the frames that were
+reported stale; the live pose and monitors are not rewritten. `init`
 pre-fills the window with copies of the seed frame (`warm_start=True`), so a fresh seed or a
 cross-camera re-seed produces a real prediction on the very next frame instead of waiting a
 full window; re-seeding drops the frame buffer and the model's online state (re-running the
@@ -1592,14 +1599,16 @@ built-in name + kwargs, and `tracking/monitor.py` compiles it on the far side.
 - `tests/test_tracking_unit.py` (39, free) — geometry/fusion maths, the re-seed policy on
   synthetic low-confidence and disagreement cases, the monitor contract, the built-in
   invariants, and the tracker providers on synthetic images. No simulator.
-- `tests/test_cotracker_tracker.py` (24 free + 1 gated) — the CoTracker provider driven by a
-  *fake* predictor (`model=` kwarg): ABC conformance, the window/staleness contract, score
+- `tests/test_cotracker_tracker.py` (26 free + 1 gated) — the CoTracker provider driven by a
+  *fake* predictor (`model=` kwarg): ABC conformance, the window/staleness contract, the
+  per-flush `window_rows`, score
   decay, visibility → lost, points leaving the frame, re-seed (online state restarts, weights
   are kept) and the `TORCH_HOME` error message. Skipped wholesale without torch. The real
   checkpoint test runs only with `COTRACKER_REAL_TEST=1` (~50 s on CPU, ~10 s on `cuda:0`).
-- `tests/test_realtime.py` (23, free) — the real-time model: latency modes/profiles, the
+- `tests/test_realtime.py` (24, free) — the real-time model: latency modes/profiles, the
   camera clock, drop vs queue policy, deferred publish and abort in the session, Kalman time
-  units, and the harness's real-time loop (lock-step equivalence at camera fps = motion rate).
+  units, windowed-tracker backfill lifted with each row's own frame depth, and the harness's
+  real-time loop (lock-step equivalence at camera fps = motion rate).
 - `tests/test_klt_tracker.py` (5, free) — the KLT provider: translation accuracy, one row per
   seed with dead slots, forward-backward rejection.
 - `tests/test_tracking_pybullet.py` (5) and `tests/test_tracking_genesis.py` (5) — **no LLM,

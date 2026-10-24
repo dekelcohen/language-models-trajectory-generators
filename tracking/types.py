@@ -87,6 +87,11 @@ class CamTrack:
     #: Frames since the 2D tracker last computed these points (windowed trackers such as
     #: online CoTracker only refresh every ``step`` frames; 0 = fresh this frame).
     stale_frames: int = 0
+    #: Windowed trackers only, on a flush: fresh per-point measurements for the frames since
+    #: the previous flush, each lifted with *that* frame's depth -
+    #: ``[{"frame_idx": f, "points_world": (n_seed, 3) seed-indexed, nan = unseen}]``.
+    #: A record for past frames (the live pose/monitors are not rewritten).
+    backfill: Optional[list] = None
 
     @property
     def n_visible(self) -> int:

@@ -236,6 +236,46 @@ class SessionTickTest(unittest.TestCase):
         self.assertIs(session.last_report, report)
 
 
+class SessionBackfillTest(unittest.TestCase):
+    """Windowed-tracker rows for past frames are lifted with *their own* frame's depth."""
+
+    def test_rows_are_lifted_with_the_view_of_their_frame(self):
+        import tracking_eval as te
+        from tracking import geometry
+        from tracking.session import TrackingSession
+
+        scene = te.SyntheticSphereScene(n_frames=4, occlusion=None, step_vector=(0.03, 0.0, 0.0))
+        scene.reset()
+        scene.select_cameras(["head"])
+        session = TrackingSession(cameras=("head",), provider="template", write_jsonl=False)
+        session.add_target("ball", scene.seed_points("ball"))
+        centres, pixels = {}, {}
+        for i in range(3):
+            scene.advance(i)
+            centres[i] = scene.ground_truth("ball")[0]
+            views = scene.views(i)
+            pixels[i], _ = geometry.project_world_to_pixel(views["head"], centres[i])
+            session.tick(float(i), views_fn=lambda v=views: v)
+        self.assertEqual(session.frame_idx, 3)
+
+        target = session.targets["ball"]
+        n_seed = len(target.seed_points_world)
+        target.point_index["head"] = np.array([n_seed - 1, 0])
+        rows = {"points": np.stack([np.stack([pixels[f], pixels[f]]) for f in (0, 1, 2, 2)]),
+                "visible": np.array([[True, False]] * 4),
+                "frames_back": [3, 2, 1, 0]}           # frame 3 has no stored view yet
+        lifted = session._lift_window_rows(target, "head", rows)
+
+        self.assertEqual([r["frame_idx"] for r in lifted], [0, 1, 2])
+        for rec in lifted:
+            pts = rec["points_world"]
+            self.assertEqual(pts.shape, (n_seed, 3))
+            self.assertTrue(np.isnan(pts[:n_seed - 1]).all())     # slot 0 was not visible
+            # The sphere moves 3 cm/frame; only its own frame's depth puts the pixel on it.
+            dist = np.linalg.norm(pts[n_seed - 1] - centres[rec["frame_idx"]])
+            self.assertAlmostEqual(dist, scene.radius, delta=0.003)
+
+
 class HarnessRealtimeTest(unittest.TestCase):
     """The harness's real-time loop on the simulator-free scene."""
 

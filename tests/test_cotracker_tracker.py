@@ -205,6 +205,23 @@ class TestWindowStaleness(unittest.TestCase):
         self.assertEqual(meta["flushes"], 1)
         self.assertIn("device", meta)
 
+    def test_flush_exposes_fresh_rows_for_the_frames_since_the_previous_flush(self):
+        tracker, _ = make_tracker(warm_start=True, dx=1.0)
+        tracker.init(frame(), [[10.0, 20.0]])
+        first = tracker.update(frame(1)).meta["window_rows"]
+        self.assertEqual(first["frames_back"], [0])
+        stale = [tracker.update(frame(i)) for i in range(2, STEP + 1)]
+        self.assertTrue(all("window_rows" not in r.meta for r in stale))
+
+        result = tracker.update(frame(STEP + 1))
+        rows = result.meta["window_rows"]
+        self.assertEqual(rows["frames_back"], list(range(STEP - 1, -1, -1)))
+        self.assertEqual(rows["points"].shape, (STEP, 1, 2))
+        # The fake moves dx per window frame: the last STEP frames of the window, oldest first.
+        np.testing.assert_allclose(rows["points"][:, 0, 0], 10.0 + np.arange(STEP, 2 * STEP))
+        np.testing.assert_allclose(rows["points"][-1], result.points)
+        self.assertTrue(rows["visible"].all())
+
 
 @unittest.skipUnless(HAVE_TORCH, "torch is not installed in this environment")
 class TestVisibility(unittest.TestCase):

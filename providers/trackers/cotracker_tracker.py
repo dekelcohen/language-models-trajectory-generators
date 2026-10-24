@@ -195,6 +195,7 @@ class CoTrackerTracker(PointTracker):
         self._last_points = None
         self._last_visible = None
         self._last_scores = None
+        self._last_rows = []
         self._dead = None
         self._obj_id = None
 
@@ -252,6 +253,7 @@ class CoTrackerTracker(PointTracker):
         self._last_points = None
         self._last_visible = None
         self._last_scores = None
+        self._last_rows = []
 
     # -- per-frame ---------------------------------------------------------
     def update(self, frame):
@@ -282,11 +284,21 @@ class CoTrackerTracker(PointTracker):
         visible = np.array(self._last_visible, dtype=bool, copy=True)
         scores = np.array(self._last_scores, dtype=float, copy=True) * decay
         scores[~visible] = 0.0
-        return TrackResult(points=points, visible=visible, scores=scores,
-                           meta={"provider": self.name, "stale_frames": int(self._stale),
-                                 "fresh": bool(fresh), "device": self.device,
-                                 "window": self.window, "step": self.step,
-                                 "flushes": int(self._flushes)})
+        meta = {"provider": self.name, "stale_frames": int(self._stale),
+                "fresh": bool(fresh), "device": self.device,
+                "window": self.window, "step": self.step,
+                "flushes": int(self._flushes)}
+        if fresh and self._last_rows:
+            # Fresh tracks for every frame since the previous flush, oldest first; the last
+            # row is this frame. ``frames_back[i]`` = how many frames before this one row i is.
+            k = len(self._last_rows)
+            meta["window_rows"] = {
+                "points": np.stack([r[0] for r in self._last_rows]),
+                "visible": np.stack([r[1] for r in self._last_rows]),
+                "scores": np.stack([r[2] for r in self._last_rows]),
+                "frames_back": list(range(k - 1, -1, -1)),
+            }
+        return TrackResult(points=points, visible=visible, scores=scores, meta=meta)
 
     # -- internals ---------------------------------------------------------
     def _flush(self):
@@ -309,14 +321,43 @@ class CoTrackerTracker(PointTracker):
             out = self._model(video_chunk=chunk)
         # Count from the attempt, not the outcome: the model state advances by ``step``
         # frames per call, so a call must not be retried on the very next frame.
+        n_new = self._since_flush           # real frames added since the previous flush
         self._since_flush = 0
         tracks, visibility = (out if isinstance(out, (tuple, list)) else (out, None))
         if tracks is None:
             logger.debug("[cotracker] window flush produced no tracks (warm-up)")
             return False
 
-        points = self._to_numpy(tracks)[0, -1].reshape(-1, 2).astype(float)
-        vis_raw = None if visibility is None else self._to_numpy(visibility)[0, -1].reshape(-1)
+        tracks_np = self._to_numpy(tracks)[0]
+        vis_np = None if visibility is None else self._to_numpy(visibility)[0]
+        points, visible, scores = self._clean_row(
+            tracks_np[-1], None if vis_np is None else vis_np[-1], self._last_points)
+
+        # The window also carries fresh tracks for the other frames that arrived since the
+        # previous flush (the online model accumulates its predictions over time, newest
+        # last). Keep them, oldest first, so a caller can backfill those frames instead of
+        # treating them as stale (``meta["window_rows"]``).
+        k = int(max(1, min(n_new, self.step, len(tracks_np))))
+        rows = []
+        for r in range(k - 1, 0, -1):
+            rows.append(self._clean_row(tracks_np[-1 - r],
+                                        None if vis_np is None else vis_np[-1 - r], points))
+        rows.append((points, visible, scores))
+        self._last_rows = rows
+
+        self._last_points = points
+        self._last_visible = visible
+        self._last_scores = scores
+        self._flushes += 1
+        logger.debug("[cotracker] flush %d: %d/%d visible (obj=%s, %d window rows)",
+                     self._flushes, int(np.count_nonzero(visible)), self.n_points,
+                     self._obj_id, k)
+        return True
+
+    def _clean_row(self, row_points, row_vis, fallback):
+        """One predicted frame -> ``(points, visible, scores)`` with this tracker's rules."""
+        points = np.asarray(row_points).reshape(-1, 2).astype(float)
+        vis_raw = None if row_vis is None else np.asarray(row_vis).reshape(-1)
         n = self.n_points
         points = points[:n]
         if len(points) < n:
@@ -351,17 +392,8 @@ class CoTrackerTracker(PointTracker):
         if self._dead is not None and len(self._dead) == n:
             visible = visible & ~self._dead
         scores = np.where(visible, scores, 0.0)
-        points = np.where(np.isfinite(points), points,
-                          self._last_points if self._last_points is not None else np.nan)
-
-        self._last_points = points
-        self._last_visible = visible
-        self._last_scores = scores
-        self._since_flush = 0
-        self._flushes += 1
-        logger.debug("[cotracker] flush %d: %d/%d visible (obj=%s)", self._flushes,
-                     int(np.count_nonzero(visible)), n, self._obj_id)
-        return True
+        points = np.where(np.isfinite(points), points, fallback if fallback is not None else np.nan)
+        return points, visible, scores
 
     def _chunk_tensor(self):
         frames = self._buffer[-self.window:]

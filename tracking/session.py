@@ -24,6 +24,7 @@ Every step is defensive: any exception is caught, logged once and downgraded, be
 tracking bug must never break a rollout that would otherwise have succeeded.
 """
 
+import collections
 import time
 
 import numpy as np
@@ -48,6 +49,9 @@ from tracking.types import (
     TrackedObjectState,
     TrackFrameReport,
 )
+
+#: Views kept per camera for backfilling windowed-tracker rows (>= CoTracker's step).
+BACKFILL_VIEWS = 32
 
 
 class _TargetTrackers:
@@ -163,6 +167,9 @@ class TrackingSession:
             self._log(f"[tracking] realtime: {self.pipeline.describe()}")
         self._timing = None
         self._warmup_done = False
+        # Recent views per camera, so a windowed tracker's fresh rows for past frames can be
+        # lifted with the depth of the frame they belong to (``CamTrack.backfill``).
+        self._recent_views = {}
 
     # -- registration ------------------------------------------------------
     def add_target(self, name, world_points):
@@ -330,6 +337,9 @@ class TrackingSession:
                                   rgb_paths=dict(rgb_paths))
         report.sim_time = getattr(self, "_frame_time", None)
         report.gripper = self._gripper_state(gripper_pose, views)
+        for cam, view in views.items():
+            self._recent_views.setdefault(cam, collections.deque(maxlen=BACKFILL_VIEWS)).append(
+                (self.frame_idx, view))
 
         for name, target in self.targets.items():
             report.objects[name] = self._process_target(target, views, report.gripper)
@@ -919,6 +929,8 @@ class TrackingSession:
         track.visible = np.asarray(result.visible, dtype=bool)
         track.confidence = float(result.confidence)
         track.stale_frames = int((getattr(result, "meta", None) or {}).get("stale_frames", 0) or 0)
+        rows = (getattr(result, "meta", None) or {}).get("window_rows")
+        track.backfill = self._lift_window_rows(target, cam, rows) if rows else None
         if result.n_visible == 0:
             track.status = "lost"
             return
@@ -939,6 +951,31 @@ class TrackingSession:
             track.status = "low_confidence"
         else:
             track.status = "ok"
+
+    def _lift_window_rows(self, target, cam, rows):
+        """Lift a windowed tracker's per-frame rows, each with its own frame's depth view.
+
+        Returns ``[{"frame_idx", "points_world"}]`` with seed-indexed ``(n_seed, 3)`` points
+        (``nan`` = not visible / no depth / no stored view for that frame).
+        """
+        n_seed = len(target.seed_points_world)
+        index = target.point_index.get(cam)
+        recent = dict(self._recent_views.get(cam, ()))
+        out = []
+        for pts, vis, back in zip(rows["points"], rows["visible"], rows["frames_back"]):
+            frame = self.frame_idx - int(back)
+            view = recent.get(frame)
+            if view is None:
+                continue
+            world, valid = geometry.points_to_world(view, np.asarray(pts, dtype=float),
+                                                    np.asarray(vis, dtype=bool))
+            seeded = np.full((n_seed, 3), np.nan)
+            slots = np.arange(len(world)) if index is None else np.asarray(index)
+            for j, s in enumerate(slots[:len(world)]):
+                if 0 <= s < n_seed and valid[j]:
+                    seeded[s] = world[j]
+            out.append({"frame_idx": frame, "points_world": seeded})
+        return out
 
     @staticmethod
     def _is_super_physical_jump(target, cam, world_point, just_seeded):
