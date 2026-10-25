@@ -166,6 +166,8 @@ def log_world_state(main_connection, logger, tag):
                     poses[key] = [round(float(v), 3) for v in value]
                 except (TypeError, ValueError):
                     pass
+        if isinstance(sim_state.get("water"), dict):
+            poses["water"] = sim_state["water"]
     eef = [round(v, 3) for v in robot_state["eef_pos"]] if robot_state["eef_pos"] else None
     logger.info(PROGRESS + f"[world-state] {tag}: eef_pos={eef} gripper_open={robot_state['gripper_open']} "
                 f"gripper_width={robot_state['gripper_width']} holding={robot_state['gripper_holding']} "

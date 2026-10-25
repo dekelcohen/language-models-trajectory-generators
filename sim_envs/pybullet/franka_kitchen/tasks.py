@@ -145,6 +145,8 @@ class KitchenTask:
         goal_joints: {joint_name: target_value} in unscaled MuJoCo joint space.
         goal_body: for free bodies (the kettle) the goal is a world position
             relative to a named link instead of a joint vector.
+        goal_pour: pour tasks only -- ``{"min_fraction": f}``: success when at
+            least ``f`` of the kettle's water particles end up inside the mug.
         camera_distance / camera_pitch: head camera spherical params
             (yaw is pinned to HEAD_CAMERA_YAW).
         camera_target_offset: (dx, dy, dz) added to the target position to get
@@ -161,13 +163,14 @@ class KitchenTask:
     """
 
     def __init__(self, task_id, label, target_link, goal_joints=None,
-                 goal_body=None, camera_distance=1.2, camera_pitch=-25.0,
+                 goal_body=None, goal_pour=None, camera_distance=1.2, camera_pitch=-25.0,
                  camera_target_offset=(0.0, 0.0, 0.0)):
         self.task_id = task_id
         self.label = label
         self.target_link = target_link
         self.goal_joints = goal_joints or {}
         self.goal_body = goal_body
+        self.goal_pour = goal_pour
         self.camera_distance = camera_distance
         self.camera_pitch = camera_pitch
         self.camera_target_offset = list(camera_target_offset)
@@ -243,6 +246,17 @@ KITCHEN_TASK_LIST = [
         # is a 7-DoF pose in a differently-oriented frame, so it is re-expressed
         # here relative to a named burner link instead of copied verbatim.
         goal_body={"burner_link": "Burner 4_link", "z_offset": 0.055},
+        camera_distance=1.9,
+        camera_pitch=-22.0,
+        camera_target_offset=(0.17, 0.0, 0.15),
+    ),
+    KitchenTask(
+        task_id="kettle_mug",
+        label="kettle",
+        target_link="Burner 2_link",
+        # Same kettle start as "kettle", plus a mug on the counter and water
+        # particles poured from the spout (see SimEnvKitchen._update_water).
+        goal_pour={"min_fraction": 0.5},
         camera_distance=1.9,
         camera_pitch=-22.0,
         camera_target_offset=(0.17, 0.0, 0.15),

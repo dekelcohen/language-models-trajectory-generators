@@ -83,6 +83,36 @@ METAL_LINKS = [
 LIGHT_ON_COLOR = [2.0, 2.0, 2.0, 1.0]
 LIGHT_OFF_COLOR = [0.1, 0.1, 0.1, 1.0]
 
+# --- Pour tasks (goal_pour): a mug on the counter and particle "water" ---------
+# Free counter spot left of the hob (z 1.20), on the side the kettle spout faces
+# (+y), in front of the microwave and within easy reach of the arm.
+MUG_POSITION = [0.22, 0.48, 1.201]
+MUG_OUTER_RADIUS = 0.05
+MUG_WALL = 0.006
+MUG_HEIGHT = 0.09
+MUG_BOTTOM = 0.008
+MUG_SEGMENTS = 16
+MUG_MASS = 0.3
+MUG_COLOR = [0.85, 0.2, 0.2, 1.0]
+
+# PyBullet has no fluid solver, so water is the usual stand-in: small rigid
+# spheres. The kettle's collision body is solid, so instead of sloshing inside
+# it the water lives in a reservoir and is released at the spout tip whenever
+# the tip drops below the kettle body's centre (i.e. the kettle is tilted
+# toward its spout by ~20 deg or more). Released spheres are ordinary bodies.
+WATER_PARTICLES = 40
+WATER_RADIUS = 0.008
+WATER_MASS = 0.002
+WATER_COLOR = [0.2, 0.55, 1.0, 1.0]
+WATER_EMIT_EVERY = 8          # sim steps between particles (240 Hz -> 30/s)
+WATER_EXIT_SPEED = 0.15       # m/s along the spout
+WATER_POUR_DROP = 0.01        # tip must sit this far below the body centre
+# Kettle-local geometry (URDF units, scaled by KITCHEN_GLOBAL_SCALING at load):
+# outer end of the spout cylinder, its outward axis, and the body box centre.
+KETTLE_SPOUT_TIP_LOCAL = [-0.165, 0.0, 0.101]
+KETTLE_SPOUT_DIR_LOCAL = [-0.78, 0.0, 0.62]
+KETTLE_BODY_CENTRE_LOCAL = [0.0, 0.0, 0.058]
+
 KITCHEN_COORDS_PROMPT_SECTION = (
     "The 3D coordinate system of the environment is as follows:\n"
     "  1. The x-axis is in the depth direction, increasing away from you.\n"
@@ -100,6 +130,11 @@ class SimEnvKitchen(SimEnvBase):
 
         self.kitchen_id = None
         self.kettle_id = None
+        self.mug_id = None
+        self.water_ids = []        # released particles, in release order
+        self._water_left = 0       # particles still inside the kettle
+        self._water_shapes = None
+        self._water_step = 0
         self.joints = {}   # joint name -> index
         self.links = {}    # child link name -> index
         self._light_on = None
@@ -209,11 +244,43 @@ class SimEnvKitchen(SimEnvBase):
             self.links = list_link_names(self.kitchen_id)
             self._reset_kettle_onto_start_burner()
             self._apply_textures()
+            if self.task.goal_pour:
+                self._load_mug_and_water()
             # Now that the scene exists, re-frame the camera on the real link pose.
             self.configure_cameras()
         except Exception as e:
             print("[Env] Failed to load Franka Kitchen assets:", e)
             traceback.print_exc()
+
+    def _load_mug_and_water(self):
+        """Hollow cylindrical mug (bottom disc + ring of wall boxes) and the
+        kettle's water reservoir."""
+        r_mid = MUG_OUTER_RADIUS - MUG_WALL / 2.0
+        seg = 2.0 * math.pi * MUG_OUTER_RADIUS / MUG_SEGMENTS * 1.3
+        types, radii, halves, lengths, poss, oris = [p.GEOM_CYLINDER], [MUG_OUTER_RADIUS], [[0, 0, 0]], [MUG_BOTTOM], \
+            [[0, 0, MUG_BOTTOM / 2.0]], [[0, 0, 0, 1]]
+        for i in range(MUG_SEGMENTS):
+            a = 2.0 * math.pi * i / MUG_SEGMENTS
+            types.append(p.GEOM_BOX)
+            radii.append(0.0)
+            halves.append([MUG_WALL / 2.0, seg / 2.0, MUG_HEIGHT / 2.0])
+            lengths.append(0.0)
+            poss.append([r_mid * math.cos(a), r_mid * math.sin(a), MUG_HEIGHT / 2.0])
+            oris.append(list(p.getQuaternionFromEuler([0, 0, a])))
+        col = p.createCollisionShapeArray(types, radii=radii, halfExtents=halves, lengths=lengths,
+                                          collisionFramePositions=poss, collisionFrameOrientations=oris)
+        vis = p.createVisualShapeArray(types, radii=radii, halfExtents=halves, lengths=lengths,
+                                       visualFramePositions=poss, visualFrameOrientations=oris)
+        self.mug_id = p.createMultiBody(MUG_MASS, col, vis, MUG_POSITION)
+        p.changeVisualShape(self.mug_id, -1, rgbaColor=MUG_COLOR)
+        p.changeDynamics(self.mug_id, -1, lateralFriction=1.0)
+        self._water_shapes = (
+            p.createCollisionShape(p.GEOM_SPHERE, radius=WATER_RADIUS),
+            p.createVisualShape(p.GEOM_SPHERE, radius=WATER_RADIUS, rgbaColor=WATER_COLOR),
+        )
+        self.water_ids = []
+        self._water_left = WATER_PARTICLES
+        print(f"[Kitchen] Pour task: mug at {MUG_POSITION}, kettle holds {WATER_PARTICLES} water particles")
 
     def _reset_kettle_onto_start_burner(self):
         """Place the kettle on the burner named by ``KETTLE_START_BURNER``.
@@ -342,6 +409,56 @@ class SimEnvKitchen(SimEnvBase):
             return
         self._update_burners()
         self._update_light()
+        if self._water_left > 0:
+            self._update_water()
+
+    def _kettle_local_to_world(self, local):
+        kp, kq = p.getBasePositionAndOrientation(self.kettle_id)
+        scaled_local = [v * KITCHEN_GLOBAL_SCALING for v in local]
+        return np.array(p.multiplyTransforms(kp, kq, scaled_local, [0, 0, 0, 1])[0]), kq
+
+    def _update_water(self):
+        """Release one particle at the spout tip every WATER_EMIT_EVERY steps
+        while the kettle is tilted toward its spout."""
+        self._water_step += 1
+        if self.kettle_id is None or self._water_step % WATER_EMIT_EVERY:
+            return
+        tip, kq = self._kettle_local_to_world(KETTLE_SPOUT_TIP_LOCAL)
+        centre, _ = self._kettle_local_to_world(KETTLE_BODY_CENTRE_LOCAL)
+        if centre[2] - tip[2] < WATER_POUR_DROP:
+            return
+        rot = np.array(p.getMatrixFromQuaternion(kq)).reshape(3, 3)
+        d = rot @ np.array(KETTLE_SPOUT_DIR_LOCAL)
+        d /= np.linalg.norm(d)
+        jitter = np.random.uniform(-0.003, 0.003, 3)
+        pos = tip + d * (WATER_RADIUS + 0.004) + jitter
+        pid = p.createMultiBody(WATER_MASS, self._water_shapes[0], self._water_shapes[1], pos.tolist())
+        for link in range(-1, p.getNumJoints(self.kettle_id)):
+            p.setCollisionFilterPair(pid, self.kettle_id, -1, link, 0)
+        p.changeDynamics(pid, -1, lateralFriction=0.1, rollingFriction=0.0, restitution=0.0,
+                         linearDamping=0.05)
+        vel = np.array(p.getBaseVelocity(self.kettle_id)[0]) + d * WATER_EXIT_SPEED
+        p.resetBaseVelocity(pid, vel.tolist(), [0, 0, 0])
+        self.water_ids.append(pid)
+        self._water_left -= 1
+        n = len(self.water_ids)
+        if n == 1 or n % 10 == 0 or self._water_left == 0:
+            print(f"[Kitchen] water: poured {n}/{WATER_PARTICLES} from spout tip {np.round(tip, 3).tolist()}, "
+                  f"in mug so far {self.water_in_mug()}")
+
+    def water_in_mug(self):
+        """Released particles currently inside the mug's inner cylinder."""
+        if self.mug_id is None:
+            return 0
+        mp, mq = p.getBasePositionAndOrientation(self.mug_id)
+        ip, iq = p.invertTransform(mp, mq)
+        inner = MUG_OUTER_RADIUS - MUG_WALL
+        count = 0
+        for pid in self.water_ids:
+            local = p.multiplyTransforms(ip, iq, p.getBasePositionAndOrientation(pid)[0], [0, 0, 0, 1])[0]
+            if math.hypot(local[0], local[1]) < inner and -0.005 < local[2] < MUG_HEIGHT + 0.01:
+                count += 1
+        return count
 
     def _update_burners(self):
         """Knob angle past the halfway point pushes its burner plate down.
@@ -404,7 +521,7 @@ class SimEnvKitchen(SimEnvBase):
         """
         if self.kitchen_id is None:
             return None
-        if self.task.goal_body and self.kettle_id is not None:
+        if (self.task.goal_body or self.task.goal_pour) and self.kettle_id is not None:
             return self._aabb_centre(self.kettle_id, -1)
         idx = self.links.get(self.task.target_link)
         if idx is None:
@@ -485,6 +602,8 @@ class SimEnvKitchen(SimEnvBase):
         if self.task.goal_body:
             criteria["goal_body"] = dict(self.task.goal_body)
             criteria["goal_body_pos"] = self._kettle_goal_position()
+        if self.task.goal_pour:
+            criteria["goal_pour"] = dict(self.task.goal_pour, particles=WATER_PARTICLES)
         return criteria
 
     def _kettle_goal_position(self):
@@ -512,6 +631,9 @@ class SimEnvKitchen(SimEnvBase):
                 achieved.append(current)
                 goal.append(self._clamped_goal(name, value))
             return float(np.linalg.norm(np.array(achieved) - np.array(goal)))
+        if self.task.goal_pour:
+            # Fraction of the water that has NOT reached the mug.
+            return 1.0 - self.water_in_mug() / float(WATER_PARTICLES)
         goal_pos = self._kettle_goal_position()
         if goal_pos is None or self.kettle_id is None:
             return None
@@ -523,7 +645,10 @@ class SimEnvKitchen(SimEnvBase):
 
     def _threshold(self):
         """Joint-vector tasks use MuJoCo's BONUS_THRESH; the kettle goal is a
-        world position and needs its own (tighter) metric tolerance."""
+        world position and needs its own (tighter) metric tolerance; pour tasks
+        compare the fraction of water missing from the mug."""
+        if self.task.goal_pour:
+            return 1.0 - float(self.task.goal_pour["min_fraction"]) + 1e-9
         return SUCCESS_THRESHOLD if self.task.goal_joints else POSITION_SUCCESS_THRESHOLD
 
     def check_success(self):
@@ -555,6 +680,18 @@ class SimEnvKitchen(SimEnvBase):
                 state["kettle_orientation_q"] = list(map(float, ori))
         except Exception as e:
             print("[Env] Warning: SimEnvKitchen.get_state failed to read kettle:", e)
+        if self.mug_id is not None:
+            try:
+                state["mug_pos"] = list(map(float, p.getBasePositionAndOrientation(self.mug_id)[0]))
+                in_mug = self.water_in_mug()
+                state["water"] = {
+                    "total": WATER_PARTICLES,
+                    "in_kettle": self._water_left,
+                    "in_mug": in_mug,
+                    "outside_mug": len(self.water_ids) - in_mug,
+                }
+            except Exception as e:
+                print("[Env] Warning: SimEnvKitchen.get_state failed to read mug/water:", e)
         return state
 
     # ------------------------------------------------------------------
