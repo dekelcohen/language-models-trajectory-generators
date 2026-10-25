@@ -52,6 +52,5 @@ URDF/OBJ/textures.
    detent (plug blocked until key fully seated) or gentler funnel.
 2. Genesis margin is thin (65 vs 60 deg): reduce key slip in grasp (finger friction/force) or
    turn past 90 deg in prompts/examples.
-3. Fix Genesis textures: insert_key meshes render white (MTL `map_Kd` not picked up).
 3. Scripted demo with fixed seed for deterministic comparison; add a Genesis test.
 4. Update `document.md` with an insert_key section.
