@@ -73,6 +73,31 @@ Signature summary: *light* = low force + no progress; *misaligned/off-axis* = hi
 force/torque + no progress + in-grip slip; *success* = force plateau at retention level then depth stops at
 pocket bottom (force rises with no motion).
 
+### Reactive spiral insertion (`touch/`, `--exp search`)
+Sim-agnostic package: `touch/state.py` (`TouchState`: EE pose, external wrench est., width, holding) and
+`touch/insertion.py` (`SpiralInsertController` approach -> probe -> spiral search -> insert -> backoff,
+`run_reactive(...)` loop). Inputs are proprioception + the estimated wrench only; sim truth is used by the
+bench just for scenario setup and scoring. Unit tests with quasi-static mock ports: `tests/test_touch_insertion.py`.
+
+Findings on the Genesis bench (start error <= 2 mm lateral, +-2 deg yaw, 0.5 N force noise):
+- **Compliance centre must be the TCP (plug tip)**, not the flange: with Kr=40 Nm/rad a push 10 cm below
+  the flange tilts the hand ~3 deg and fakes "advance". Bench now uses `get_jacobian(local_point=tcp)`.
+- **Lateral stiffness**: >= 5000 N/m while spiralling (face friction makes a soft hand lag the spiral);
+  800 N/m once in the hole (RCC-like) lets the chamfer centre the plug.
+- **Pinch grasp pitches** about the finger-normal axis under tip friction (tip rises ~4 mm, ~9 deg) -> the
+  spiral loses its reference -> most remaining `search_exhausted`. Observable only with in-hand
+  sensing (GelSight marker rotation / wrist cam) -> strongest argument for tactile pads.
+- **Grasp creep** at 17-18 N: ~2-3.5 mm/s both when seated and when wedged (free insert 20-40 mm/s).
+  Stall/creep detectors confuse the two; rule used: judge the depth the *first* time motion turns slow
+  (< 6 mm/s over 0.2 s): advance >= 9 mm -> seated, else jam -> backoff -> search.
+- Grip 30/40 N is worse (soft-contact penetration); keep 20 N. Lower search force (1.5 N) is worse.
+
+| method (3 seeds x 5 trials) | truly inserted | notes |
+|---|---|---|
+| naive firm push | 2-3/15 | |
+| touch spiral (default) | 10/15 | 1 false "seated" (9.5 mm), 2 seated-but-reported-exhausted, 1 jam |
+| touch, `--f_search 1.5` | 8/15 | more `search_exhausted` |
+
 ## 4. Hardware shortlist (≤ $1–2k)
 Panda built-in external wrench estimate (free) · DIGIT (~$350/pad) · GelSight Mini (~$500) · AnySkin (DIY,
 cheap, magnetic) · low-cost wrist F/T (e.g. Bota/OnRobot are above budget; DIY strain-gauge or SO-101
@@ -81,8 +106,11 @@ servo load as a coarse fallback).
 ## 5. Open items / next steps
 - [ ] Grasp-pose realism: plug can tilt 1–2° / sit ~1.7 mm low in the grasp after transport — the robot must
       correct from vision + touch (spiral/tilt search), not from sim truth.
-- [ ] Touch API: `TOUCH_STATE` (noisy wrench est., finger taxels, slip, width) + `run_reactive(controller,
-      max_s, period_s, review_every_s)` with built-in exits (no contact, over-force, stall, timeout).
+- [x] Touch API: `touch/` (`TouchState`, `SpiralInsertController`, `run_reactive`) with exits (no contact,
+      over-force, jam, slipped, search exhausted, timeout). TODO: finger taxels / slip in `TouchState`,
+      `review_every_s` VLM hook.
+- [ ] Insertion robustness: detect in-grasp pitch (taxels) and re-reference the spiral; fix missed seats
+      after search (2/15).
 - [ ] USB env through the adapter API, visible vs half-occluded port; eval = insertion depth.
 - [ ] Touch skill (`prompts/skills/touch-guided-contact/SKILL.md`), LLM runs (gemini-3.8-flash).
 - [ ] Slip + joint-direction follow-ups (kettle grasp, `helpers/pull_proprio.py`).
@@ -91,5 +119,7 @@ servo load as a coarse fallback).
 ```
 $env:PYTHONIOENCODING="utf-8"
 C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_genesis\python.exe research\touch\genesis_touch_probe.py --exp push   # ~150 s CPU
-...  --exp grip | press | slot | slip | render
+...  --exp grip | press | slot | slip | creep | render
+...  --exp search --trials 5 --seed 0 --methods naive touch   # ~5-10 min per seed
+python -m pytest tests\\test_touch_insertion.py -q
 ```

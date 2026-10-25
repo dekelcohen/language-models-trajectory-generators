@@ -25,7 +25,11 @@ Run (vlm_genesis env, CPU; set PYTHONIOENCODING=utf-8 on Windows):
   python research/touch/genesis_touch_probe.py --exp push
 """
 import argparse
+import os
+import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import numpy as np
 import torch
@@ -34,7 +38,8 @@ import genesis as gs
 import genesis.utils.geom as gu
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--exp", choices=("press", "slot", "slip", "grip", "push", "render", "all"), default="all")
+ap.add_argument("--exp", choices=("press", "slot", "slip", "grip", "creep", "push", "search", "render", "all"),
+                default="all")
 ap.add_argument("--offsets", nargs="*", default=["0,0", "0.002,0", "-0.002,0", "0,0.0015", "0,-0.0015", "0.0007,0"],
                 help="plug (dy,dz) offsets from the port centre, metres")
 ap.add_argument("--dt", type=float, default=0.005)
@@ -45,6 +50,22 @@ ap.add_argument("--armature", type=float, default=0.5, help="plug translational 
 ap.add_argument("--stiff_fric", type=int, default=1)
 ap.add_argument("--noise", type=float, default=0.0, help="joint torque sensor noise std (Nm)")
 ap.add_argument("--img", default="research/touch/usb_probe.png")
+ap.add_argument("--trials", type=int, default=8, help="search: random misalignment trials")
+ap.add_argument("--grip", type=float, default=20.0, help="per-finger squeeze force, N")
+ap.add_argument("--seed", type=int, default=0)
+ap.add_argument("--methods", nargs="*", default=["naive", "touch"])
+ap.add_argument("--err_r", type=float, default=0.002, help="search: max lateral alignment error, m")
+ap.add_argument("--err_yaw", type=float, default=2.0, help="search: max plug yaw error, deg")
+ap.add_argument("--case", default="", help="search: fixed 'dy,dz,yaw' (m,m,deg) for the first trial")
+ap.add_argument("--standoff", type=float, default=0.004, help="search: start gap tip -> port face, m")
+ap.add_argument("--k_lat", type=float, default=5000.0, help="search: lateral impedance stiffness N/m")
+ap.add_argument("--kr", type=float, default=40.0, help="search: rotational impedance stiffness Nm/rad")
+ap.add_argument("--tcp", type=int, default=1, help="search: impedance/EE frame at the nominal plug tip (1) or hand (0)")
+ap.add_argument("--fnoise", type=float, default=0.5, help="search: force-estimate noise std, N")
+ap.add_argument("--max_s", type=float, default=20.0, help="search: controller timeout, s")
+ap.add_argument("--f_search", type=float, default=3.0, help="search: press force while spiralling, N")
+ap.add_argument("--trace", type=int, default=0, help="search: print an eval-only sim-truth trace (debug)")
+ap.add_argument("--verbose", type=int, default=1, help="search: print controller events for the first N trials")
 args = ap.parse_args()
 
 gs.init(backend=gs.cpu, precision="32", logging_level="warning")
@@ -126,7 +147,7 @@ franka.set_dofs_kv([450, 450, 350, 350, 200, 200, 200, 10, 10])
 
 hand = franka.get_link("hand")
 robot_links = [franka.get_link(n) for n in ("hand", "left_finger", "right_finger")]
-GRIP_N = 20.0                     # per-finger squeeze force (Franka Hand: up to 70 N continuous)
+GRIP_N = args.grip                # per-finger squeeze force (Franka Hand: up to 70 N continuous)
 
 
 def np_(x):
@@ -254,11 +275,14 @@ def tip_end_pose():
     return np_(plug.get_pos()) + R @ np.array([TIP_X, 0, 0]), R
 
 
-def drive_impedance(p_des, R_des, steps, K=1500.0, Kr=40.0, q_rest=None, log_every=0, push_dir=None, K_lat=2000.0):
+def drive_impedance(p_des, R_des, steps, K=1500.0, Kr=40.0, q_rest=None, log_every=0, push_dir=None, K_lat=2000.0,
+                    tcp_local=None):
     """Cartesian impedance at the hand (gravity is compensated by the robot model, like libfranka's
     cartesian_impedance example): tau = J^T [K dp - D v ; Kr dR - Dr w] + null-space posture hold.
     The contact force the robot feels is the spring deflection K (p_des - p) at equilibrium.
-    With push_dir, stiffness is K along it and K_lat across it (compliant push, stiff lateral hold)."""
+    With push_dir, stiffness is K along it and K_lat across it (compliant push, stiff lateral hold).
+    tcp_local (hand frame) moves the compliance centre and p/p_des to the tool tip, like setting
+    libfranka's EE frame to the TCP: a push at the tip then does not tilt the hand."""
     if push_dir is None:
         Km, Dm = K * np.eye(3), 2 * np.sqrt(K * 2.0) * np.eye(3)
     else:
@@ -271,9 +295,13 @@ def drive_impedance(p_des, R_des, steps, K=1500.0, Kr=40.0, q_rest=None, log_eve
         port_physics()
         p, R = np_(hand.get_pos()), gu.quat_to_R(np_(hand.get_quat()))
         v, w = np_(hand.get_vel()), np_(hand.get_ang())
+        if tcp_local is not None:
+            r = R @ tcp_local
+            p, v = p + r, v + np.cross(w, r)
         e_r = 0.5 * sum(np.cross(R[:, i], R_des[:, i]) for i in range(3))
         wrench = np.concatenate([Km @ (p_des - p) - Dm @ v, Kr * e_r - Dr * w])
-        J = np_(franka.get_jacobian(hand))[:, :7]
+        J = np_(franka.get_jacobian(hand, local_point=None if tcp_local is None else
+                                    torch.tensor(tcp_local, dtype=torch.float32)))[:, :7]
         q, dq = np_(franka.get_dofs_position(motors)), np_(franka.get_dofs_velocity(motors))
         tau = J.T @ wrench
         if q_rest is not None:
@@ -333,6 +361,136 @@ def exp_push(cases):
         # release and back off so the next case starts clean
         franka.control_dofs_position(np.array([0.04, 0.04]), fingers)
         drive(np_(ik(np_(hand.get_pos()) + np.array([-0.05, 0, 0.05]))), 0.04, 100)
+
+
+def imp_gains(K, push_dir, K_lat):
+    P = np.outer(push_dir, push_dir)
+    return K * P + K_lat * (np.eye(3) - P), 2 * np.sqrt(K * 2.0) * P + 2 * np.sqrt(K_lat * 2.0) * (np.eye(3) - P)
+
+
+def place_tip(aim, R_des, rel):
+    """Scenario set-up only: put the real tip end at `aim` (which already contains the perception
+    error) using sim truth, so every method starts from the same, known misalignment."""
+    hand_t = hand_target_for_tip(aim, rel)
+    for _ in range(6):
+        qd = np_(franka.inverse_kinematics(link=hand, pos=hand_t, quat=gu.R_to_quat(R_des), pos_tol=1e-5,
+                                           rot_tol=1e-4, max_solver_iters=100))
+        drive(qd, 0.0, 120, force=GRIP_N)
+        tip, _ = tip_end_pose()
+        hand_t = hand_t + (aim - tip)
+
+
+def search_trial(method, ey, ez, yaw, rng, verbose=False):
+    """One insertion attempt from a misaligned start. The robot only believes 'the port is straight
+    ahead along +x'; (ey, ez, yaw) is the unknown error of its vision-based alignment."""
+    from touch import InsertConfig, SpiralInsertController, TouchState, run_reactive
+
+    q, rel = grasp_plug()
+    R_des = gu.quat_to_R(np_(gu.euler_to_quat((0.0, 0.0, yaw)))) @ gu.quat_to_R(np_(HAND_DOWN))
+    place_tip(PORT + np.array([-args.standoff, ey, ez]), R_des, rel)
+    q_rest = np_(franka.get_dofs_position(motors))
+    axis = np.array([1.0, 0.0, 0.0])
+    # TCP = nominal plug tip from the planned grasp (fingertip centre + plug length along the believed
+    # axis), in the hand frame. The robot does not know the yaw error, so it uses the unyawed geometry.
+    tcp_local = gu.quat_to_R(np_(HAND_DOWN)).T @ np.array([TIP_X, 0.0, -TIP]) if args.tcp else None
+
+    def ee():
+        p, R = np_(hand.get_pos()), gu.quat_to_R(np_(hand.get_quat()))
+        v, w = np_(hand.get_vel()), np_(hand.get_ang())
+        if tcp_local is None:
+            return p, v, R
+        r = R @ tcp_local
+        return p + r, v + np.cross(w, r), R
+
+    p0, _, R0 = ee()
+    rel0 = R0.T @ (np_(plug.get_pos()) - np_(hand.get_pos()))
+    st = {"t": 0.0, "p_des": p0.copy(), "K": 1500.0, "K_lat": args.k_lat}
+
+    def advance(period):
+        n = max(1, int(round(period / args.dt)))
+        drive_impedance(st["p_des"], R_des, n, K=st["K"], Kr=args.kr, q_rest=q_rest, push_dir=axis, K_lat=st["K_lat"],
+                        tcp_local=tcp_local)
+        st["t"] += n * args.dt
+
+    def read_state():
+        # Proprioception only: EE pose (FK) and the external force the impedance controller is resisting
+        # (what tau_J-based O_F_ext_hat_K reports quasi-statically), plus sensor noise.
+        p, v, _ = ee()
+        Km, Dm = imp_gains(st["K"], axis, st["K_lat"])
+        f = -(Km @ (st["p_des"] - p) - Dm @ v) + rng.normal(0.0, args.fnoise, 3)
+        return TouchState(t=st["t"], ee_pos=p, force=f, gripper_width=grip_width())
+
+    if method == "naive":
+        for s in np.linspace(0, 1, 9)[1:]:
+            st["p_des"] = p0 + axis * 0.030 * s
+            advance(0.1)
+        advance(1.2)
+        res = {"outcome": "pushed", "duration_s": st["t"], "events": []}
+    else:
+        def send(cmd):
+            st["p_des"], st["K"] = np.asarray(cmd.ee_target, float), cmd.k_axial
+            st["K_lat"] = cmd.k_lateral or args.k_lat
+        ctrl = SpiralInsertController(axis, InsertConfig(f_search=args.f_search), log=(lambda m: print("   ", m, flush=True)) if verbose else None)
+        def debug_tick(ts, cmd):   # eval-only trace (sim truth), printed for debugging, never fed back
+            if verbose and args.trace and int(round(ts.t / 0.02)) % 10 == 0:
+                tp, _ = tip_end_pose()
+                Rh = gu.quat_to_R(np_(hand.get_quat()))
+                sl = 1000 * np.linalg.norm(Rh.T @ (np_(plug.get_pos()) - np_(hand.get_pos())) - rel0)
+                print(f"      trace t {ts.t:5.2f} {cmd.phase:8s} F_ax {ts.axial_resistance(axis):5.1f} "
+                      f"ee_adv {1000 * (ts.ee_pos - p0)[0]:6.2f} lat_cmd {np.round(1000 * (cmd.ee_target - p0)[1:], 2)} "
+                      f"| true depth {1000 * (tp[0] - FACE_X):6.2f} tip_yz_err {np.round(1000 * (tp[1:] - PORT[1:]), 2)} "
+                      f"slip {sl:.2f}", flush=True)
+        res = run_reactive(ctrl, read_state, send, advance, max_s=args.max_s, period_s=0.02, on_tick=debug_tick)
+    tip, _ = tip_end_pose()
+    depth = tip[0] - FACE_X                                               # eval only (sim truth)
+    R1 = gu.quat_to_R(np_(hand.get_quat()))
+    slip = 1000 * np.linalg.norm(R1.T @ (np_(plug.get_pos()) - np_(hand.get_pos())) - rel0)
+    tilt = np.degrees(np.arccos(np.clip((np.trace(R0.T @ R1) - 1) / 2, -1, 1)))
+    ok = depth > 0.010
+    print(f"RESULT search {method:5s} err dy {ey*1000:+.2f} dz {ez*1000:+.2f}mm yaw {yaw:+.1f}deg | "
+          f"outcome {res['outcome']:16s} t {res['duration_s']:5.2f}s | true depth {depth*1000:5.1f}mm "
+          f"({'IN' if ok else 'not in'}) | in-grip slip {slip:.1f}mm hand tilt {tilt:.1f}deg", flush=True)
+    franka.control_dofs_position(np.array([0.04, 0.04]), fingers)
+    drive(np_(ik(np_(hand.get_pos()) + np.array([-0.05, 0, 0.05]))), 0.04, 100)
+    return ok, res
+
+
+def exp_search(n, seed, methods):
+    rng = np.random.default_rng(seed)
+    noise_rng = np.random.default_rng(seed + 1000)   # separate stream: trial errors stay fixed
+    stats = {m: [] for m in methods}
+    for i in range(n):
+        # Relative plug-to-port alignment error after wrist-camera servoing: uniform in a 2 mm disc, +-2 deg yaw.
+        r, ang = args.err_r * np.sqrt(rng.uniform()), rng.uniform(0, 2 * np.pi)
+        ey, ez, yaw = r * np.cos(ang), r * np.sin(ang), rng.uniform(-args.err_yaw, args.err_yaw)
+        if i == 0 and args.case:
+            ey, ez, yaw = (float(v) for v in args.case.split(","))
+        for m in methods:
+            ok, res = search_trial(m, ey, ez, yaw, noise_rng, verbose=(i < args.verbose))
+            stats[m].append((ok, res["duration_s"], res["outcome"]))
+    for m, s in stats.items():
+        ok = [x for x in s if x[0]]
+        print(f"SUMMARY {m}: {len(ok)}/{len(s)} inserted; mean time (successes) "
+              f"{np.mean([x[1] for x in ok]) if ok else float('nan'):.2f}s; outcomes "
+              f"{sorted({o: sum(1 for x in s if x[2] == o) for o in {x[2] for x in s}}.items())}", flush=True)
+
+
+def exp_creep(loads):
+    """Hold a constant axial push (-x, like the port face pushing back) on the held plug for 2 s, arm under
+    position control. A Coulomb grasp would not move below ~2*mu*F_grip; soft contacts creep."""
+    pl = plug.get_link("plug")
+    for F in loads:
+        q, rel0 = grasp_plug()
+        trace = []
+        for k in range(400):
+            pl.apply_external_force(np.array([-F, 0.0, 0.0]))
+            franka.control_dofs_position(q[:7], motors)
+            franka.control_dofs_force(np.array([-GRIP_N, -GRIP_N]), fingers)
+            scene.step()
+            if k % 100 == 99:
+                trace.append(round(1000 * ((np_(plug.get_pos()) - np_(hand.get_pos()))[0] - rel0[0]), 2))
+        print(f"RESULT creep grip {GRIP_N:.0f}N load {F:4.1f}N: slip mm at 0.5/1/1.5/2 s {trace}; "
+              f"width {grip_width()*1000:.1f}mm", flush=True)
 
 
 def exp_slot(offsets, render_only=False):
@@ -434,6 +592,10 @@ if args.exp in ("push", "all"):
               ("firm_dy1.5", 1500, 0.030, 0, 0, 0.0015)])
 if args.exp == "grip":
     exp_grip()
+if args.exp == "creep":
+    exp_creep([4.0, 8.0, 12.0, 18.0])
+if args.exp == "search":
+    exp_search(args.trials, args.seed, args.methods)
 if args.exp in ("slip", "all"):
     exp_slip()
 print(f"sim wall time {time.time() - t0:.1f}s (dt {args.dt}, substeps {args.substeps})", flush=True)
