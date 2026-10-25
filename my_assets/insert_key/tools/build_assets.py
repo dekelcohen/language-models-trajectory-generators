@@ -56,6 +56,11 @@ KEY_MASS = 0.030
 
 # Keyway clearance hole (x along the blade width, y along its thickness).
 SLOT_HX, SLOT_HY = 0.0080, 0.0066
+# Collision-only: the mesh blade is a chunky 12.5x10.3 mm prism that slips past the keyway
+# walls under ~1.6 mm of (soft, Genesis) contact penetration. A flat 3 mm collision blade
+# in a 4.4 mm keyway needs ~4.5 mm to slip, so turning the key reliably drives the plug.
+KEY_BLADE_COLL_HY = 0.0015
+KEYWAY_COLL_HY = 0.0022
 
 # Lock (link frames: base origin on the table top, plug joint on the housing top).
 PLINTH = (0.13, 0.13, 0.025)
@@ -401,8 +406,8 @@ def build_key_stand(tex):
 
 def build_key(tex):
     path = build_key_mesh()
-    colls = [coll_box((KEY_BLADE["x"][0], KEY_BLADE["y"][0], KEY_BLADE["z"][0]),
-                      (KEY_BLADE["x"][1], KEY_BLADE["y"][1], KEY_BLADE["z"][1])),
+    colls = [coll_box((KEY_BLADE["x"][0], -KEY_BLADE_COLL_HY, KEY_BLADE["z"][0]),
+                      (KEY_BLADE["x"][1], KEY_BLADE_COLL_HY, KEY_BLADE["z"][1])),
              coll_box((KEY_SHOULDER["x"][0], KEY_SHOULDER["y"][0], KEY_SHOULDER["z"][0]),
                       (KEY_SHOULDER["x"][1], KEY_SHOULDER["y"][1], KEY_SHOULDER["z"][1])),
              coll_box((KEY_BOW["x"][0], KEY_BOW["y"][0], KEY_BOW["z"][0]),
@@ -457,7 +462,7 @@ def build_lock(tex):
     ]
     plug_top = PLUG_PROUD
     funnel_bottom = plug_top - FUNNEL_DEPTH
-    plug_colls = keyway_collisions(funnel_bottom, KEYWAY_DEPTH - FUNNEL_DEPTH, SLOT_HX, SLOT_HY, PLUG_SQ)
+    plug_colls = keyway_collisions(funnel_bottom, KEYWAY_DEPTH - FUNNEL_DEPTH, SLOT_HX, KEYWAY_COLL_HY, PLUG_SQ)
     # Solid rim around the funnel up to the plug face.
     plug_colls += [
         coll_box((FUNNEL_TOP_HX, -PLUG_SQ, funnel_bottom), (PLUG_SQ, PLUG_SQ, plug_top)),
@@ -465,7 +470,7 @@ def build_lock(tex):
         coll_box((-FUNNEL_TOP_HX, FUNNEL_TOP_HY, funnel_bottom), (FUNNEL_TOP_HX, PLUG_SQ, plug_top)),
         coll_box((-FUNNEL_TOP_HX, -PLUG_SQ, funnel_bottom), (FUNNEL_TOP_HX, -FUNNEL_TOP_HY, plug_top)),
     ]
-    plug_colls += funnel_collisions(plug_top, FUNNEL_DEPTH, SLOT_HX, SLOT_HY, FUNNEL_TOP_HX, FUNNEL_TOP_HY)
+    plug_colls += funnel_collisions(plug_top, FUNNEL_DEPTH, SLOT_HX, KEYWAY_COLL_HY, FUNNEL_TOP_HX, FUNNEL_TOP_HY)
 
     body = (
         '  <link name="lock_base">\n'

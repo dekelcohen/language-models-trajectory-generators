@@ -55,8 +55,11 @@ INSERT_DEPTH_MIN = 0.025
 INSERT_XY_MAX = 0.007
 TURN_ANGLE_MIN = math.radians(60)
 
-# Plug "spring": a weak velocity motor so the plug does not drift, yet a held key turns it.
-PLUG_RESIST_TORQUE = 0.05
+# Plug Coulomb friction so it does not drift, yet a held key turns it. Per simulator: PyBullet
+# models it as a capped zero-velocity motor, Genesis as joint frictionloss, and Genesis' softer
+# finger contacts let the key slip in the grasp above ~0.01 N*m.
+PLUG_RESIST_TORQUE = {"pybullet": 0.05, "genesis": 0.01}
+PLUG_RESIST_TORQUE_DEFAULT = 0.05
 # Genesis defaults joint armature to 0.1 kg*m^2 (plug inertia is ~4e-5); PyBullet ignores it.
 PLUG_ARMATURE = 1e-4
 KEY_FRICTION = 1.5
@@ -180,7 +183,9 @@ class SimEnvInsertKey(SimEnvBase):
                                     spinningFriction=0.01, rollingFriction=0.0)
             if self.lock_id is not None and self.plug_joint is not None:
                 sim.set_joint_armature(self.lock_id, self.plug_joint, PLUG_ARMATURE)
-                sim.set_joint_friction(self.lock_id, self.plug_joint, PLUG_RESIST_TORQUE)
+                sim.set_joint_friction(self.lock_id, self.plug_joint,
+                                       PLUG_RESIST_TORQUE.get(getattr(sim, "name", ""),
+                                                              PLUG_RESIST_TORQUE_DEFAULT))
         except Exception as e:
             print("[Env] insert_key tune_physics failed:", e)
             traceback.print_exc()
