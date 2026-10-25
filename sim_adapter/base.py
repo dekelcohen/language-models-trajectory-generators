@@ -297,6 +297,24 @@ class SimAdapter(ABC):
         """
         return None
 
+    def set_joint_armature(self, body: Any, joint: Any, armature: float) -> None:
+        """Set a joint's rotor inertia (armature). No-op where the simulator has none.
+
+        PyBullet has no armature. Genesis gives every URDF joint 0.1 kg*m^2 by default,
+        which swamps light mechanisms (a lock plug is ~4e-5) so they barely move under
+        contact and the pushing body tunnels through instead.
+        """
+        return None
+
+    def set_joint_friction(self, body: Any, joint: Any, torque: float) -> None:
+        """Passive Coulomb friction on an unactuated joint.
+
+        Default is the PyBullet idiom: a zero-velocity motor capped at ``torque``.
+        Genesis overrides it - its velocity control damps implicitly with ``kv``
+        regardless of the force cap, which would make the joint near-immovable.
+        """
+        self.set_joint_velocity(body, joint, target_velocity=0.0, force=torque)
+
     @abstractmethod
     def inverse_kinematics(self, body: Any, link: Any, position,
                            orientation_q=None, lower_limits=None, upper_limits=None,
