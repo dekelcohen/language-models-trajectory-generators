@@ -339,9 +339,20 @@ def summarize_pull(handle_frames, gripper_positions, dt=0.1, face_points=None,
 
     # -- recommendation for the next attempt -----------------------------------------
     if rec is None and normal is not None:
-        rec_src = ("face_normal_after_wrong_dir" if "pull_direction_wrong" in facts["flags"]
-                   else "face_normal")
-        rec = normal
+        aligned_no_motion = (not handle_moved and facts.get("pull_alignment_cos") is not None
+                             and "pull_direction_wrong" not in facts["flags"])
+        if aligned_no_motion:
+            # pulled straight out of the face and nothing moved: the part does not open
+            # that way (sliding panel / lift-up flap) - recommend sliding along the face
+            side = _unit(np.array([-normal[1], normal[0], 0.0]))
+            if side is not None:
+                rec, rec_src = side, "face_lateral_after_no_motion"
+                facts["alternative_dirs"] = [np.round(-side, 3).tolist(), [0.0, 0.0, 1.0],
+                                             np.round(-normal, 3).tolist()]
+        if rec is None:
+            rec_src = ("face_normal_after_wrong_dir" if "pull_direction_wrong" in facts["flags"]
+                       else "face_normal")
+            rec = normal
     if rec is not None:
         facts["recommended_pull_dir"] = np.round(rec, 3).tolist()
         facts["recommended_pull_dir_source"] = rec_src
@@ -378,6 +389,14 @@ def recommendation_text(facts):
     elif src == "face_normal_after_wrong_dir":
         why = ("straight out of the door front (its outward normal); the last pull went "
                "sideways/along the face and the door did not move")
+    elif src == "face_lateral_after_no_motion":
+        alts = facts.get("alternative_dirs") or []
+        why = ("sideways along the door front: the last pull went straight out of the front "
+               "and the door did not move at all, so it probably slides in a track rather than "
+               "swinging out (if it has a latch/lever, actuate that first). Pick the sideways "
+               "sense toward the panel's free/open side (away from the edge its handle sits on)"
+               + (f"; if it does not move either, try {_vec(alts[0])}, then lifting "
+                  f"{_vec(alts[1])}, then pushing {_vec(alts[2])}" if len(alts) >= 3 else ""))
     else:
         why = ("straight out of the door front (its outward normal). The door did not move: "
                "make sure the handle/latch is actuated and the grasp is firm before pulling; "

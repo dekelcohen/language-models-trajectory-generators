@@ -72,6 +72,9 @@ class API:
         # only starts/stops it and pulls reports.
         self.tracking_active = False
         self.tracking_summary = None
+        # Per-trajectory proprioception (env._trajectory_proprio): commanded vs reached hand
+        # motion + finger state; feeds the reviewer's pull evidence (helpers.pull_proprio).
+        self.motion_log = []
         # Per-(sub)task mutable state. Replaced with a fresh TaskState per subtask.
         self.task = TaskState(start_trajectory_step=self.trajectory_step)
 
@@ -488,8 +491,16 @@ class API:
                     self.logger.info(_msg)
                 except Exception:
                     pass
-                if len(resp) >= 3 and isinstance(resp[2], dict) and resp[2].get("tracking_abort"):
-                    tracking_abort = resp[2]
+                if len(resp) >= 3 and isinstance(resp[2], dict):
+                    if resp[2].get("tracking_abort"):
+                        tracking_abort = resp[2]
+                    if isinstance(resp[2].get("proprio"), dict):
+                        rec = dict(resp[2]["proprio"])
+                        try:    # commanded first waypoint, in the LLM's trajectory coordinates
+                            rec["traj_start"] = [float(v) for v in list(trajectory.points[0])[:3]]
+                        except Exception:
+                            pass
+                        self.motion_log.append(rec)
         except Exception:
             pass
         self.task.trajectory_length += len(trajectory.points)
@@ -855,6 +866,56 @@ class API:
                 "direct physical measurement, more reliable than small details in the low-resolution clips):\n"
                 "  - " + verdict)
 
+    def _pull_proprio_review_evidence(self, start_idx):
+        """Measured grasp-and-pull facts of this attempt -> ``(facts, prompt_text)`` or ``(None, None)``.
+
+        Built from the arm's own per-trajectory log (commanded vs reached hand motion,
+        finger width) - what a real arm reports; no scene/joint state of the sim is used.
+        """
+        from helpers.pull_proprio import summarize_pull_proprio, format_pull_proprio
+        if not getattr(config, "review_pull_proprio", True):
+            return None, None
+        records = [r for r in (self.motion_log or []) if int(r.get("step_start", 0)) >= int(start_idx)]
+        try:
+            facts = summarize_pull_proprio(records, logger=lambda m: self.logger.info(PROGRESS + m + ENDC))
+        except Exception as e:                  # evidence is optional; never break the review
+            self.logger.info(WARNING + f"Review: pull proprioception failed: {type(e).__name__}: {e}" + ENDC)
+            return None, None
+        if facts is None:
+            self.logger.info(PROGRESS + f"Review: no pull proprioception ({len(records)} trajectories, "
+                             "no closed-gripper motion or no width sensor)" + ENDC)
+            return None, None
+        text = format_pull_proprio(facts)
+        self.logger.info(PROGRESS + f"Review: pull proprioception -> outcome={facts['outcome']} "
+                         f"max_carried={facts['max_carried_m']} pulls={len(facts['pulls'])}" + ENDC)
+        return facts, text
+
+    def _apply_pull_proprio_verdict(self, facts, success, reason, improvement_steps):
+        """Measured-veto + retry direction bookkeeping -> (success, reason, improvement_steps)."""
+        from helpers.pull_proprio import measured_no_motion_veto, retry_direction_hint
+        if not facts:
+            return success, reason, improvement_steps
+        veto = measured_no_motion_veto(facts, self.task.command)
+        if success and veto:
+            self.logger.info(FAIL + "Review: success verdict OVERRULED by measured pull proprioception: "
+                             + veto + ENDC)
+            success = False
+            reason = veto + (" (The VLM reviewer had judged success: " + str(reason) + ")"
+                             if reason else " (final attempt, accepted without VLM review)")
+        hint = None
+        if not success:
+            hint = retry_direction_hint(facts, self.task.failed_pull_dirs)
+        if facts["outcome"] == "part_did_not_move":
+            self.task.failed_pull_dirs = list(self.task.failed_pull_dirs) + list(facts["pull_dirs"])
+        self.task.retry_direction_hint = hint
+        if hint:
+            self.logger.info(PROGRESS + f"Review: retry direction recommendation -> {hint}" + ENDC)
+            if isinstance(improvement_steps, list):
+                improvement_steps = [hint] + improvement_steps
+            else:
+                improvement_steps = (hint + "\n" + str(improvement_steps or "")).strip()
+        return success, reason, improvement_steps
+
     def run_vlm_review(self):
         """Ask a VLM to judge whether the attempt achieved the task goal.
 
@@ -959,6 +1020,9 @@ class API:
         gripper_text = self._gripper_review_evidence()
         if gripper_text:
             media_section = media_section + "\n\n" + gripper_text + "\n"
+        pull_facts, pull_text = self._pull_proprio_review_evidence(start_idx)
+        if pull_text:
+            media_section = media_section + "\n\n" + pull_text + "\n"
 
         # Build prompt with placeholders
         prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.task.command)) \
@@ -998,7 +1062,10 @@ class API:
         success = bool(resp.get("success") is True)
         reason = resp.get("reasoning", "")
         improvement_steps = resp.get("improvement_steps", "")
-        if not success and tracking_facts:
+        # the measured pull bookkeeping knows every direction already tried in this task; the
+        # tracking recommendation only sees this attempt, so it yields when the former applies
+        proprio_directs = bool(pull_facts and pull_facts["outcome"] == "part_did_not_move")
+        if not success and tracking_facts and not proprio_directs:
             from tracking.review_evidence import recommendation_text
             rec = recommendation_text(tracking_facts)
             if rec:
@@ -1008,6 +1075,8 @@ class API:
                 else:
                     improvement_steps = (str(improvement_steps) + "\n" + rec).strip()
                 self.logger.info(PROGRESS + f"Review: added to improvement steps -> {rec}" + ENDC)
+        success, reason, improvement_steps = self._apply_pull_proprio_verdict(
+            pull_facts, success, reason, improvement_steps)
         self.task.review_reason = reason
         self.task.review_improvement_steps = improvement_steps
         self.logger.info((OK if success else FAIL) + f"Review: success={success} | task=\"{self.task.title()}\". See details in above json" + ENDC)
@@ -1048,6 +1117,13 @@ class API:
             self.task.completed_task = True
             self.task.accepted_without_review = True
             self.logger.info(PROGRESS + f"task_completed final attempt {self.task.attempt_number}/{max_attempts} -- accepting result" + ENDC)
+            # No review, but the measured pull facts still tell the planner when the held
+            # part never moved (so it does not take the unreviewed attempt as an opening).
+            facts, _ = self._pull_proprio_review_evidence(self.task.start_attempt_trajectory_step)
+            _ok, reason, steps = self._apply_pull_proprio_verdict(facts, True, "", [])
+            if not _ok:
+                self.task.review_reason = reason
+                self.task.review_improvement_steps = steps
             return
         self.logger.info(PROGRESS + "Waiting to execute all generated trajectories..." + ENDC)
         self.main_connection.send([TASK_COMPLETED])

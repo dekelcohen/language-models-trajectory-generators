@@ -468,6 +468,40 @@ def _record_tilt_while_holding(sim, robot):
         robot.max_tilt_since_close = {"deg": round(tilt, 1), "dip_dir": dip}
 
 
+def _motion_sample(sim, robot):
+    """Measured hand position + finger state right now (joint encoders + gripper width)."""
+    pos, _ = sim.get_link_pose(robot.id, robot.ee_index)
+    grip = _gripper_proprio(sim, robot)
+    return [round(float(v), 4) for v in pos], grip["gripper_width"], grip["gripper_holding"]
+
+
+def _trajectory_proprio(sim, robot, desc, step_start, start, held_samples, n_points, aborted):
+    """One executed trajectory as a real arm would log it: where the hand was told to go
+    (the controller's last target) vs where the encoders say it went, and whether the
+    fingers still held something along the way. Lets the reviewer tell "the held handle
+    moved with the hand" from "the handle slipped out / the arm was blocked" without any
+    privileged scene state (see ``helpers.pull_proprio``)."""
+    ee_end, width_end, holding_end = _motion_sample(sim, robot)
+    ee_start, width_start, holding_start = start
+    last_held = None
+    for pos, holding in held_samples:
+        if holding:
+            last_held = pos
+    if holding_end:
+        last_held = ee_end
+    target = getattr(robot, "last_ee_target", None)
+    return {
+        "desc": desc, "step_start": int(step_start), "step_end": int(robot.trajectory_step),
+        "n_points": int(n_points), "aborted": bool(aborted),
+        "gripper_closed": not bool(robot.gripper_open),
+        "ee_start": ee_start, "ee_end": ee_end,
+        "cmd_end": None if target is None else [round(float(v), 4) for v in target],
+        "width_start": width_start, "width_end": width_end,
+        "holding_start": holding_start, "holding_end": holding_end,
+        "ee_last_holding": last_held,
+    }
+
+
 def step_env_and_record_loop(env, robot):
     for _ in range(100):
         robot.step_env_and_record(env, force_record=False)
@@ -686,12 +720,18 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                     desc = None
 
                 aborted_by_tracking = False
+                step_start = robot.trajectory_step
+                proprio_start = _motion_sample(sim, robot)
+                held_samples = []
                 for i, point in enumerate(trajectory):
                     try:
                         ee_target_orientation_e = trajectory_point_orientation(robot.ee_start_orientation_e, point)
                     except ValueError as e:
                         raise ValueError(f"Trajectory point {i}: {e}") from e
                     robot.move(env, point[:3], ee_target_orientation_e, gripper_open=robot.gripper_open, is_trajectory=True, desc=desc if i == 0 else None)
+                    if not robot.gripper_open:
+                        pos, _w, holding = _motion_sample(sim, robot)
+                        held_samples.append((pos, holding))
                     # A tracking monitor that returned "abort" (e.g. the object left the
                     # gripper) stops the rollout here rather than after the last waypoint,
                     # so the agent can retry from a state close to the failure.
@@ -704,6 +744,12 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
 
                 step_env_and_record_loop(env, robot)
                 _record_tilt_while_holding(sim, robot)
+                try:
+                    proprio = _trajectory_proprio(sim, robot, desc, step_start, proprio_start,
+                                                  held_samples, len(trajectory), aborted_by_tracking)
+                except Exception as e:
+                    logger.info(FAIL + f"Trajectory proprioception record failed: {e}" + ENDC)
+                    proprio = None
 
                 if aborted_by_tracking:
                     session = robot.tracking_session
@@ -712,9 +758,11 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                                          robot.trajectory_step,
                                          {"tracking_abort": True,
                                           "reason": session.abort_reason,
-                                          "summary": session.summary()}])
+                                          "summary": session.summary(),
+                                          "proprio": proprio}])
                 else:
-                    env_connection.send([OK + "Finished executing generated trajectory!" + ENDC, robot.trajectory_step])
+                    env_connection.send([OK + "Finished executing generated trajectory!" + ENDC, robot.trajectory_step,
+                                         {"proprio": proprio}])
 
             elif env_connection_received[0] == START_TRACKING:
 

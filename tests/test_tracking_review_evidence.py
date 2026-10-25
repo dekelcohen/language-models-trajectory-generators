@@ -129,7 +129,12 @@ class TestPullFailures(unittest.TestCase):
         self.assertNotIn("pull_direction_wrong", f["flags"], f)
         self.assertIn("handle_did_not_follow_gripper", f["flags"], f)
         self.assertGreater(f["pull_alignment_cos"], 0.9, f)
-        self.assertEqual(f["recommended_pull_dir_source"], "face_normal")
+        # pulled straight out and nothing moved: next try sideways along the face (sliding
+        # panel), with the other side / lift / push as fallbacks - not the same pull again
+        self.assertEqual(f["recommended_pull_dir_source"], "face_lateral_after_no_motion")
+        rec = np.asarray(f["recommended_pull_dir"])
+        self.assertLess(abs(cos_to(rec, OUT_NORMAL)), 0.2, f)
+        self.assertLess(abs(rec[2]), 0.05, f)
         self.assertIn("pushing", format_evidence(f))
 
     def test_slip_mid_arc_reports_partial_angle_and_detach(self):
@@ -243,6 +248,110 @@ class TestEvidenceText(unittest.TestCase):
         self.assertNotIn("WARNING", txt)
         self.assertIn("ALIGNED", txt)
         self.assertIn("RECOMMENDED NEXT PULL DIRECTION", txt)
+
+
+class TestPullProprio(unittest.TestCase):
+    """Arm-encoder + gripper-width pull evidence (helpers.pull_proprio), no tracking.
+
+    Scenario from the slide-cabinet false positive: the handle is approached along +x, the
+    gripper closes on it, and the arm pulls straight back (-x) although the panel slides
+    sideways - the bar slips out of the fingers and the panel never moves.
+    """
+
+    HANDLE = [0.50, 0.10, 1.90]
+
+    @staticmethod
+    def rec(desc, start, end, closed, hold_start=None, hold_end=None, last_holding=None, cmd=None):
+        return {"desc": desc, "step_start": 0, "gripper_closed": closed,
+                "ee_start": list(start), "ee_end": list(end), "cmd_end": list(cmd or end),
+                "holding_start": hold_start if closed else False,
+                "holding_end": hold_end if closed else False,
+                "ee_last_holding": None if last_holding is None else list(last_holding)}
+
+    def attempt(self, pull_to, slipped=True, after=()):
+        h = np.array(self.HANDLE)
+        recs = [self.rec("standoff", h + [-0.30, 0, 0], h + [-0.18, 0, 0], False),
+                self.rec("advance onto handle", h + [-0.18, 0, 0], h, False)]
+        end = h + np.asarray(pull_to)
+        if slipped:
+            recs.append(self.rec("pull", h, end, True, True, False, last_holding=h + 0.3 * (end - h)))
+        else:
+            recs.append(self.rec("pull", h, end, True, True, True))
+        return recs + list(after)
+
+    def test_slipped_straight_pull_is_vetoed_and_retry_goes_sideways(self):
+        from helpers.pull_proprio import (summarize_pull_proprio, measured_no_motion_veto,
+                                          retry_direction_hint, alternative_directions)
+        h = np.array(self.HANDLE)
+        retreat = self.rec("retreat", h + [-0.20, 0, 0], h + [-0.35, 0, 0], False)
+        f = summarize_pull_proprio(self.attempt([-0.20, 0, 0], after=[retreat]))
+        self.assertEqual(f["outcome"], "part_did_not_move", f)
+        self.assertEqual(f["pulls"][0]["result"], "slipped")
+        self.assertIsNotNone(measured_no_motion_veto(f, "open the right cabinet"))
+        self.assertIsNone(measured_no_motion_veto(f, "pick up the mug"))
+        hint = retry_direction_hint(f)
+        self.assertIn("Do NOT repeat", hint)
+        first = np.asarray(alternative_directions(f["pull_dirs"], f["approach_dir"])[0][1])
+        self.assertLess(abs(first[0]), 0.1, "first alternative must be sideways, not along the pull")
+        self.assertGreater(abs(first[1]), 0.9)
+
+    def test_blocked_pull_also_means_no_motion(self):
+        from helpers.pull_proprio import summarize_pull_proprio
+        h = np.array(self.HANDLE)
+        recs = self.attempt([-0.15, 0, 0], slipped=False)
+        recs[-1]["ee_end"] = list(h + [-0.01, 0, 0])               # stalled, still holding
+        f = summarize_pull_proprio(recs)
+        self.assertEqual(f["pulls"][0]["result"], "blocked", f)
+        self.assertEqual(f["outcome"], "part_did_not_move", f)
+
+    def test_sliding_pull_that_carries_the_handle_is_not_vetoed(self):
+        from helpers.pull_proprio import summarize_pull_proprio, measured_no_motion_veto
+        f = summarize_pull_proprio(self.attempt([0, -0.20, 0], slipped=False))
+        self.assertEqual(f["outcome"], "part_moved_with_hand", f)
+        self.assertIsNone(measured_no_motion_veto(f, "open the right cabinet"))
+
+    def test_open_hand_push_after_the_slip_blocks_the_veto(self):
+        from helpers.pull_proprio import summarize_pull_proprio, measured_no_motion_veto
+        h = np.array(self.HANDLE)
+        push = self.rec("push panel sideways", h + [-0.06, 0, 0], h + [-0.06, -0.25, 0], False)
+        f = summarize_pull_proprio(self.attempt([-0.20, 0, 0], after=[push]))
+        self.assertEqual(f["outcome"], "part_did_not_move")
+        self.assertEqual(f["possible_push_after_pull"], ["push panel sideways"])
+        self.assertIsNone(measured_no_motion_veto(f, "open the right cabinet"))
+
+    def test_closed_on_air_is_a_grasp_failure_not_a_direction_failure(self):
+        from helpers.pull_proprio import summarize_pull_proprio, retry_direction_hint
+        recs = self.attempt([-0.20, 0, 0])
+        recs[-1].update(holding_start=False, holding_end=False, ee_last_holding=None)
+        f = summarize_pull_proprio(recs)
+        self.assertEqual(f["outcome"], "closed_on_nothing", f)
+        self.assertIsNone(retry_direction_hint(f))
+
+    def test_retry_history_moves_on_to_the_other_side(self):
+        from helpers.pull_proprio import summarize_pull_proprio, alternative_directions
+        straight = summarize_pull_proprio(self.attempt([-0.20, 0, 0]))
+        side = summarize_pull_proprio(self.attempt([0, 0.20, 0]))
+        alts = alternative_directions(straight["pull_dirs"] + side["pull_dirs"], side["approach_dir"])
+        self.assertLess(alts[0][1][1], -0.9, alts)                 # the untried -y side
+
+    def test_no_closed_gripper_motion_gives_no_evidence(self):
+        from helpers.pull_proprio import summarize_pull_proprio
+        h = np.array(self.HANDLE)
+        self.assertIsNone(summarize_pull_proprio([self.rec("move", h, h + [0.1, 0, 0], False)]))
+
+    def test_moved_but_rejected_keeps_direction_and_relocates_handle(self):
+        # attempt slid the panel 20 cm (-y) yet the VLM said "not open": the retry must keep
+        # sliding from where the handle is NOW, not re-grasp at the stale detected position
+        from helpers.pull_proprio import summarize_pull_proprio, retry_direction_hint
+        recs = self.attempt([0, -0.20, 0], slipped=False)
+        recs[-1]["traj_start"] = [0.48, 0.10, 1.90]                 # LLM-frame grasp point
+        f = summarize_pull_proprio(recs)
+        self.assertEqual(f["outcome"], "part_moved_with_hand")
+        np.testing.assert_allclose(f["handle_now"], [0.48, -0.10, 1.90], atol=1e-3)
+        hint = retry_direction_hint(f, history_dirs=[[-1.0, 0.0, 0.0]])
+        self.assertIn("DOES move that way", hint)
+        self.assertIn("STALE", hint)
+        self.assertIn("[-1.00, +0.00, +0.00]", hint)                # the earlier failed pull
 
 
 if __name__ == "__main__":

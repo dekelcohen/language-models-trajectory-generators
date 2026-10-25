@@ -47,6 +47,10 @@ class TaskState:
         self.review_reason = ""
         self.review_improvement_steps = ""
         self.accepted_without_review = False
+        # Measured pull bookkeeping (helpers.pull_proprio): pull directions of earlier
+        # attempts whose held part did not move, and the direction hint for the next retry.
+        self.failed_pull_dirs = []
+        self.retry_direction_hint = None
         # Per-attempt trajectory clips (head, wrist mp4) built by task_completed() and
         # attached to the reviewer when the review model supports video input.
         self.review_clips = []

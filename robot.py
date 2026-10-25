@@ -304,6 +304,9 @@ class Robot:
         rest_poses = list((np.array(max_joint_positions) + np.array(min_joint_positions)) / 2)
 
         ee_target_orientation_q = self.sim.quat_from_euler(ee_target_orientation_e)
+        # the controller's target in the measured EE-link frame (after the depth offset), so
+        # proprioception can compare commanded vs reached hand motion (env._trajectory_proprio)
+        self.last_ee_target = list(ee_target_position)
 
         ee_current_position, ee_current_orientation_q = self.sim.get_link_pose(self.id, self.ee_index)
         ee_current_orientation_e = self.sim.euler_from_quat(ee_current_orientation_q)

@@ -167,6 +167,11 @@ tracker_provider_default = "template"   # template | klt | csrt | cotracker | re
 # articulated pull/open tasks, and add the recommended next pull direction to the retry's
 # improvement steps when the review fails. Needs an active track_objects session.
 review_tracking_evidence = True
+# Paste the arm's measured grasp-and-pull facts (helpers.pull_proprio: commanded vs reached
+# hand motion + gripper width per trajectory) into the review prompt, overrule a VLM
+# "success" when the held handle provably never moved with the hand, and recommend an
+# untried opening direction for the retry. Needs no tracking.
+review_pull_proprio = True
 # CoTracker3 provider (--tracker-provider cotracker). The online model is fetched once via
 # torch.hub into TORCH_HOME and reused offline afterwards; None honours the environment
 # and falls back to <repo>/cache/torch.

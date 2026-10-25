@@ -843,6 +843,37 @@ no-op (no IPC traffic). Tests: `tests/test_vis_grasp.py`.
     review: `completed_task=True`, `accepted_without_review=True`;
   - else `TASK_COMPLETED` then dispatch review by `--review-provider`.
 
+#### Measured pull proprioception (`helpers/pull_proprio.py`, `config.review_pull_proprio`)
+Catches "held the handle, pulled, nothing moved" without camera or sim state, using only
+what a real arm reports. For every `EXECUTE_TRAJECTORY`, `env.py` replies with `reply[2] =
+{"proprio": {...}}`: hand pose at start/end (after the settle steps), the commanded end
+(`robot.last_ee_target`), finger width, the `holding` flag, and the last hand pose while still
+holding. `api.motion_log` collects these records; each record also gets the first waypoint in
+trajectory coordinates (`traj_start`). Only records of the current attempt are summarized.
+- Each closed-gripper motion of 4 cm or more that starts while holding is classified:
+  `carried` (still holding and reached its target), `blocked` (still holding, reached less
+  than half), or `slipped` (the grip was lost). This gives one attempt outcome:
+  `closed_on_nothing`, `part_did_not_move` (the hand carried the part less than 3 cm), or
+  `part_moved_with_hand`. The reviewer prompt gets this as a `PULL PROPRIOCEPTION` block.
+- **Veto:** on articulated tasks (open/close/door/drawer/...), when the outcome is
+  `part_did_not_move` and the only later open-hand motion is a retreat (nothing that could
+  have pushed the part), a VLM `success=True` becomes False. This also applies to the
+  unreviewed final attempt, so the planner learns that the part never opened.
+- **Retry direction** (`task.retry_direction_hint`, added verbatim to the retry prompt by
+  `handle_task_failure`):
+  - After `part_did_not_move`, the failed pull directions go into `task.failed_pull_dirs`, and
+    the hint recommends untried directions: sideways along the face (both senses), then lift,
+    then push in. There is no hinge or axis prior.
+  - After `part_moved_with_hand` that the reviewer rejected, the hint says to keep the
+    direction. It also gives the handle's current position (the grasp point plus the measured
+    hand travel), because the detected coordinates are now stale. Without this, a retry
+    re-grasped at the old spot and dragged a slid panel shut.
+- With tracking evidence, `tracking.review_evidence` makes the same switch: after a pull
+  aligned with the face that moved nothing, it recommends a sideways motion
+  (`face_lateral_after_no_motion`).
+- Limitation: if the fingers slide along a long bar while still reading "holding" (for
+  example a lift along a vertical bar), the motion counts as `carried`.
+
 #### Trajectory videos (`helpers/video_utils.py`)
 Per review, only the **new** attempt's frames are encoded; the full session video is grown
 by appending that clip — no O(n²) re-encode from frame 0 (the old code re-encoded every
@@ -1651,6 +1682,12 @@ has no `shapely` and nothing on the tracking path needs it.
 ---
 
 ## Changelog
+
+- **Measured pull proprioception in review and retry** (§7): a reviewer false positive on
+  `franka_kitchen:slide_cabinet` (the hand pulled a sliding panel straight out and nothing
+  moved) is now vetoed using arm and gripper measurements. Retries switch to an untried
+  direction (sideways first), or keep a direction that did move the part and re-grasp the
+  handle where it now is.
 
 - **`--images-root DIR`**: overrides `config.images_folder` (default `./images`) so 2+
   concurrent runs on the same checkout write images/videos/trajectory frames to isolated

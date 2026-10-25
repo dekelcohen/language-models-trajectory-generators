@@ -202,10 +202,17 @@ class IpcContractMixin:
     def test_execute_trajectory(self):
         reply = self._exchange([EXECUTE_TRAJECTORY, _sample_trajectory()])
         self.assertIsInstance(reply, list)
-        self.assertEqual(len(reply), 2)
+        self.assertIn(len(reply), (2, 3))
         self.assertIsInstance(reply[0], str)
         self.assertIsInstance(reply[1], int)
         self.assertGreaterEqual(reply[1], 1, "trajectory_step must advance")
+        if len(reply) == 3:
+            # optional extras: {"proprio": {...}} (pybullet) and/or tracking abort info
+            self.assertIsInstance(reply[2], dict)
+            proprio = reply[2].get("proprio")
+            if proprio is not None:
+                self.assertEqual(len(proprio["ee_start"]), 3)
+                self.assertEqual(len(proprio["ee_end"]), 3)
 
     def test_execute_trajectory_then_state_moves_the_eef(self):
         before = self._exchange([GET_ROBOT_STATE])["eef_pos"]

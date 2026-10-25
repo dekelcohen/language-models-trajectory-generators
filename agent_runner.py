@@ -823,6 +823,7 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
     """
     args, logger, api = ctx.args, ctx.logger, ctx.api
     logger.info(FAIL + "FAILED TASK! Generating summary of the task execution attempt..." + ENDC)
+    log_world_state(ctx.main_connection, logger, f"attempt {task.attempt_number} end (failed)")
 
     summary_prompt = feedback + TASK_SUMMARY_PROMPT + "\n"
     logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
@@ -869,6 +870,12 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
         for i, s in enumerate(attempt_summaries)
     )
     retry_prompt += "\n" + TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", combined_summary)
+    # Measured (not VLM) direction advice: survives the LLM summary verbatim, so a pull that
+    # never moved the part is not simply repeated (helpers.pull_proprio.retry_direction_hint).
+    if task.retry_direction_hint:
+        retry_prompt += "\nMEASURED PULL RESULT OF THE LAST ATTEMPT:\n" + task.retry_direction_hint + "\n"
+        logger.info(PROGRESS + f"Retry prompt: added measured direction hint -> {task.retry_direction_hint}" + ENDC)
+        task.retry_direction_hint = None
 
     logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
     messages = models.call_llm_cached(ctx.main_connection, ctx.client, args.language_model, retry_prompt, [], "system", options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache, "conversation_key": task.conversation_key})

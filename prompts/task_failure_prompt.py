@@ -8,7 +8,7 @@ Can you suggest what was wrong with the plans for the trajectories, and suggest 
 1) Analyze carefully the previous summary of previous attempts with the review notes and improvement suggestions
 2) Incrementally Explore: In the failed trajs, change one thing at a time. Do not just repeat a set of failed trajectories - as it will fail again. 
    ) Ex: If Grasping failed - change grapsing pose towards the correct object part 
-   ) Ex: If pull failed - consider changing pull direction (a little bit each attempt)
+   ) Ex: If pull failed - consider changing pull direction (a little bit each attempt). If the handle was held but the door/drawer/panel did NOT move at all, the mechanism does not open that way: switch to a clearly different direction (e.g. slide sideways along the face for a sliding panel, lift, or push) instead of a small tweak
    ) Try the DIFFERENT candidate positions of the SAME target object across attempts: the scene analysis provides ranked affordance-pointing 3D positions (best-first) and the segmentation/bounding-box computation yields another position estimate. If one position failed, try the next-best affordance point or the segmentation-bbox position instead of repeating the same one.
 Then, replan and retry the task by continuing with INITIAL PLANNING 1.
 """
