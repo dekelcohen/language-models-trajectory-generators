@@ -99,7 +99,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `--seg-provider` | `moondream` | 2D segmentation: `langsam` \| `sam3` \| `moondream`. |
 | `--depth-format` | `norm_1m` | Depth reconstruction: `norm_1m` \| `norm_zfar` \| `raw`. |
 | `--timeout` | `15.0` | Timeout secs; `<=0` disables. |
-| `--delete-images` | off | Wipe image folders before recreating. |
+| `--delete-images` / `--no-delete-images` | on | Wipe the `--images-root` folders before recreating them. Default on: frame numbers can have gaps (e.g. odd-only), and old frames left in those gaps were stitched into the trajectory videos and the reviewer's clips. A failed delete (e.g. a file locked by an image viewer) prints a warning. |
 | `--images-root DIR` | `./images` (or `$IMAGES_ROOT`) | Root folder for all image/video/trajectory output (`config.images_folder` and every path derived from it). Parsed from `sys.argv` *before* `config`/other modules import, via `_apply_early_images_root()` at the top of `main.py`, so it must reach every module regardless of import order. Set this per run to allow 2+ concurrent experiments on the same checkout without overwriting each other's outputs, e.g. `--images-root ./images_run1` / `./images_run2`. |
 | `--review-provider` | `vlm` | Success check: `vlm`, `vlm:<model>` (e.g. `vlm:or-openai/gpt-5.5`), or `xmem`. |
 | `--planner-perception-vlm` | `gemini-3.8-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
@@ -1652,6 +1652,9 @@ has no `shapely` and nothing on the tracking path needs it.
 
 ## Changelog
 
+- **`--delete-images` default on** (`--no-delete-images` to keep). Old even-index frames
+  from an earlier run filled the gaps of a new run's odd-only frame sequence and got into
+  the review/full videos. Delete failures now warn instead of passing silently.
 - **`--images-root DIR`**: overrides `config.images_folder` (default `./images`) so 2+
   concurrent runs on the same checkout write images/videos/trajectory frames to isolated
   folders instead of clobbering each other. Also honors `$IMAGES_ROOT` env var; the CLI

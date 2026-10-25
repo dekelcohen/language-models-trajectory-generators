@@ -1,6 +1,7 @@
 import math
 import os
 import shutil
+import sys
 from typing import Iterable
 
 import numpy as np
@@ -291,9 +292,10 @@ def ensure_image_dirs_exist(delete: bool = False, extra_dirs: Iterable[str] | No
             try:
                 if os.path.isdir(d):
                     shutil.rmtree(d)
-            except Exception:
-                # Best effort cleanup; leave to creation phase
-                pass
+            except Exception as e:
+                # Best effort (e.g. a file locked by a viewer on Windows), but say so: stale
+                # frames left in images/trajectory get mixed into the trajectory videos.
+                print(f"[Warning] Could not fully delete '{d}': {e}", file=sys.stderr)
 
     for d in dirs:
         os.makedirs(d, exist_ok=True)
