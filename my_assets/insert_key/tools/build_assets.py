@@ -8,7 +8,7 @@ fast_simplification (e.g. the ``vlm_genesis`` conda env)::
 Inputs: ``cache/robodojo/extracted/key.npz`` + ``key__extracted_image_2.jpg`` produced
 by ``extract_robodojo_usdz.py`` (stage 1). Everything else is procedural.
 
-Outputs (committed): ``my_assets/insert_key/{meshes,textures}/*`` and the URDFs
+Outputs (committed): ``my_assets/insert_key/meshes/*`` (OBJ/MTL + textures) and the URDFs
 ``key.urdf``, ``lock.urdf``, ``key_stand.urdf``, ``table.urdf``.
 
 Design notes
@@ -36,7 +36,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 REPO = os.path.abspath(os.path.join(ROOT, "..", ".."))
 CACHE = os.path.join(REPO, "cache", "robodojo", "extracted")
 MESH_DIR = os.path.join(ROOT, "meshes")
-TEX_DIR = os.path.join(ROOT, "textures")
+# Textures sit next to the OBJs: trimesh (Genesis) will not resolve a "../" map_Kd path.
+TEX_DIR = os.path.join(ROOT, "meshes")
 
 RNG = np.random.default_rng(7)
 
@@ -225,7 +226,7 @@ def write_obj(name, parts, texture=None, kd=(1, 1, 1), ks=0.25, ns=60):
         fh.write(f"Ka 0.2 0.2 0.2\nKd {kd[0]:.4f} {kd[1]:.4f} {kd[2]:.4f}\n")
         fh.write(f"Ks {ks:.3f} {ks:.3f} {ks:.3f}\nNs {ns}\nd 1.0\nillum 2\n")
         if texture:
-            fh.write(f"map_Kd ../textures/{texture}\n")
+            fh.write(f"map_Kd {texture}\n")
     lines = [f"mtllib {mtl}", f"o {name}"]
     lines += [f"v {a:.6f} {b:.6f} {c:.6f}" for a, b, c in V]
     lines += [f"vt {a:.6f} {b:.6f}" for a, b in UV]

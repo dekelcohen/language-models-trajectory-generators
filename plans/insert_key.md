@@ -42,6 +42,7 @@ URDF/OBJ/textures.
   Fixed: per-sim plug friction `PLUG_RESIST_TORQUE = {"pybullet": 0.05, "genesis": 0.01}`
   (different friction models anyway).
 - Tried and rejected: heavier key (0.1 kg) -> tilts in grasp, insert fails; shared 0.02 N*m -> both sims flaky.
+- Genesis textures rendered white: trimesh ignores `map_Kd ../textures/x.png`. Fixed: textures live in `meshes/`.
 - Scripted demo (scratch, not in repo) needed: approach waypoint high enough for the 46 mm blade,
   closed-loop tip-over-keyway xy correction before descending.
 
@@ -52,5 +53,5 @@ URDF/OBJ/textures.
 2. Genesis margin is thin (65 vs 60 deg): reduce key slip in grasp (finger friction/force) or
    turn past 90 deg in prompts/examples.
 3. Fix Genesis textures: insert_key meshes render white (MTL `map_Kd` not picked up).
-4. Scripted demo with fixed seed for deterministic comparison; add a Genesis test.
-5. Update `document.md` with an insert_key section.
+3. Scripted demo with fixed seed for deterministic comparison; add a Genesis test.
+4. Update `document.md` with an insert_key section.
