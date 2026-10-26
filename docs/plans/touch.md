@@ -142,8 +142,8 @@ servo load as a coarse fallback).
       drives the palm into the plug and closing squeezes it out -> skill line added. (2) `robot.move` passed
       1200 Nm / 1000 N as Genesis force ranges, overriding the profile's real Franka limits (87/12 Nm, 100 N)
       -> adapter now clamps to the profile caps. (3) the plug's 0.5 kg translational armature (needed: 0 and
-      0.05 both drop the centred grasp) cuts effective gravity ~40x, so a squeezed-out plug flies metres; kept
-      and documented as a sim artefact. (4) small-part perception: box merged plug + stand -> skill line (use
+      0.05 both drop the centred grasp) had no weight: effective gravity ~g/40, so a released plug floated and
+      drifted metres -> the armature now gets its matching weight (z dof force); seat still 11.6 mm. (4) small-part perception: box merged plug + stand -> skill line (use
       the affordance x,y). (5) pull-proprio door/handle wording leaked into insert reviews -> gated to
       open/close/pull tasks.
 - [ ] Slip + joint-direction follow-ups (kettle grasp, `helpers/pull_proprio.py`). Door/drawer touch plan:
