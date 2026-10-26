@@ -355,6 +355,68 @@ RoboRSI's 27B-Preview shows the same pattern (RoboCasa365 26.0 → 46.5 with −
 Prerequisite: idea 11 (an automated harness with a programmatic success signal used **only as the reward**,
 never in prompts). This is a long-term direction, not a near-term change.
 
+PyRUA training details (arXiv 2610.01939v2, section 5 and appendix J):
+
+- Each iteration samples 16 instances with 8 rollouts each.
+- Advantage is normalized within each group of 8. Clip range is 0.2 / 0.28. No KL or entropy term.
+- Adam with a constant LR of 1e-6, full fine-tuning, no SFT stage and no demos.
+- Rollouts are capped at 24 cells, 25 min and 4,096 tokens per call.
+- Runs on the miles framework with SGLang rollouts, on one node with 8 GPUs, about 12 h.
+- The cost is dominated by **sim rollouts**: 3,840 episodes. The gradient steps are cheap (60 steps).
+
+### 18b. Alternative: on-policy self-distillation from a privileged same-model teacher (OPSD) + LoRA
+
+Idea:
+
+- The student (the local model, pixels + proprio only) generates its own episode on-policy.
+- The **same model** with privileged sim info in context acts as the teacher. Privileged info here means
+  object poses, the hinge axis, or a hindsight summary of a successful episode.
+- The teacher re-scores the student's tokens in a single prefill pass.
+- Loss: per-token reverse KL(student || teacher). This can be limited to tokens where the two diverge
+  strongly or the student is uncertain (high entropy).
+- Train a LoRA adapter only. The teacher is the frozen base with the adapter off, which keeps it stable.
+
+Why it should be cheaper than GRPO:
+
+- **Dense signal.** Every token gets a target, while GRPO gives one bit per episode. One rollout per
+  instance is enough instead of a group of 8, and episodes that fail everywhere still teach something.
+  GRPO gets zero gradient from groups that are all-0 or all-1.
+- The teacher costs one prefill per episode, with no generation.
+- LoRA fits one or two GPUs. A 4B model in bf16 plus a LoRA adapter can train and serve rollouts with
+  SGLang/vLLM on a single 48-80 GB card.
+- Expected order of magnitude: about 4-8x fewer episodes than GRPO. Sim time still dominates, so the
+  saving is in rollouts, not in gradient compute.
+
+It fits our Sim2Real rule:
+
+- Privileged info goes **only into the teacher context during training**.
+- The deployed student never sees it.
+- This is the standard 'privileged teacher' pattern, as in RL sim2real.
+
+Risks and mitigations:
+
+- **Unobservability gap.** The teacher can be confident about things the student cannot infer from
+  pixels, such as the exact hinge axis. Imitating that teaches the student to hallucinate confident
+  numbers.
+  - Mitigation: give the teacher *observable-level* hints, e.g. 'the door opens to the left', or a
+    hindsight log of what worked. Avoid raw ground-truth floats.
+  - Mitigation: mask the loss on numeric tokens that come straight from privileged values.
+- **Teacher not much better than student.** Self-distillation only helps if privileged context really
+  improves the model's code.
+  - Check this first: run the local model with privileged hints and measure SR. If it doesn't rise, OPSD
+    has nothing to transfer.
+- **No outcome grounding.** The student can match a teacher that is itself wrong.
+  - Mitigation: weight the per-episode loss by the binary success reward, or mix in a small GRPO / RFT
+    term later.
+- **Cheapest first step:** rejection-sampling SFT (RFT) on successful privileged-teacher episodes with
+  LoRA. It is offline and simple, and gives a baseline that OPSD must beat.
+
+Prerequisites, same as idea 18:
+
+- idea 11: the automated harness and a success check used only as reward;
+- a train/test seed split;
+- a local OpenAI-compatible server (SGLang/vLLM) that can serve the LoRA adapter for rollouts.
+
 ## Explicitly *not* to copy
 
 - **Reading the benchmark's success flag** (`robo.done`, `terminated`) in the agent loop. It is privileged.
