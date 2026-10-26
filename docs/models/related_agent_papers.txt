@@ -1,0 +1,454 @@
+* Title: CaP-X - CaP-X: A Framework for Benchmarking and Improving Coding Agents for Robot Manipulation
+  ) Goal: natural language task + RGB-D/state observations --> LLM/VLM coding agent writes Python programs composing perception (SAM3, Molmo 2, OpenCV, Open3D) and control (PyRoki IK/motion-planning) primitives in CaP-Gym (Gymnasium REPL) --> CaP-Bench scores 12 frontier models across abstraction/interaction/grounding tiers --> insights used to build CaP-Agent0 (training-free agentic harness) and CaP-RL (GRPO-trained coding policy) --> executed program controls robot in sim or real
+  ) Problem: unclear how much Code-as-Policy performance comes from the agent vs from human-tuned high-level primitives (designer scaffolding)
+    ) Also unclear whether more test-time compute can compensate for low-level interfaces
+  ) Tags: VLM, Planning, PrimitivePolicies, Zeroshot, Closed-Loop, TextPrompt, ImagePrompt, Segmentation, MotionPlanner, RL, AutoReward, Sim2Real, Long Horizon
+  ) Project: https://capgym.github.io
+  ) Paper: https://arxiv.org/pdf/2603.22435
+  ) Video: sim task clips on project page (Cube Stack, Drawer, Bottle Racking, Spill Cleanup, Stove Knob, Bimanual Handover, Peg Insertion); real demos in paper appendix B
+  ) Method: CaP-Gym binds the env loop (sim or real) to a stateful Code Executor loop
+    ) One turn: agent receives obs, writes a Python program, env executes it fully (may call several primitives), returns stdout/stderr/images
+    ) Never resets mid-trial
+    ) Data Collection: no human demos
+      ) Human-expert-written Python reference solutions used as upper bound
+      ) Successful agent rollouts pooled to mine reusable skills
+    ) Data Augmentation: none beyond task/seed variation and LIBERO-PRO perturbations (position swap, instruction redirection)
+    ) Preprocessing: perception primitives turn RGB-D into structured objects via SAM3 (language segmentation) and Molmo 2 (pointing)
+      ) Visual Differencing Module (VDM) turns RGB before/after into natural-language scene diffs
+    ) Training: CaP-RL applies GRPO (RLVR) to post-train Qwen2.5-Coder-7B-Instruct on Cube Lift, Cube Stack, Spill Wipe
+      ) Uses privileged state APIs (tier S1)
+      ) 50 GRPO iterations per task
+      ) Regularization: train only on the noiseless state tier to reduce reward noise from perception errors
+    ) Inference: 8 tiers (S1-S4 single-turn, M1-M4 multi-turn) vary primitive abstraction, in-context examples and visual grounding (raw images vs VDM text)
+      ) Test time techniques: CaP-Agent0 = multi-turn + auto-synthesized persistent skill library (9 task-agnostic functions mined from pooled rollouts) + parallel ensembled reasoning (9 queries or 3 models, merged by a central coding agent)
+      ) Tools: SAM3 segmentation, Molmo 2 pointing, OpenCV, Open3D, PyRoki IK/motion planner, Python sandbox REPL
+      ) Close-loop: multi-turn tiers feed back stdout/stderr (M1), raw RGB (M2) or VDM text diffs (M3/M4) each turn; agent retries/debugs without env reset
+    ) Usage of lower level models: SAM3 and Molmo 2 for grounding, PyRoki for IK/motion planning/collision checking, separate VLM for VDM
+  ) Results:
+    ) S4 (zero-shot, single-turn, low-level): human expert 88.5 percent avg; none of 12 frontier models match it; success rises monotonically from S4 to S1 as abstraction increases
+    ) Multi-turn: text feedback (M1) helps; raw image feedback (M2) hurts vs M1; VDM text-diff (M3) beats both; low-level + VDM (M4) reaches parity with high-level M3
+    ) CaP-Agent0 (Gemini-3-Pro) matches or exceeds human code on 4 of 7 tasks with only low-level primitives
+    ) LIBERO-PRO perturbations: OpenVLA and pi0 at 0.00; pi0.5 0.17-0.38 (Pos), 0.00-0.01 (Task); CaP-Agent0 0.12-0.26 (Pos), 0.14-0.18 (Task)
+    ) BEHAVIOR R1Pro: Pick up Radio Human 36 / CaP-Agent0 56 percent; Soda Can Human 72 / CaP-Agent0 72
+    ) CaP-RL 7B sim: Cube Lift 25->80, Cube Stack 4->44, Spill Wipe 30->93 percent
+    ) CaP-RL 7B real Franka: Cube Lift 24->84, Cube Stack 12->76 percent (sim2real via shared code action space)
+  ) Pro: training-free CaP-Agent0 near-human and far more robust to instruction perturbation than VLAs
+  ) Pro: code-as-action-space transfers sim to real because primitives are shared
+    ) Note: very relevant to our repo - text scene diffs beat raw images as multi-turn feedback
+  ) Con: big gap vs human experts in single-turn zero-shot for all models; raw RGB each turn degrades performance
+  ) Dataset: CaP-Gym 187 tasks (7 Robosuite core + 130 LIBERO-PRO + 50 BEHAVIOR) - each sample = scene config, instruction, success predicate, same primitive API in sim and real
+  ) Assets: auto-synthesized skill library of 9 task-agnostic functions (appendix H.1)
+  ) Code: https://github.com/capgym/cap-x 888 stars, uv-based install with simulator extras, extensive docs (adding envs/APIs, LIBERO, BEHAVIOR, RL training, real Franka), last-commit 2026-04-09
+  ) Models: Qwen2.5-Coder-7B-Instruct + GRPO (CaP-RL, no checkpoint link found); SAM3 (facebook/sam3), Molmo 2 off the shelf
+    ) Opt: finetuned Qwen2.5-Coder-7B-Instruct
+  ) Hardware: Franka Emika Panda, AgiBot G1 humanoid, R1Pro wheeled humanoid
+  ) Simulator: Robosuite, LIBERO-PRO, BEHAVIOR (Isaac Sim / OmniGibson), PyRoki
+  ) References: Code as Policies, ProgPrompt, SayCan, VoxPoser, OpenVLA, pi0, pi0.5, LIBERO-PRO, BEHAVIOR-1K, RATS
+* Title: Harness VLA (RPent) - Harness VLA: Steering Frozen VLAs into Reliable Manipulation Primitives via Memory-Guided Agents
+  ) Goal: task text + RGB-D + robot state --> agentic LLM planner (Claude Code / Codex) picks JSON calls from a fixed primitive library, retrieves Task Specific and Global Memory --> analytic primitives (move_to, rotate_wrist, rotate_pitch, set_gripper, release, navigate_to, move_base) do staging/transport/release, vla_act calls a frozen VLA (pi0.5, RLDX-1, LingBot-VLA) for contact-rich bursts --> loop until goal
+  ) Problem: VLAs have strong contact skills but fail under perturbations (retargeting, layout shift, unstable contact)
+    ) Pure analytic / coding-agent primitives struggle with irregular grasps, constrained placement, articulated objects
+  ) Tags: VLA, Planning, PrimitivePolicies, Closed-Loop, TextPrompt, 3DFeatures, Long Horizon, Fewshot, Zeroshot, Segmentation
+  ) Project: https://harnessvla.github.io/
+  ) Paper: https://arxiv.org/pdf/2607.08448
+  ) Video: https://raw.githubusercontent.com/RLinf/misc/c6f629129ac1a889d764dcd93defc213a4c31ae5/rpent/demo/real-world-demo01.mp4 (dual-Franka, more on project page)
+  ) Method: planner never emits low-level actions, only selects a primitive and binds args from language, RGB-D, proprio and memory
+    ) Data Collection: none new - reuses frozen VLA checkpoints (pi0.5 LIBERO-130 SFT from RLinf, RLDX-1, LingBot-VLA post-trained by authors)
+    ) Data Augmentation: none
+    ) Preprocessing: RGB-D agent view + proprio (EE pose, gripper) each turn
+    ) Training: no gradient training
+      ) Bootstrapping phase on one reference seed with reset allowed and generous budget
+      ) Searches staging orders, pre-contact poses, vla_act timing, stop predicates, recovery choices
+      ) Regularization: none
+    ) Inference: bootstrapping (reset allowed, search for a working sequence), then deployment (no reset, strict budget, retrieve trace, re-ground spatial args from live obs)
+      ) Test time techniques: re-staging and retry of vla_act after failed contact; JSONL traces with symbolic perception queries instead of coordinates, reusable across layouts
+      ) Tools: move_to, move_pose, rotate_wrist, rotate_pitch, set_gripper, release, vla_act, navigate_to, move_base
+      ) Close-loop: refresh RGB-D + proprio after every call, classify outcome as progress / recoverable / unrecoverable, write successes and failure models to memory
+    ) Usage of lower level models: frozen pi0.5 (LIBERO/LIBERO-Pro), RLDX-1 (RoboCasa365), LingBot-VLA (RoboTwin) via vla_act; SAM3 for perception
+  ) Results:
+    ) LIBERO 96.0 percent vs frozen pi_RLinf 95.3
+    ) LIBERO-Pro T+S: 82.4 (Claude Code) / 72.1 (Codex) vs RATS 43.8, frozen pi_RLinf 50.0
+    ) RoboCasa365: 57.1 vs RLDX-1 30.0
+    ) RoboTwin C2R: 58.4 vs LingBot-VLA 50.4
+    ) Without task memory on LIBERO-Pro Goal-S: 31.0 vs 87.0 with memory - most position-swap gain comes from bootstrapped memory
+    ) GPT-6 Astra planner reaches 92.63 percent on LIBERO-PRO (README leaderboard)
+  ) Pro: VLA weights untouched - gains stack with better VLAs
+  ) Pro: small fixed primitive vocabulary, interpretable
+    ) Note: this is the tool-calling baseline PyRUA-Lean beats with Python cells using the same primitives
+  ) Con: bootstrapping needs a reset primitive and a reference seed per task
+  ) Con: LLM coding agent in the loop adds latency and API cost
+  ) Dataset: no training data; evaluated on LIBERO, LIBERO-Pro, RoboCasa365, RoboTwin C2R; memory traces released on HF (RLinf/RPent-memory)
+  ) Assets: RPent-memory HF dataset (task-specific and global memory traces)
+  ) Code: https://github.com/RLinf/RPent 1614 stars, pip install -e with env extras (libero-pro, robocasa, robotwin, franka), docs at rpent.readthedocs.io (quickstart, architecture, real robots), last-commit 2026-10-26 (very active)
+  ) Models: RLinf/RLinf-Pi05-LIBERO-130-fullshot-SFT (HF), RLDX-1 RoboCasa checkpoint, LingBot-VLA RoboTwin checkpoint, SAM3 (facebook/sam3)
+    ) Opt: no further finetuning by Harness VLA itself
+  ) Hardware: single and dual Franka Panda, RGB-D cameras
+  ) Simulator: MuJoCo / Robosuite (LIBERO, LIBERO-Pro, RoboCasa365), RoboTwin (SAPIEN)
+  ) References: pi0.5, RLinf, Code as Policies, ProgPrompt, RATS, LIBERO, RoboCasa, RoboTwin, openpi
+* Title: Zetta - Zetta: An Efficient Closed-Loop Embodied Harness for Self-Evolving Physical Intelligence
+  ) Goal: frozen VLA (pi0.5 / GR00T / pi0) in sim --> code-based runtime critics monitor rollout at action frequency and trigger recovery skills --> offline failure clustering, causal diagnosis, candidate critic/recovery code --> validation-gated promotion into versioned skill memory --> higher success with the same frozen policy
+  ) Problem: harnesses around frozen policies are open-loop, reflecting only after the episode, so they cannot govern execution at the frequency physical interaction needs
+  ) Tags: VLA, Closed-Loop, PrimitivePolicies, Planning, Long Horizon, TextPrompt
+  ) Project: https://air-embodied-brain.github.io/zetta
+  ) Paper: https://arxiv.org/pdf/2608.16590
+  ) Video: https://fe-1301391939.cos.ap-shanghai.myqcloud.com/zetta/zetta02.mp4
+  ) Method: three timescale-separated loops around a frozen policy, plus Z-Infra rollout infrastructure
+    ) Data Collection: self-generated parallel sim rollouts (video, telemetry, failure segments), no human demos
+    ) Data Augmentation: Not Avail
+    ) Preprocessing: synchronized video + bounded telemetry per rollout fed to offline Cluster / Diagnose stages
+    ) Training: no weight updates - only code-space updates to critics, recovery skills and tools (SGD-like bounded code updates, SkillOpt / EmbodiSkill style)
+      ) Regularization: candidate critic/recovery must pass a same-seed regression gate and held-out seed generalization before merge
+    ) Inference: Loop 1 runs learned critics at action frequency, invokes recovery skills on deviation; base policy frozen
+      ) Test time techniques: critic-triggered recovery and retry; reflection deferred to offline loops
+      ) Tools: code critic functions, recovery action programs, orchestrator that accepts or rejects critic proposals
+      ) Close-loop: Loop 1 = action-frequency critic + recovery
+        ) Loop 2 = cluster failures by earliest observable divergence, diagnose, write candidate critics/recoveries
+        ) Loop 3 = validation-gated admission to skill memory; skills transfer zero-shot to related tasks
+    ) Usage of lower level models: frozen pi0.5, GR00T, pi0, Cosmos-Lite as base; Codex LLM agent for offline diagnosis and candidate writing
+  ) Results:
+    ) LIBERO-Pro Goal 90.8 percent vs frozen VLA 31-38
+    ) RoboCasa (18 tasks) 93.6 vs 73.56
+    ) Success grows over evolution rounds: 34.5->90.8 (LIBERO-Pro), 73.6->93.6 (RoboCasa)
+    ) Zero-shot skill transfer: PnP 64->84 percent macro avg; articulated 64->80
+    ) Z-Infra 20.6x rollout throughput (1.7->35.1 eps/min), 11.1x inference speedup
+  ) Pro: no policy finetuning, model-agnostic code harness
+  ) Pro: cheap action-rate governance, expensive diagnosis offline in batches
+    ) Note: skills defined by object-relative geometry, contact, grasp-retention and progress predicates - why they transfer
+  ) Con: sim only, no real robot
+  ) Con: critic code quality depends on the LLM planner
+  ) Dataset: none fixed; self-generated rollouts on LIBERO-Pro, RoboCasa, RoboTwin 2.0, Genie Sim, ManiSkill, BEHAVIOR (50 dev rollouts per round, held-out seeds 1-20)
+  ) Assets: per-round case-study videos on project page
+  ) Code: https://github.com/air-embodied-brain/Zetta-Embodiment 1305 stars, pip install -e, per-env install guides, Docker, docs, last-commit 2026-10-25 (very active)
+  ) Models: none released; pluggable frozen pi0.5, GR00T, pi0, Cosmos-Lite; Codex as offline LLM agent
+  ) Hardware: Not Avail (sim only)
+  ) Simulator: LIBERO-Pro, RoboCasa, RoboTwin 2.0 (SAPIEN), Genie Sim / Isaac Sim, ManiSkill, BEHAVIOR (OmniGibson)
+  ) References: pi0, pi0.5, OpenVLA, GR00T, DROID, Open X-Embodiment, SkillOpt, EmbodiSkill
+* Title: ASPIRE - ASPIRE: Agentic Skills Discovery for Robotics
+  ) Goal: multimodal execution traces + task --> LLM agent diagnoses failures, writes code-as-policy repairs --> validated repairs distilled into a reusable skill library --> evolutionary search explores diverse programs --> growing library of transferable skills reused zero-shot
+  ) Problem: manual robot programming is brittle; prior self-improvement refines a single trajectory instead of accumulating reusable knowledge
+  ) Tags: VLM, Planning, Closed-Loop, Long Horizon, PrimitivePolicies, Zeroshot, Sim2Real, 3DFeatures, Segmentation, Grasp-Prediction, MotionPlanner
+  ) Project: https://research.nvidia.com/labs/gear/aspire/
+  ) Paper: https://arxiv.org/pdf/2607.00272
+  ) Video: https://github.com/user-attachments/assets/ce86d1c1-582e-4388-9eb8-2b9027252eec (table bussing sim2real), https://github.com/user-attachments/assets/7fa4ea5c-bcae-4eb8-b0e6-3109af08c94d (Rubiks cube real)
+  ) Method: closed-loop execution engine + continually expanding skill library + evolutionary program search
+    ) Data Collection: no human demos
+      ) Self-generated experience from LLM-written programs in sim (LIBERO-Pro, Robosuite, BEHAVIOR-1K) and on a real YAM arm
+      ) Fine-grained traces of every perception/planning/grasp/control call with inputs, outputs and visual evidence
+    ) Data Augmentation: Not Avail
+    ) Preprocessing: primitive API wraps SAM3 segmentation, grasping, motion planning behind inspectable logs
+    ) Training: no gradients - continual learning = iterative code refinement + skill-library accumulation
+      ) Regularization: repairs validated by re-execution before distillation
+    ) Inference: agent inspects salient primitive logs to localize a failure, writes a code repair, validates by re-execution
+      ) Test time techniques: diagnose-synthesize-validate loop, parallel evolutionary search, inference-time scaling
+      ) Tools: perception, planning, grasping and control primitive API composed in Python; skill library import
+      ) Close-loop: per-primitive traces localize failures; fixes validated within and across episodes
+    ) Usage of lower level models: SAM3 segmentation, grasp prediction and motion planning primitives as black-box tools
+  ) Results:
+    ) Up to +77 percent on manipulation under perturbation, +72 on Robosuite bimanual handover, +32 on BEHAVIOR-1K long-horizon
+    ) Zero-shot unseen long-horizon: 31 vs 4 percent prior
+    ) Claude Opus 5.5: 99 percent avg on all 80 LIBERO-Pro tasks
+    ) Scales with model: 15 percent (GPT-6 Luna) to 99 (Claude Opus 5.5) on 10 LIBERO-Pro tasks
+    ) Sim skills cut real-world token cost; real Rubiks cube solved with improving efficiency
+  ) Pro: accumulates transferable skills, not just one fixed trajectory
+  ) Pro: parallel evolutionary search
+    ) Note: skills transfer sim2real and across embodiments/APIs
+  ) Con: not a fully autonomous real-world learner (needs success detection, safe resets, safety monitors)
+  ) Con: depends on a frontier LLM
+  ) Con: limited by a fixed primitive API; skill library staleness/redundancy unresolved; compute heavy
+  ) Dataset: task suites LIBERO-Pro (80), Robosuite, BEHAVIOR-1K; real tasks: table bussing, Rubiks cube, bottle cap + pour, pill-in-bottle, cup stacking
+  ) Assets: skill library artifacts, run logs, Claude Code / Codex skill packages for iterative debugging and evosearch
+  ) Code: https://github.com/NVlabs/ASPIRE 876 stars, 75 forks, install via docs/host-setup.md (CUDA, uv, HF token for SAM3), extensive docs (api-reference, system2, per-benchmark), last-commit 2026-10-16 (v1.0)
+  ) Models: none trained; frontier LLMs via API (Claude Opus 4.6/5.5, GPT-5.5, GPT-6 Astra/Luna) + SAM3
+  ) Hardware: YAM robot arm (real), simulated Franka-class arms
+  ) Simulator: LIBERO-Pro, Robosuite, BEHAVIOR-1K
+  ) References: Voyager, Code as Policies, LIBERO, LIBERO-Pro, Robosuite, BEHAVIOR-1K
+* Title: VLCP - VLCP: Vision Language Control Policy, Closed-Loop Code Replanning for Robot Manipulation
+  ) Goal: multi-view RGB + proprio + state delta --> frozen VLM writes a short Python control(obs,J) function every K steps --> runs open-loop for K steps on a PD controller --> rewritten at next boundary if failure observed
+  ) Problem: finetuning a VLM into a VLA discards reasoning; code-as-policy writes code once and never re-observes, so failures after execution starts go uncorrected
+  ) Tags: VLM, TextPrompt, ImagePrompt, Closed-Loop, Zeroshot, PrimitivePolicies
+  ) Project: Not found
+  ) Paper: https://arxiv.org/pdf/2608.16978
+  ) Video: Not found
+  ) Method: episode split into K=50 step blocks; VLM queried once per block to write control(obs,J)->actions; analytic Jacobian passed in
+    ) Data Collection: Not Avail (training-free)
+    ) Data Augmentation: Not Avail
+    ) Preprocessing: 2 fixed RGB cameras, EE pose, joint positions, object poses READ FROM SIMULATOR (privileged)
+    ) Training: none, frozen VLM
+      ) Regularization: Not Avail
+    ) Inference: cached prompt blocks - A: API docs + examples, B: learned skill library (up to 12, by recency), C: goal pin
+      ) User turn carries prior block images + code + actions, current RGB, JSON numeric state
+      ) Test time techniques: within-episode replanning every K steps; history truncated to last 20 turns with prompt cache breakpoints
+      ) Tools: RGB, proprio, object pose read, analytic Jacobian, per-joint PD control, on-disk skill library
+      ) Close-loop: every 50 steps re-observe and rewrite the control function itself
+        ) 27.3 percent of failed grasps recovered by a later replan, median 3 replans after a miss
+    ) Usage of lower level models: none - VLM writes low-level control code using the Jacobian as IK
+  ) Results:
+    ) 57-task MuJoCo/RoboVerse sweep: 35.1 percent pooled vs 3.5 for same system queried once per episode (10x, non-overlapping CIs)
+    ) Instruction reframing (LIBERO-Object): VLA-0 drops 97.3->75.0, VLCP flat at 40.0
+    ) Cost: median 10 replans/episode, 84 percent cache hit, 18.8s median per replan, 100 percent of 778 code blocks compiled
+  ) Pro: frozen VLM stays in its pretraining distribution (code), no demos or finetuning
+  ) Pro: edits the failing artifact (control code), not just retry
+    ) Note: clean ablation isolating closed-loop replanning
+  ) Con: uses privileged sim object poses, no real robot
+  ) Con: 18.8s per replan; Qwen3-4B failed to write reliable code
+  ) Dataset: 57-task sweep (10 LIBERO-Object, 30 LIBERO-90 kitchen, 17 LIBERO-90 living room) + 6-task reframing study
+  ) Assets: none released
+  ) Code: Not found (no repo linked; GitHub search found nothing)
+  ) Models: GPT-5.5 (closed) as replanning VLM; Qwen3-4B tried and insufficient
+  ) Hardware: none (sim Franka Panda only)
+  ) Simulator: MuJoCo via RoboVerse
+  ) References: Code as Policies, ProgPrompt, ELLMER, Robotic Programmer, Code-as-Monitor, DoReMi, Inner Monologue, VLA-0, OpenVLA, pi0, Act-Observe-Rewrite, CaP-X, Voyager
+* Title: Thea - Towards the Harness of Embodied Agents
+  ) Goal: instruction + multi-camera RGB-D --> agentic VLM loop calls robot-capability tools, reading a persistent scene graph and a per-tool evaluator verdict --> closed loop drives long-horizon pick-place, navigation and delivery on real robots
+  ) Problem: coding-agent harnesses work because software is verifiable (exit codes, stack traces); the physical world gives neither, so embodied agents cannot close perceive-act-verify
+  ) Tags: VLM, Planning, TextPrompt, Closed-Loop, Long Horizon, Tracking, 3DGeometryRepresenation, PrimitivePolicies, VLA, Navigation
+  ) Project: https://eit-hai.github.io/thea
+  ) Paper: https://arxiv.org/pdf/2608.11246
+  ) Video: https://youtu.be/Sm9jFmfnOF0
+  ) Method: one tool call per turn; model decides, harness executes, result appended, repeat until no tool call
+    ) Data Collection: 200 teleop demos per task to train the policies (ACT, pi0.5, LingBot-VLA-V2) behind some manipulation tools
+    ) Data Augmentation: Not found
+    ) Preprocessing: context engineering
+      ) Resident: system prompt, memory, embodiment profile, tool schemas
+      ) Refreshed: scene graph brief, current camera views, clearance distances
+      ) Accumulated: notes, responses, tool results - older messages compacted
+    ) Training: harness not trained; tools wrap trained policies or CaP-style programs; GPT-5.5 decides, Qwen3.7-Plus evaluates
+      ) Regularization: Not found
+    ) Inference: single tool call per turn, physical actions never parallel, failure budget halts runaway loops
+      ) Test time techniques: retry guided by the evaluator failure_reason (reposition, switch policy), not blind retry
+      ) Tools: navigate_to, move_base, tilt_head, pick_up, open_drawer, query_user, notify_user, evaluator, scene-graph query tools, load_skill
+      ) Close-loop: Evaluation as Exit Codes - independent evaluator runs after every manipulation
+        ) Sees only the current observation + the tool hidden post-condition (never shown to the actor)
+        ) Returns success / failure / in-progress + evidence + failure_reason
+        ) Success gates scene-graph updates; failure reasons feed per-tool experience memory
+    ) Usage of lower level models: ACT and pi0.5 as manipulation tools, Qwen3.7-Plus evaluator VLM, GPT-5.5 orchestrator, Astribot SDK + SysNav for perception/navigation
+  ) Results:
+    ) Real tasks L1 (pick-place), L2 (repeated pick-place), L3 (nav + delivery): Thea best at all levels vs ACT, LingBot-VLA-V2, pi0.5, CaP-X, SayCan; gap grows L1->L3
+    ) Evaluator accuracy 93.3 percent on 90 checkpoints; errors one-directional (6.7 percent of failures called success, 0 percent of successes called failure)
+    ) Model: alpha 0.93, p 0.8, 5 retries -> 5-step task 0.33 open-loop vs 0.91 with harness
+  ) Pro: embodiment-agnostic - ported to 3 robots by swapping the Embodiment Profile
+  ) Pro: evaluator is reasoning-blind (no access to actor chain of thought), reducing self-grading bias
+    ) Note: very close to our VLM reviewer; adds hidden per-tool post-conditions and a 3-state verdict
+  ) Con: false-success evaluator errors unresolved; safety only initial; lab only
+  ) Dataset: in-house L1-L3 tasks and 90-checkpoint evaluator test set (not released)
+  ) Assets: demo logs for 4 real tasks in appendix
+  ) Code: https://github.com/EIT-HAI/Thea 139 stars, install.sh/run.sh, bilingual docs, last-commit 2026-09-17
+  ) Models: none trained; GPT-5.5, Qwen3.7-Plus via API; ACT, pi0.5 policies
+  ) Hardware: Astribot S1 wheeled dual-arm humanoid, AgileX Cobot Magic, Unitree G1 with BrainCo Revo 2 hands, LiDAR, multiple cameras
+  ) Simulator: Not Avail for paper experiments (sim mode supports LIBERO, RoboTwin 2.0)
+  ) References: SayCan, Code as Policies, CaP-X, VoxPoser, Inner Monologue, ACT, pi0.5, RT-2, MCP
+* Title: Robo-Harness K1 - Robo-Harness K1: Harnessing Robot-Use Agents via Perception Augmentation
+  ) Goal: RGB views + instruction + robot state --> frontier VLM (Gemini 3.7 Flash / GPT-6 Astra) calls frozen perception and control tools (SAM3 regions, calibrated depth back-projection, TAPNext++ anchor tracking, GraspGen grasps) --> selects generic motions from returned evidence --> traces distilled into a Qwen3.5-9B student
+  ) Problem: VLAs need many demos and lose VL understanding when finetuned; RGB-only robot-use agents force VLMs to guess metric 3D from pixels
+  ) Tags: VLM, Finetune-VLM, Grasp-Prediction, Tracking, Segmentation, 3DFeatures, 3DGeometryRepresenation, Closed-Loop, TextPrompt, Zeroshot, KeyPoints
+  ) Project: Not found (GitHub only)
+  ) Paper: https://arxiv.org/pdf/2609.29389
+  ) Video: Not found
+  ) Method: MDP with reasoning tool calls (no state change) and action tool calls (commit motion); context accumulates tool receipts; ends on done or budget
+    ) Data Collection: 180 Gemini+K1 LIBERO-PRO rollouts (6,282 decisions) for analysis; 107 successful teacher episodes as the only training pool
+    ) Data Augmentation: RoboTwin Hard domain randomization used for robustness tests only
+    ) Preprocessing: four perception tool families through the VLM image+text interface
+      ) Region grounding (SAM3 masks with persistent ids)
+      ) Depth and geometry (pixel->world back-projection, plane/axis fit, region distances)
+      ) Anchor tracking (TAPNext++ lifted to 3D with validity flags)
+      ) Grasp candidates (GraspGen -> finger-pad coordinates)
+      ) Images overlaid with point labels, axes, TCP-to-surface lines instead of raw depth
+    ) Training: Qwen3.5-9B LoRA on language layers, vision encoder frozen, next-token on serialized tool calls (filtered of errors/invalid calls)
+      ) Regularization: LoRA language-only, frozen vision encoder
+    ) Inference: adaptive granularity
+      ) move_relative capped 0.03 m/axis
+      ) move_to_pose / rotate_toward hold absolute targets
+      ) move_toward goes straight to target in one call, stops on tolerance / stall / budget
+      ) Test time techniques: 25.5 percent of decisions are perception re-queries; cross-view depth consistency check (check_region_view); anchor co-motion as grasp-success evidence
+      ) Tools: find_regions, inspect_region, check_region_view, measure_depth, fit_geometry, region_relation, move_relative, move_to_pose, rotate_toward, move_toward, set_gripper, grasp_candidates, search_history, read_history, done
+      ) Close-loop: observe-measure-act-verify - each action reports achieved motion and residual error; agent re-measures before proceeding (e.g. tests lift before transport)
+    ) Usage of lower level models: SAM3, TAPNext++, GraspGen; Gemini 3.7 Flash, GPT-6 Astra, distilled Qwen3.5-9B as controller
+  ) Results:
+    ) LIBERO-PRO matched: Gemini+K1 77.8 vs Astra RGB-only 61.1; K1 lifts Astra to 88.9
+    ) Full LIBERO-PRO Gemini+K1 77.2 avg vs pi0.5 12.8, OpenVLA 0, CaP-Agent0 23.2, RATS 43.8
+    ) Zero-shot cross-embodiment RoboSuite: Panda 90.0, UR5e 88.8, IIWA 86.2 vs OpenVLA / pi0.5 0.0
+    ) RoboTwin Easy/Hard 32.0/28.0 (small drop) vs pi0 64.0/25.2
+    ) Distilled 9B student: 51.2 in-domain / 44.2 new state / 13.9 held-out task vs OpenVLA 20.9/30.2/0, RGB-only student 7.0/4.7
+  ) Pro: no architecture change or depth retraining - perception exposed as callable tools
+  ) Pro: tool-call traces fit next-token prediction; 107 episodes enough to train a small model
+    ) Note: highly relevant to us - same ingredients (SAM, depth back-projection, tracking, GraspGen) but exposed as LLM-callable tools
+  ) Con: sim only; held-out task generalization 13.9 percent; articulated/multi-stage Goal tasks lag; handover 5 percent
+  ) Dataset: LIBERO-PRO (train/eval), RoboSuite and RoboTwin 2.0 (zero-shot transfer), 107 Gemini teacher episodes
+  ) Assets: code, configs, docs; no datasets or weights shipped
+  ) Code: https://github.com/Robo-Harness/k1 20 stars, pip package with pytest smoke tests, quick-start + LoRA guide, docs (architecture, results, environments, training), last-commit 2026-09-28
+  ) Models: Qwen3.5-9B LoRA student (weights not released); Gemini 3.7 Flash / GPT-6 Astra via API; SAM3, TAPNext++, GraspGen as-is
+    ) Opt: finetuned Qwen3.5-9B
+  ) Hardware: none (sim Panda, UR5e, IIWA, AgileX dual-arm)
+  ) Simulator: LIBERO-PRO, RoboSuite, RoboTwin 2.0 (SAPIEN)
+  ) References: SayCan, Code as Policies, CaP-X, VoxPoser, Inner Monologue, RT-2, OpenVLA, pi0.5, RDT, Show-Harness, Harness-VLA, SD-VLM, LoRA
+* Title: ReTrace - ReTrace: Cross-Stage Failure Attribution for Self-Improving Robotic Manipulation
+  ) Goal: instruction + visual/state observation --> frozen multimodal model as Executor (closed-loop action) and Attributor (retrospective reasoning) --> Attributor traces later failures to the earlier decision that caused them, proposes and validates corrections across attempts --> validated corrections consolidated into a reusable skill
+  ) Problem: in multi-stage tasks an action can succeed locally yet cause a later stage to fail; immediate-feedback self-correction cannot trace that back to the true cause
+  ) Tags: VLM, Closed-Loop, Planning, TextPrompt, Zeroshot, Long Horizon
+  ) Project: Not found
+  ) Paper: https://arxiv.org/pdf/2610.15814
+  ) Video: Not found
+  ) Method: Executor + Attributor sharing an Experience Memory (skill, pending-correction buffer, history); same frozen model plays both roles
+    ) Data Collection: autonomous real interaction on Franka Research 3 over repeated attempts, no demos
+    ) Data Augmentation: Not Avail
+    ) Preprocessing: Not found (trajectories = images, measured robot state, actions, execution feedback)
+    ) Training: none; learning = accumulating Experience Memory across attempts
+      ) Regularization: pending-correction buffer capacity K limits how many factors change at once, so each correction effect can be isolated
+    ) Inference: Executor plans from instruction + observation + memory, executes action chunks, observes after each chunk
+      ) Test time techniques: cross-attempt failure attribution; corrections with explicit magnitude; classified effective / ineffective / uncertain by comparing attempts; magnitudes refined
+      ) Tools: robot control interface spec only
+      ) Close-loop: within-attempt observe-decide-execute; after each attempt the Attributor diagnoses, corrects and updates memory until success
+    ) Usage of lower level models: none (GPT-6 Astra or GPT-6 Sol for both roles)
+  ) Results:
+    ) Skills learned with Astra-high, evaluated on Astra-low and Sol-xhigh, 4 tasks x 10 trials
+    ) Plug insertion: Astra-low 0->80, Sol-xhigh 0->10
+    ) Ball pouring: Astra-low 0->100, Sol-xhigh 0->90
+    ) Block stacking: Sol-xhigh 30->80; banana picking already 90-100
+    ) Fewer decisions in 6 of 8 combos (e.g. pouring 25->12.7)
+  ) Pro: no demos and no weight updates
+  ) Pro: skills transfer across models and reasoning efforts
+    ) Note: addresses cross-stage dependency failures our per-subtask reviewer can miss
+  ) Con: uneven across models; 4 tasks x 10 trials only; needs a frontier closed model
+  ) Dataset: none; 4 real tasks (banana pick, block stack, plug insertion, ball pour), budgets of 25-35 decisions
+  ) Assets: Not found
+  ) Code: Not found
+  ) Models: GPT-6 Astra (high/low), GPT-6 Sol (xhigh) via API
+  ) Hardware: Franka Research 3, cameras (not specified)
+  ) Simulator: Not Avail (real only)
+  ) References: RT-2, OpenVLA, pi0, pi0.5, RoboPrompt, Show-Harness, RoboDawn, RoboDojo, Harness VLA, Zeva, Self-Refine, REFLECT, ASPIRE, CaP-X
+* Title: AGP - Agent as Policy for Robotic Manipulation
+  ) Goal: task + video/image/language references + documented robot interface --> general coding agent (Codex / Claude Code) writes and runs Python in a workspace, interprets observations, issues motion commands, revises from feedback --> completed real-robot task, no training
+  ) Problem: agentic robot systems either pre-generate fixed programs (brittle) or orchestrate pretrained policies (limited); neither reasons jointly over scene, motion and outcome at runtime
+  ) Tags: Zeroshot, VLM, Planning, Closed-Loop, Long Horizon, TextPrompt, ImagePrompt, GoalImage, HumanVideos, 3DFeatures
+  ) Project: https://agent-as-policy-2026.github.io/
+  ) Paper: https://arxiv.org/pdf/2609.12541
+  ) Video: https://github.com/user-attachments/assets/788696b7-7461-4011-b58c-dce6ee930342 (5 min 49 sec)
+  ) Method: preparation agent builds a reusable task definition from references + interface docs; execution agent (the policy) loops until done or budget
+    ) Data Collection: none; live camera/depth/state; human demo videos (AutoMate parts) and goal images for one task
+    ) Data Augmentation: Not Avail
+    ) Preprocessing: agent itself calibrates cameras to robot frame, converts wrist RGB-D to robot coordinates, uses FK/IK (Mink)
+    ) Training: none
+    ) Inference: agent writes/edits local Python scripts to estimate geometry and compose robot calls
+      ) Test time techniques: multi-step planning, self-revision from motion feedback, reusing saved procedures across trials, transfer of saved documents from a stronger to a weaker model
+      ) Tools: Python CLI client to robot (camera image, depth, joint state; Cartesian/joint targets; gripper), Mink IK
+      ) Close-loop: after each action the interface reports updated state and target errors; agent re-estimates alignment and recovery (e.g. after a failed insertion it gets a closer view and changes approach)
+    ) Usage of lower level models: none - single MLLM agent does perception, planning, motion, recovery via self-written code
+  ) Results:
+    ) GPT-6 Astra on real robot: assembly 8/10, pyramid 10/10, two towers 10/10, six-block tower 9/10, dice flip 10/10, targeted throw 9/10, sequential towel fold 5/5, simultaneous fold 3/5
+    ) Two-pair assembly vs baselines: Graph-as-Policy 0/25, ASPIRE 3/25, AGP 23/25
+    ) ASPIRE needs ~7x time and 4.2x cost including sim preparation
+  ) Pro: zero-shot on the real robot, no sim2real
+  ) Pro: one agent handles perception, planning, motion and recovery
+    ) Note: experience reuse shortens repeated trials
+  ) Con: slow and expensive (towel folding 50.8 min, USD 24.14 per success); weaker models fail assembly
+  ) Dataset: none for training; released HF dataset of videos, frames, joint trajectories and full agent traces
+  ) Assets: HF dataset of agent traces
+  ) Code: https://github.com/agent-as-policy-2026/agent-as-policy 37 stars, Apache-2.0, setup docs (robot SDK, RoboDojo sim variant), last-commit 2026-10-20
+  ) Models: Codex with GPT-5.6 Sol/Terra/Luna and GPT-6 Astra; Claude Code with Claude Opus 5, Claude Fable 5.1 (frozen)
+  ) Hardware: I2RT YAM 6-DoF arms (bimanual for towels), wrist RealSense D405, overhead Logitech BRIO
+  ) Simulator: MuJoCo only for baselines preparation; RoboDojo sim variant in repo
+  ) References: Graph-as-Policy, ASPIRE, SayCan, Inner Monologue, Diffusion Policy, RT-2, OpenVLA, pi0, AutoMate
+* Title: RoboDawn - Transferring the Intelligence of VLMs to Robotic Control
+  ) Goal: camera views + robot state + grid localization overlays + few demos --> frozen VLM reasons each round and outputs a batch of discrete semantic commands (move / rotate / point / gripper on the gripper interaction point) --> motion planner executes each as one Cartesian motion --> feedback and memory update
+  ) Problem: VLA/VLM policies need task-specific robot data; can a frozen VLM transfer via a human-intuitive command interface instead
+  ) Tags: Zeroshot, OneShot, Fewshot, VLM, Planning, Closed-Loop, TextPrompt, ImagePrompt, KeyPoints, MotionPlanner, Long Horizon
+  ) Project: https://robodawn.top/
+  ) Paper: https://arxiv.org/pdf/2609.22966
+  ) Video: https://robodawn.top/assets/demo/original.mp4 (episode replays at https://robodawn.top/results/)
+  ) Method: commands on the GIP (midpoint between fingertips): move x/y/z, rotate roll/pitch/yaw, point down/forward/down45, gripper open/close/0-1, home/wait/done; max 20 cm and 90 deg per command
+    ) Data Collection: expert trajectories (RoboTwin 2.0 clean, RoboDojo) reduced to waypoints, rewritten in the command grammar, VLM adds rationale per round; disjoint from eval scenes
+    ) Data Augmentation: none (RoboTwin randomization used for the C2R eval split)
+    ) Preprocessing: annotated head + wrist views, grid localization overlays, robot state text
+    ) Training: none, frozen VLM
+    ) Inference: Observe (annotated images, state, grid) -> Reason (progress, plan, scratchpad) -> Act (command batch) -> Adapt (reached / partial / failed + memory)
+      ) Test time techniques: 0/1/N-shot ICL with command primer and rationales; bigger command budget (one-shot 31.2 percent at 60 commands -> 47.2 at 240)
+      ) Tools: semantic command interface only (no code execution)
+      ) Close-loop: per-command reached/partial/failed + scratchpad memory; no privileged object poses
+    ) Usage of lower level models: motion planner converts each command to a planned Cartesian motion
+  ) Results:
+    ) RoboTwin 2.0 C2R (50 tasks): 53.2 zero-shot, 73.6 one-shot (GPT-6 Astra) vs pi0.5 trained on full set 46.0
+    ) RoboDojo: 35.67 zero-shot, 47.17 one-shot vs DM0.5 19.34
+    ) Real Franka block-in-basket 9/10 zero-shot (Gemini 3.8 Flash)
+    ) Gains flatten after 1 demo; 8 demos slightly hurt
+    ) Ablation: grid localization and explicit reasoning matter most
+  ) Pro: frozen VLM beats trained baselines zero-shot, SOTA one-shot
+  ) Pro: transfers to real Franka unchanged
+    ) Note: inference/motion time ratio 4.65 vs pi0.5 0.037 - far slower per decision
+  ) Con: coarse near fine contact (coin insertion last cm), IK collisions, premature success judgment, rotations harder than translation, not for high-frequency control
+  ) Dataset: 128 demos (command-grammar rewrites with rationales), 500 RoboTwin and 210 RoboDojo eval episodes, all released with replays
+  ) Assets: results browser with 710 episodes and 128 demos
+  ) Code: https://github.com/Hugo-AGI/RoboDawn 72 stars, MIT, README with setup, prompts, demos, seeds, last-commit 2026-09-23
+  ) Models: frozen GPT-6 Astra, Gemini 3.8 Flash, Seed-2.1-Pro
+  ) Hardware: Franka arm, head + left/right wrist cameras
+  ) Simulator: RoboTwin 2.0 (C2R), RoboDojo
+  ) References: pi0.5, RoboTwin 2.0, RoboDojo, StarVLA, X-VLA, FastWAM, Motus, LingBot-VA, DM0.5, Agent as Policy
+* Title: RoboICL - RoboICL: Embodied In-Context Learning with GPT-6 Astra
+  ) Goal: instruction + demo trajectories + rollout history --> frozen GPT-6 Astra reads a shared observation-action-receipt grammar (demo context + bounded anchored interaction memory) --> predicts dual-arm Cartesian action chunks --> validated and executed closed-loop, no finetuning
+  ) Problem: GPT-6 Astra is weak on high-precision and long-horizon tasks; prior robot ICL needs robot-specific training or does not unify demos with online feedback
+  ) Tags: Fewshot, Zeroshot, VLM, TextPrompt, ImagePrompt, Closed-Loop, Long Horizon
+  ) Project: https://mosi-ai.github.io/RoboICL-GPT6-Astra.github.io/
+  ) Paper: https://arxiv.org/pdf/2609.34261
+  ) Video: Not found (interactive episode viewer on project page)
+  ) Method: each round: task text, demo context, interaction memory, current triptych (left wrist, head, right wrist) + proprio -> one act tool call returning an action chunk
+    ) Data Collection: RoboDojo expert HDF5 demos; real robot: 3 GELLO teleop demos per task
+    ) Data Augmentation: none
+    ) Preprocessing: 3 views of 640x480 concatenated into one 1920x480 triptych (API limit 50 images per request)
+    ) Training: none
+      ) Regularization: not applicable
+    ) Inference: chunk executed as validated prefix at 25 Hz; horizon H 5-25 per task
+      ) Test time techniques: anchored memory (B-1 fixed anchors + latest); demos sampled into J non-overlapping blocks (early/mid/late); TRAJECTORY_GAP tokens; 0/1/3-shot
+      ) Tools: single act tool; deterministic code does validation, IK, execution
+      ) Close-loop: execution receipts (steps executed, tracking residual, interruptions) fed into memory each round; rejected actions retried immediately without using an anchor slot
+    ) Usage of lower level models: none; optional gate decides whether to reuse a predicted action suffix instead of calling the model (cuts calls 33-48 percent)
+  ) Results:
+    ) 30 RoboDojo tasks: overall 50.64 vs strongest baseline 33.68-39.56; best on Memory (70.00) and Open (54.75)
+    ) vs official zero-shot GPT-6 Astra: +20 to +27 points per category
+    ) 10-task panel: one-shot 60.60 vs GPT-as-Policy Direct 38.50; within 2 points of pi0.5+Astra hybrid (62.60)
+    ) Real Franka (peg in hole, towel fold, bridge): 14.45 zero-shot -> 63.33 one-shot -> 78.89 three-shot
+    ) Anchored memory 80.25 vs first+recent 73.50
+  ) Pro: no robot training, single tool interface
+  ) Pro: demos and online feedback share one grammar
+    ) Note: keeping the first observation as an anchor matters when success depends on initial state
+  ) Con: still weak on some precision tasks (Make a Kong 0); API image cap limits context; per-task horizon tuning
+  ) Dataset: RoboDojo 30 of 42 tasks + one-shot reference bundles (12 action blocks); 3 real GELLO tasks, 5 trials per shot count
+  ) Assets: RoboDojo asset tree, per-task horizon config, locked submodules (RoboDojo, XPolicyLab, IsaacLab, cuRobo)
+  ) Code: https://github.com/Mosi-AI/RoboICL 226 stars, 21 forks, install docs (two envs, submodules, asset scripts), good README, last-commit 2026-10-22
+  ) Models: GPT-6 Astra via API, nothing released
+  ) Hardware: Franka Research 3, GELLO teleop, wrist RealSense D405, external RealSense D515
+  ) Simulator: IsaacLab / Isaac Sim 5.1 (RoboDojo), cuRobo
+  ) References: ICRT, Instant Policy, RICL, Zero-WAM, GEN-1.5, Show-Harness, ReAct, Reflexion, Zeva, Reflective VLA, GPT-as-Policy, GPT-Policy, RoboDojo
+* Title: RoboProbe-Eval - An Unexpected Robot Policy: Early Evaluations of GPT-6 Astra on RoboDojo and Beyond
+  ) Goal: RGB triptych + proprio + instruction / task recipe --> frozen LLM (GPT-6 Astra, GPT-5.5, DeepSeek-Flash) called every turn as the policy via move_eef or give_up --> classical IK / validation converts to joint commands --> closed-loop RoboDojo execution scored by the benchmark
+  ) Problem: can a frontier LLM be the control policy itself (no VLA) against a full public leaderboard rather than small custom suites
+  ) Tags: Zeroshot, OneShot, VLM, TextPrompt, ImagePrompt, Closed-Loop, Long Horizon
+  ) Project: https://robodojo-benchmark.com/report/gpt-6-astra-eval
+  ) Paper: https://arxiv.org/pdf/2609.24170
+  ) Video: Not found (episode viewer on report page)
+  ) Method: fixed system message + goal message (instruction + wiki-derived recipe, no action sequence) + tool defs; every turn must call move_eef or give_up
+    ) Data Collection: none; one-shot study uses another layout of the same task as image or text demo
+    ) Data Augmentation: probing perturbations only - mirrored images, wrist-only view, ~10 cm pose jitter, negated axes
+    ) Preprocessing: 3 RGB views + remaining step budget + 14 grasp-point dims + 12 joint angles; only 2 latest turns keep images
+    ) Training: none
+      ) Regularization: not applicable
+    ) Inference: medium reasoning, 100 calls per episode; move_eef sets any subset of position/orientation/gripper per arm, both arms concurrently
+      ) Test time techniques: one-shot demo conditioning on 340 matched pairs; 6 unexplained online perturbations
+      ) Tools: move_eef, give_up (no pick/place primitives)
+      ) Close-loop: each observation reports requested-vs-measured EE discrepancy and acceptance; rejected targets cause no motion so the model retries
+    ) Usage of lower level models: none - classical IK and path planning only
+  ) Results:
+    ) RoboDojo 42 tasks x 50 eps: Astra 28.97 score / 22.48 percent SR, above all 40 public policies (+3.14 SR over DM0.5)
+    ) GPT-5.5 0.88 SR, DeepSeek-Flash 1.92 SR
+    ) Strong on Open / Generalization, weak on Memory / Precision / Long-Horizon
+    ) One-shot demos do not help (22.9 zero-shot baseline); hurt tasks already solved
+    ) Real-robot protocol halted after unsafe actions damaged equipment
+  ) Pro: first leaderboard-scale (2100 trials) LLM-as-policy evaluation
+  ) Pro: shows active perception (moves wrist camera around occlusion), flexible bimanual role assignment
+    ) Note: model-specific - other LLMs fail with the same interface
+  ) Con: weak on contact-rich / precision / bimanual coordination; unsafe on real hardware
+  ) Dataset: RoboDojo 42 sim tasks, 50-episode protocol, 40-policy leaderboard snapshot
+  ) Assets: task recipes, prompt / tool appendix, per-layout result JSON
+  ) Code: https://github.com/RoboProbe/RoboProbe 216 stars, pip install -e, CI tests, docs (setup, harness contract, leaderboard), last-commit 2026-10-16
+  ) Models: GPT-6 Astra, GPT-5.5, DeepSeek-Flash via API through XPolicyLab EEF harness
+  ) Hardware: RoboDojo-Real embodiment (halted, arm model Not found); qualitative humanoid and two Shadow hands piano demo
+  ) Simulator: RoboDojo (XPolicyLab)
+  ) References: SayCan, Inner Monologue, Code as Policies, VoxPoser, Hi Robot, Helix, RT-2, OpenVLA, pi0, Claude Plays Robotics, ICRT, RoboPrompt, Skild S1, GEN-1.5, RoboTTT, Agent as Policy, XPolicyLab, RoboICL

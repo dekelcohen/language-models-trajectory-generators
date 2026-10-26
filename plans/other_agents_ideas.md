@@ -371,3 +371,7 @@ never in prompts). This is a long-term direction, not a near-term change.
 3. Ideas 1, 6, 7 and 9: the interface and perception upgrades with the strongest evidence.
 4. Ideas 4, 5 and 8: reviewer, context and knowledge.
 5. Ideas 12–16 and 18: larger research items.
+
+## Related-work agents
+
+The 12 related agent papers mined from the related-work sections are summarized in `docs/models/related_agent_papers.txt`. The ideas most relevant to us: Thea evaluator exit codes (hidden per-tool post-conditions, 3-state verdict), Robo-Harness K1 perception-as-tools (back-projection, cross-view depth check, anchor co-motion), Zetta action-rate code critics, ReTrace cross-stage failure attribution, and CaP-X visual-differencing text feedback.
