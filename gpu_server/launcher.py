@@ -17,8 +17,8 @@ Policy (``--tracking-server``, ``$GPU_SERVER_POLICY``, ``config.tracking_server_
 Remote URLs (another machine) are never launched or stopped from here, only pinged.
 
 Interpreter: ``$GPU_SERVER_PYTHON`` > ``config.gpu_server_python`` > the conda env named
-``config.gpu_server_conda_env`` next to the current env; none found -> :class:`GpuServerEnvError`
-(only the no-GPU ``echo`` test module may run on ``sys.executable``).
+``config.gpu_server_conda_env`` next to the current env > ``sys.executable`` if it can host the
+module itself (CUDA torch; one env for everything) > :class:`GpuServerEnvError`.
 
 Typical use::
 
@@ -188,9 +188,29 @@ def _env_missing(module, env_name, exe=None):
         f"with CUDA torch; or run with --tracker-provider template (no GPU).")
 
 
+def _current_env_can_host(module):
+    """True when this interpreter itself has what ``module`` needs (a single-env deployment):
+    CUDA torch, and torch >= 2.4 for RoMa v2."""
+    import importlib.util
+    if importlib.util.find_spec("torch") is None:
+        return False
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return False
+        if module == "romav2":
+            major, minor = (int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
+            if (major, minor) < (2, 4):
+                return False
+    except Exception:  # noqa: BLE001 - a broken torch install cannot host the module either
+        return False
+    return True
+
+
 def resolve_python(module=None):
-    """Interpreter for a server hosting ``module``. Raises :class:`GpuServerEnvError` when
-    the configured env is missing instead of silently using this (CPU-only) interpreter."""
+    """Interpreter for a server hosting ``module``. When the configured env is missing, this
+    interpreter is used only if it can host the module itself (one env for everything);
+    otherwise :class:`GpuServerEnvError` - never a silent CPU fallback."""
     module = module or _cfg("tracker_remote_module", "cotracker")
     prof = module_profile(module)
     if prof.get("python"):
@@ -198,23 +218,23 @@ def resolve_python(module=None):
             raise _env_missing(module, None, prof["python"])
         return prof["python"]
     if prof.get("conda_env"):
-        found = _find_conda_env(prof["conda_env"])
-        if found:
-            return found
-        raise _env_missing(module, prof["conda_env"])
-    exe = os.environ.get("GPU_SERVER_PYTHON") or _cfg("gpu_server_python", None)
-    if exe:
-        if not os.path.isfile(exe):
-            raise _env_missing(module, None, exe)
-        return exe
-    name = _cfg("gpu_server_conda_env", None)
-    if name:
-        found = _find_conda_env(name)
-        if found:
-            return found
-    if module in _NO_GPU_MODULES:
+        # a module with its own env (RoMa v2: torch >= 2.4) cannot use the shared server env
+        wanted = prof["conda_env"]
+    else:
+        exe = os.environ.get("GPU_SERVER_PYTHON") or _cfg("gpu_server_python", None)
+        if exe:
+            if not os.path.isfile(exe):
+                raise _env_missing(module, None, exe)
+            return exe
+        wanted = _cfg("gpu_server_conda_env", None)
+    found = _find_conda_env(wanted) if wanted else None
+    if found:
+        return found
+    if module in _NO_GPU_MODULES or _current_env_can_host(module):
+        logger.info("[launcher] no %r env for %s; using this interpreter (%s), which can host it",
+                    wanted, module, sys.executable)
         return sys.executable
-    raise _env_missing(module, name or "(gpu_server_conda_env unset)")
+    raise _env_missing(module, wanted or "(gpu_server_conda_env unset)")
 
 
 # -- launching --------------------------------------------------------------

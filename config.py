@@ -208,7 +208,8 @@ tracking_server_policy_default = "no-shutdown"
 gpu_server_idle_timeout_s = 1800.0
 gpu_server_startup_timeout_s = 300.0     # first run downloads CoTracker (~100 MB) into TORCH_HOME
 # Interpreter for the server: $GPU_SERVER_PYTHON > gpu_server_python > the conda env named
-# gpu_server_conda_env next to the current one; none found -> GpuServerEnvError (setup hint).
+# gpu_server_conda_env next to the current one > this interpreter if it has CUDA torch;
+# else GpuServerEnvError (setup hint).
 gpu_server_python = None
 gpu_server_conda_env = "env_lapa_tracking"
 gpu_server_log_dir = os.path.join("outputs", "gpu_server")   # relative to the repo root

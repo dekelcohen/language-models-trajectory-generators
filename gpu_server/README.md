@@ -79,8 +79,9 @@ When tracking uses `--provider remote`, the client starts the server itself:
   (1800 s) with no requests. Any request counts as activity, including a ping. In-flight
   requests and loads block the exit; open idle connections do not.
 - **Python:** `$GPU_SERVER_PYTHON` > `config.gpu_server_python` > the conda env
-  `config.gpu_server_conda_env` (`env_lapa_tracking`). If none is found the launcher raises
-  `GpuServerEnvError` pointing at the install steps (README "3D Tracking" step 2).
+  `config.gpu_server_conda_env` (`env_lapa_tracking`) > the current interpreter, only if it has
+  CUDA torch itself. Otherwise the launcher raises `GpuServerEnvError` pointing at the install
+  steps (README "3D Tracking" step 2).
 - **Per-module profiles** (`config.gpu_server_module_profiles`): a module that needs a
   different env gets its own server, spawned with that profile's python, args and env.
   This is how CoTracker (py3.10/torch 2.0, port 8765) and RoMa v2 (torch ≥ 2.4, port 8775,

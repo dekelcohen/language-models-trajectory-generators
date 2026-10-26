@@ -382,7 +382,8 @@ class TestLauncher(unittest.TestCase):
         from unittest import mock
         os.environ.pop("GPU_SERVER_PYTHON", None)
         with mock.patch.object(config, "gpu_server_python", None), \
-                mock.patch.object(config, "gpu_server_conda_env", "no_such_env_xyz"):
+                mock.patch.object(config, "gpu_server_conda_env", "no_such_env_xyz"), \
+                mock.patch.object(self.launcher, "_current_env_can_host", return_value=False):
             with self.assertRaisesRegex(self.launcher.GpuServerEnvError, "3D Tracking"):
                 self.launcher.resolve_python("cotracker")
             # prewarm must not swallow it: the run has to stop at startup
@@ -390,6 +391,11 @@ class TestLauncher(unittest.TestCase):
             with self.assertRaises(self.launcher.GpuServerEnvError):
                 self.launcher.prewarm(f"tcp://127.0.0.1:{_free_port_pair()}", "cotracker")
             self.assertEqual(self.launcher.resolve_python("echo"), sys.executable)
+        # one env for everything: this interpreter has CUDA torch, so it hosts the module
+        with mock.patch.object(config, "gpu_server_python", None), \
+                mock.patch.object(config, "gpu_server_conda_env", "no_such_env_xyz"), \
+                mock.patch.object(self.launcher, "_current_env_can_host", return_value=True):
+            self.assertEqual(self.launcher.resolve_python("cotracker"), sys.executable)
         os.environ["GPU_SERVER_PYTHON"] = os.path.join(self.tmp, "missing", "python.exe")
         with self.assertRaisesRegex(self.launcher.GpuServerEnvError, "does not exist"):
             self.launcher.resolve_python("cotracker")
