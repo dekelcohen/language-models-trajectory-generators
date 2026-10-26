@@ -180,7 +180,7 @@ python main.py --tracking --tracker-provider remote --tracker3d pose_tracker
 # in-process (only if the main env has CUDA torch):
 python main.py --tracking --tracker-provider cotracker --tracker3d pose_tracker
 ```
-- The auto-launcher picks the server's interpreter from `$GPU_SERVER_PYTHON`, then `config.gpu_server_python`, then the conda env `config.gpu_server_conda_env` (`env_lapa_tracking`).
+- The auto-launcher picks the server's interpreter from `$GPU_SERVER_PYTHON`, then `config.gpu_server_python`, then the conda env `config.gpu_server_conda_env` (`env_lapa_tracking`). If none exists, the run stops at startup with an error pointing here; it does not fall back to the CPU-only main env.
 - The server log is `outputs/gpu_server/server_<port>.log`. A launched server exits after 30 min with no requests.
 - To use a server on another machine, set `GPU_SERVER_URL=ws://<host>:8765/v1/ws`, plus `GPU_SERVER_TOKEN` (required for non-loopback binds). Over slow links, also set `GPU_SERVER_CODEC=jpeg` (14.5 KB per frame instead of 192 KB, same accuracy).
 - **No local GPU at all?** Run the server on Kaggle or Colab with [`gpu_server/kaggle_gpu_server.ipynb`](gpu_server/kaggle_gpu_server.ipynb). It publishes a `wss://….trycloudflare.com` URL. Set it as `GPU_SERVER_URL` and run with `--tracking-server no-launch`. See [`gpu_server/README.md`](gpu_server/README.md#kaggle--colab-expose-the-server-to-a-cpu-only-client-gpu_serverexposepy).

@@ -377,6 +377,23 @@ class TestLauncher(unittest.TestCase):
         with self.assertRaisesRegex(ConnectionError, "no-launch"):
             self.launcher.ensure_server(url, "echo")
 
+    def test_missing_gpu_env_fails_with_setup_hint(self):
+        import config
+        from unittest import mock
+        os.environ.pop("GPU_SERVER_PYTHON", None)
+        with mock.patch.object(config, "gpu_server_python", None), \
+                mock.patch.object(config, "gpu_server_conda_env", "no_such_env_xyz"):
+            with self.assertRaisesRegex(self.launcher.GpuServerEnvError, "3D Tracking"):
+                self.launcher.resolve_python("cotracker")
+            # prewarm must not swallow it: the run has to stop at startup
+            self.launcher.configure("no-shutdown")
+            with self.assertRaises(self.launcher.GpuServerEnvError):
+                self.launcher.prewarm(f"tcp://127.0.0.1:{_free_port_pair()}", "cotracker")
+            self.assertEqual(self.launcher.resolve_python("echo"), sys.executable)
+        os.environ["GPU_SERVER_PYTHON"] = os.path.join(self.tmp, "missing", "python.exe")
+        with self.assertRaisesRegex(self.launcher.GpuServerEnvError, "does not exist"):
+            self.launcher.resolve_python("cotracker")
+
 
 if __name__ == "__main__":
     unittest.main()

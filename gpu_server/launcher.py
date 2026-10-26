@@ -17,7 +17,8 @@ Policy (``--tracking-server``, ``$GPU_SERVER_POLICY``, ``config.tracking_server_
 Remote URLs (another machine) are never launched or stopped from here, only pinged.
 
 Interpreter: ``$GPU_SERVER_PYTHON`` > ``config.gpu_server_python`` > the conda env named
-``config.gpu_server_conda_env`` next to the current env > ``sys.executable``.
+``config.gpu_server_conda_env`` next to the current env; none found -> :class:`GpuServerEnvError`
+(only the no-GPU ``echo`` test module may run on ``sys.executable``).
 
 Typical use::
 
@@ -166,25 +167,54 @@ def module_profile(module):
     return prof
 
 
+class GpuServerEnvError(RuntimeError):
+    """No interpreter able to host a GPU module was found (its conda env is not installed)."""
+
+
+SETUP_DOCS = ('README.md "3D Tracking" step 2 (CoTracker3: create the env_lapa_tracking conda env) '
+              'and step 3 (RoMa v2), or gpu_server/README.md')
+
+# Modules the main (CPU-only) interpreter may host itself: no torch/GPU needed.
+_NO_GPU_MODULES = {"echo"}
+
+
+def _env_missing(module, env_name, exe=None):
+    where = (f"interpreter {exe!r} does not exist" if exe else
+             f"conda env {env_name!r} was not found next to {sys.prefix!r}")
+    return GpuServerEnvError(
+        f"Cannot start the gpu_server for module {module!r}: {where}.\n"
+        f"Install it as described in {SETUP_DOCS}; or point $GPU_SERVER_PYTHON "
+        f"(${'GPU_SERVER_' + str(module).upper() + '_PYTHON'} for this module) at a python "
+        f"with CUDA torch; or run with --tracker-provider template (no GPU).")
+
+
 def resolve_python(module=None):
-    prof = module_profile(module) if module else {}
+    """Interpreter for a server hosting ``module``. Raises :class:`GpuServerEnvError` when
+    the configured env is missing instead of silently using this (CPU-only) interpreter."""
+    module = module or _cfg("tracker_remote_module", "cotracker")
+    prof = module_profile(module)
     if prof.get("python"):
+        if not os.path.isfile(prof["python"]):
+            raise _env_missing(module, None, prof["python"])
         return prof["python"]
     if prof.get("conda_env"):
         found = _find_conda_env(prof["conda_env"])
         if found:
             return found
-        logger.warning("[launcher] conda env %r of module %s not found; using the default "
-                       "gpu_server python", prof["conda_env"], module)
+        raise _env_missing(module, prof["conda_env"])
     exe = os.environ.get("GPU_SERVER_PYTHON") or _cfg("gpu_server_python", None)
     if exe:
+        if not os.path.isfile(exe):
+            raise _env_missing(module, None, exe)
         return exe
     name = _cfg("gpu_server_conda_env", None)
     if name:
         found = _find_conda_env(name)
         if found:
             return found
-    return sys.executable
+    if module in _NO_GPU_MODULES:
+        return sys.executable
+    raise _env_missing(module, name or "(gpu_server_conda_env unset)")
 
 
 # -- launching --------------------------------------------------------------
@@ -254,9 +284,12 @@ def _start_or_attach(url, module, policy, idle_timeout_s):
 
 def prewarm(url=None, module=None):
     """Non-blocking :func:`ensure_server`: start the server (if needed) so the model loads
-    while the run does other work. Errors are logged, not raised."""
+    while the run does other work. Errors are logged, not raised - except a missing server
+    env, which no later retry can fix, so the run fails at startup with the setup hint."""
     try:
         return ensure_server(url, module, wait=False)
+    except GpuServerEnvError:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("[launcher] prewarm of %s failed: %s", url, exc)
         return None

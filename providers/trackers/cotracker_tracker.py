@@ -72,8 +72,9 @@ DEFAULT_TORCH_HOME = os.path.join(REPO_ROOT, "cache", "torch")
 HUB_REPO = "facebookresearch/co-tracker"
 
 TORCH_HINT = (
-    "The cotracker provider needs PyTorch. Install torch in the active environment (or "
-    "run with --tracker-provider template)."
+    "The cotracker provider needs PyTorch. Install CUDA torch in the active environment "
+    "(README.md \"3D Tracking\" step 2), or use the GPU server env with --tracking cotracker "
+    "(= --tracker-provider remote), or run with --tracker-provider template."
 )
 
 
@@ -87,7 +88,8 @@ def _load_hint(torch_home, variant, detail):
         f"  * or point TORCH_HOME at a machine that already has the cache "
         f"(set TORCH_HOME=<dir> containing hub/checkpoints), e.g. "
         f"set TORCH_HOME={DEFAULT_TORCH_HOME};\n"
-        "  * or run with --tracker-provider template (no download, no torch)."
+        "  * or run with --tracker-provider template (no download, no torch).\n"
+        "Setup: README.md \"3D Tracking\" step 2 (2b downloads the model)."
     )
 
 
