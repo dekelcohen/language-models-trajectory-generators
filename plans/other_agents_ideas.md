@@ -366,6 +366,14 @@ PyRUA training details (arXiv 2610.01939v2, section 5 and appendix J):
 
 ### 18b. Alternative: on-policy self-distillation from a privileged same-model teacher (OPSD) + LoRA
 
+> **Update (2026-10, see `docs/train/self_distillation_variants.md`).**
+> For multi-turn tool or code agents, pure OPSD with privileged info in the KL loss is **not recommended**:
+> - In PSP (arXiv 2609.29051) it fell below the untrained base model.
+> - A 132-run reality check (arXiv 2610.19789) found no self-distillation method that consistently beats GRPO.
+>
+> Use privileged info only to *collect data* or *write hints* (PSP), not as a token target.
+> For 1-2 GPUs, follow 18c.
+
 Idea:
 
 - The student (the local model, pixels + proprio only) generates its own episode on-policy.
@@ -416,6 +424,50 @@ Prerequisites, same as idea 18:
 - idea 11: the automated harness and a success check used only as reward;
 - a train/test seed split;
 - a local OpenAI-compatible server (SGLang/vLLM) that can serve the LoRA adapter for rollouts.
+
+### 18c. Recommended low-compute path (1-2 H100): SFT/RFT + LoRA first, GRPO last
+
+Why not GRPO first:
+
+- VRAM is not the problem. A 4B model with LoRA fits one H100; CaP-RL ran GRPO for a 7B model on one H100.
+- The cost is **sim rollouts**. GRPO needs a fresh group of 8 multi-turn episodes per task at every step,
+  and throws each one away after one update. In 12 h, that caps the dataset at a few thousand episodes
+  over about 45 tasks.
+- SFT-style data is collected once, reused for many epochs, and can be scaled to many tasks and seeds.
+
+Stages (each one is a baseline the next must beat):
+
+1. **Teacher-data SFT (no GPU for data).**
+   - A frontier model (GPT-6 class) runs our normal pipeline on many tasks and seeds.
+   - Keep only sim-verified successes. Train a LoRA on them (multi-turn chat format, loss on assistant
+     turns only).
+   - Evidence: Robo-Harness K1 trained a useful 9B student from 107 teacher episodes (arXiv 2609.29389).
+2. **Privileged hints for collection only.**
+   - Where the teacher fails every attempt, re-run it with a short qualitative hint written from sim state
+     (PSP-style). Train on the successful run *with the hint removed*.
+   - PSP reports that SFT on such trajectories already captures most of its gain.
+   - Risk: the 'privilege gap' — the student learns confident actions it cannot justify from pixels.
+     Keep only runs whose code detects and measures before acting. Reject runs that hard-code
+     ground-truth numbers.
+3. **Iterated RFT (rejection-sampling fine-tuning / expert iteration).**
+   - The student samples k attempts per task and is fine-tuned on its *own* successes. Repeat 2-4 rounds.
+   - On-policy data, so there is no privilege gap. The cost is sampling only, with no group-relative
+     training loop.
+   - RAFT++ (arXiv 2504.11343) found this competitive with GRPO early in training, falling behind later.
+4. **Optional DPO/KTO** on success/fail pairs from the same task and seed. It is offline and cheap, and
+   uses the failures that RFT discards.
+5. **Optional short GRPO with LoRA**, only on tasks with mixed success (0 < SR < 1), where GRPO has signal.
+
+Monitor:
+
+- Unseen-task SR on a held-out seed split.
+- Wrong-claim rate: code that uses values it cannot observe.
+- Number of re-detect / check calls, to catch suppressed verification.
+- Cells and tokens per episode (PyRUA's main gain was interface discipline).
+
+Known weakness: offline SFT generalizes worse than on-policy training. Experience Distillation
+(arXiv 2607.21051) found SFT kept only 3.8% of in-context gains, versus at least 64.8% for on-policy
+distillation. Stage 3 exists to close part of this gap.
 
 ## Explicitly *not* to copy
 

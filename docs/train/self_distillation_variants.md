@@ -192,6 +192,7 @@ graph LR
    - entropy collapse;
    - training curves, not just endpoints[^4][^15].
 7. **Cheapest fallback:** SFT on successful hinted episodes (the K1 pattern) before any RL[^12].
+8. **Compute-limited path (1-2 H100):** teacher-data SFT, then iterated RFT, then optional DPO, with only a short final GRPO run. See `plans/other_agents_ideas.md` section 18c.
 
 ---
 
