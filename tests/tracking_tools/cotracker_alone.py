@@ -4,8 +4,7 @@ Runs CoTracker3 (online and/or offline, with/without the 6x6 support grid) on th
 ``dump_door_clip.py`` - no 3D lift, no gates, no re-seeding - and scores every seed point
 against its ground-truth pixel. Clean and occluded (disc painted on the head) variants.
 
-GPU env:
-    $env:TORCH_HOME="$PWD\\cache\\torch"
+GPU env (TORCH_HOME defaults to ~/.cache/torch):
     & $lapa_py tests/tracking_tools/cotracker_alone.py outputs/tracking_probes/door_clip/door_region12_fps30.npz
 """
 import argparse
@@ -17,12 +16,12 @@ import time
 import numpy as np
 import torch
 
-_REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-HUB_DIR = os.path.join(_REPO, "cache", "torch", "hub", "facebookresearch_co-tracker_main")
+_TORCH_HOME = os.environ.get("TORCH_HOME") or os.path.join(os.path.expanduser("~"), ".cache", "torch")
+HUB_DIR = os.path.join(_TORCH_HOME, "hub", "facebookresearch_co-tracker_main")
 
 
 def load(variant, device):
-    os.environ.setdefault("TORCH_HOME", os.path.join(_REPO, "cache", "torch"))
+    os.environ.setdefault("TORCH_HOME", _TORCH_HOME)
     model = torch.hub.load(HUB_DIR, variant, source="local")
     return model.to(device).eval()
 

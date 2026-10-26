@@ -14,7 +14,7 @@ RemoteTracker / GpuClient  --tcp|ws-->  ModuleHost --> cotracker | romav2 | echo
 
 ```powershell
 $py = "C:\Users\dekelco\AppData\Local\miniconda3\envs\env_lapa_tracking\python.exe"
-$env:TORCH_HOME = "$PWD\cache\torch"
+# Weights cache: $env:TORCH_HOME, default ~/.cache/torch (outside the repo).
 & $py -m gpu_server.server --modules cotracker --preload cotracker      # ws :8765, tcp :8766
 & $py -m gpu_server.server --modules romav2 --set romav2.root=<RoMaV2 checkout> --set romav2.setting=turbo --preload romav2 --ws 127.0.0.1:8775 --tcp 127.0.0.1:8776
 ```

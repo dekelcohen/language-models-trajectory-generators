@@ -167,10 +167,9 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available(), tor
 
 *2b. Download the model once* (`torch.hub` clones `facebookresearch/co-tracker` and fetches the checkpoint into `TORCH_HOME`). Later runs work offline:
 ```
-set TORCH_HOME=<repo>\cache\torch                      # PowerShell: $env:TORCH_HOME="$PWD\cache\torch"
 <env_lapa_tracking>\python.exe -c "import torch; torch.hub.load('facebookresearch/co-tracker', 'cotracker3_online')"
 ```
-`<repo>/cache/torch` is git-ignored and is the default the tracker and the server use.
+With `TORCH_HOME` unset, this goes to torch's user cache `%USERPROFILE%\.cache\torch`. That is also the default the tracker and the server use, and it is kept outside the repo so the hub source code does not show up in repo searches. Set `TORCH_HOME` only if you want a different location.
 
 *2c. Run.* The remote provider is the recommended way:
 ```

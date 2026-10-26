@@ -175,10 +175,10 @@ review_tracking_evidence = True
 review_pull_proprio = True
 # CoTracker3 provider (--tracker-provider cotracker). The online model is fetched once via
 # torch.hub into TORCH_HOME and reused offline afterwards; None honours the environment
-# and falls back to <repo>/cache/torch.
+# and falls back to torch's user cache ~/.cache/torch (kept outside the repo).
 tracker_cotracker_variant = "cotracker3_online"
 tracker_cotracker_device = None          # None = cuda:0 when available, else cpu
-tracker_cotracker_torch_home = None      # None = $TORCH_HOME or <repo>/cache/torch
+tracker_cotracker_torch_home = None      # None = $TORCH_HOME or ~/.cache/torch
 # Visibility probability above which a CoTracker point counts as visible (ignored when the
 # predictor already returns a boolean mask, which CoTracker3 does).
 tracker_cotracker_vis_threshold = 0.5

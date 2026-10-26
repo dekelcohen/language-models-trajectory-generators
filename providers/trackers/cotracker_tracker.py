@@ -46,11 +46,11 @@ exactly what ``stale_frames`` and the score decay advertise to the session.
 Weights / offline use
 ---------------------
 ``torch.hub.load`` clones ``facebookresearch/co-tracker`` and downloads the checkpoint into
-``TORCH_HOME`` (defaults to ``<repo>/cache/torch``, which is git-ignored). After one online
-run everything is cached, so later runs work offline as long as ``TORCH_HOME`` points at
-the same directory::
+``TORCH_HOME`` (defaults to torch's standard user cache ``~/.cache/torch``, outside the repo so
+the hub source does not pollute repo searches). After one online run everything is cached, so
+later runs work offline as long as ``TORCH_HOME`` points at the same directory::
 
-    set TORCH_HOME=D:\\...\\language-models-trajectory-generators\\cache\\torch
+    set TORCH_HOME=%USERPROFILE%\\.cache\\torch
     python main.py --tracking --tracker-provider cotracker
 
 Select with ``--tracker-provider cotracker``; the provider is imported lazily, so a repo
@@ -68,7 +68,7 @@ from providers.trackers.base import PointTracker, TrackResult
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DEFAULT_TORCH_HOME = os.path.join(REPO_ROOT, "cache", "torch")
+DEFAULT_TORCH_HOME = os.path.join(os.path.expanduser("~"), ".cache", "torch")
 HUB_REPO = "facebookresearch/co-tracker"
 
 TORCH_HINT = (

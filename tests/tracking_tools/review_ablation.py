@@ -374,8 +374,7 @@ def _offline_tracks(frames_rgb, query_px):
     import torch
     from providers.trackers import cotracker_tracker as ct
     if "model" not in _OFFLINE:
-        ct.ensure_torch_home()
-        hub_dir = os.path.join(ct.DEFAULT_TORCH_HOME, "hub", "facebookresearch_co-tracker_main")
+        hub_dir = os.path.join(ct.ensure_torch_home(), "hub", "facebookresearch_co-tracker_main")
         model = (torch.hub.load(hub_dir, "cotracker3_offline", source="local")
                  if os.path.isdir(hub_dir) else ct._hub_load("cotracker3_offline"))
         dev = ct.resolve_device()

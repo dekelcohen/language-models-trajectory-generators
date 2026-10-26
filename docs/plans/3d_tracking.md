@@ -95,7 +95,7 @@ list, §9 the pipeline as built, §10 the decision log; this is the orientation.
   never committed into this repo.**
 - Checkpoint: `D:\Vision\3d_Tracking\checkpoints\lapa.pt` (4,494,291 bytes).
   Needs `torch.load(..., weights_only=False)` - it pickles an `argparse.Namespace`.
-- CoTracker weights cache to `<repo>/cache/torch` via `TORCH_HOME` (git-ignored).
+- CoTracker weights cache to `~/.cache/torch` via `TORCH_HOME` (outside the repo).
 
 ### 0.3 Artifacts outside the repo
 
@@ -134,7 +134,7 @@ Both tools share one CLI (`tracking_eval.add_eval_args`), grouped as *scene*, *t
 *seeding*, *visibility* (`--occlusion`, `--scenario`, `--blind cam:start:end`), *timing*
 (`--camera-fps`, `--latency`, `--motion-rate`) and *output*. Occlusion/blind windows are in
 motion frames (10 per sim second by default) in both modes.
-CoTracker runs need the GPU env and `$env:TORCH_HOME="$PWD\cache\torch"`.
+CoTracker runs need the GPU env; `TORCH_HOME` defaults to `~/.cache/torch`.
 
 **Known-good counts:** the suites above give **315 passed, 2 skipped** (measured on this
 branch after §10 D21-D24).
@@ -1890,7 +1890,6 @@ same model (`--planner-perception-vlm`, e.g. Gemini) with its own prompt and con
 $vp = "C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_traj\python.exe"
 $lp = "C:\Users\dekelco\AppData\Local\miniconda3\envs\env_lapa_tracking\python.exe"
 & $vp tests\tracking_tools\dump_door_clip.py --seeding region --seed-points 12 --occlusion 15 25 --occluder-cam head
-$env:TORCH_HOME="$PWD\cache\torch"
 & $lp tests\tracking_tools\cotracker_alone.py outputs\tracking_probes\door_clip\door_region12_fps30.npz
 & $vp tests\tracking_tools\render_clip_tracks.py <clip.npz> <tracks.npz> --keys head__clean__online head__occluded__online --out outputs\tracking_video\x.mp4
 & $vp tests\tracking_tools\redetect_probe.py outputs\tracking_probes\door_clip\door_region12_fps30.npz [--detail 100 140 --every 2]

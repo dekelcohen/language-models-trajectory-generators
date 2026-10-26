@@ -115,7 +115,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 | Arg | Default | Purpose |
 |-----|---------|---------|
 | `--tracking / --no-tracking` | off | Enable per-frame 3D tracking of the gripper + affordance objects during trajectory execution. Off by default: the capture path is untouched when inactive, so goldens cannot drift. |
-| `--tracker-provider` | `template` | 2D point tracker: `template` (base-cv2 NCC, no extra deps; the default after the real-time comparison in `docs/plans/3d_tracking.md` §12) \| `klt` (base-cv2 pyramidal Lucas-Kanade with a forward-backward check) \| `csrt` (needs `opencv-contrib-python`) \| `cotracker` (CoTracker3 online; needs `torch` and a CUDA GPU to be real-time, downloads the model once into `TORCH_HOME`, defaults to `<repo>/cache/torch`) \| `remote` (stub). |
+| `--tracker-provider` | `template` | 2D point tracker: `template` (base-cv2 NCC, no extra deps; the default after the real-time comparison in `docs/plans/3d_tracking.md` §12) \| `klt` (base-cv2 pyramidal Lucas-Kanade with a forward-backward check) \| `csrt` (needs `opencv-contrib-python`) \| `cotracker` (CoTracker3 online; needs `torch` and a CUDA GPU to be real-time, downloads the model once into `TORCH_HOME`, defaults to `~/.cache/torch`) \| `remote` (stub). |
 | `--tracker3d` | `depth_fusion` | 3D lift: `depth_fusion` (weighted per-camera average) \| `pose_tracker` (per-point lift + epipolar/depth-jump gates + Kabsch 6-DoF pose + Kalman filter; see `docs/plans/3d_tracking.md` §9) \| `triangulate` \| `weighted_triangulate` \| `rigid_refine`. |
 | `--track-cameras` | `head wrist` | Cameras to track in. Two cameras is the default and is enough for the grasp tasks; add the optional robot-base-mounted third camera with `--track-cameras head wrist shoulder`. It joins through the pose once 25 % of its projected points are depth-verified (`config.track_pose_join_min_frac`). |
 | `--track-camera-fps` | `30` | Simulated camera rate in **sim time**. The tracker samples the world on this clock on every physics step, whether or not the robot moves, and pays its compute as sim-time latency: a result is only visible to monitors (and can only abort) at `frame_time + latency` (`tracking/realtime.py`). Rendering costs ~43 ms per 256×256 camera frame in PyBullet, so 30 fps × 2 cameras ≈ 2.6 s wall per sim second. `0` = legacy cadence (motion-gated ≤5 fps keyframes). |
@@ -1603,7 +1603,7 @@ full window; re-seeding drops the frame buffer and the model's online state (re-
 `is_first_step` pass with the new queries) but **keeps the loaded weights**. Points whose
 visibility falls below threshold, or that leave the image, come back `visible=False` with
 score `0`. The first run downloads the checkpoint (~97 MB) into `TORCH_HOME` (default
-`<repo>/cache/torch`, git-ignored); afterwards set `TORCH_HOME` to that directory and the
+`~/.cache/torch`, outside the repo); afterwards keep `TORCH_HOME` pointing at that directory and the
 provider runs offline. Without network *and* without a cache the factory raises an
 actionable error naming `TORCH_HOME` instead of a hub traceback. The forward pass runs under
 fp16 autocast on CUDA (`config.tracker_cotracker_fp16`). Measured on an RTX A1000 (4 GB,
