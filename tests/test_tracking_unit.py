@@ -256,6 +256,18 @@ class TestMonitorContract(unittest.TestCase):
         runner = MonitorRunner.from_spec(None)
         self.assertEqual(runner(make_report(0.01)).status, STATUS_OK)
 
+    def test_called_builtins_survive_the_ipc_spec(self):
+        # LLM code passes factory *calls* (closures); api ships their spec, the sim rebuilds them.
+        import pickle
+        from api import API
+        for mon in (monitors.attached_to_gripper("mug", max_dist=0.05, grace_frames=1),
+                    monitors.combine(monitors.attached_to_gripper("mug", 0.05, grace_frames=1),
+                                     monitors.moved_at_least("mug", 0.05))):
+            spec = pickle.loads(pickle.dumps(API._monitor_spec(mon)))
+            runner = MonitorRunner.from_spec(spec)
+            runner(make_report(0.01))
+            self.assertEqual(runner(make_report(0.5)).status, STATUS_ABORT)
+
 
 class TestBuiltinMonitors(unittest.TestCase):
     def test_attached_to_gripper_arms_only_after_the_grasp(self):

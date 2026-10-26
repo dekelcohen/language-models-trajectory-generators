@@ -133,6 +133,10 @@ servo load as a coarse fallback).
 - [x] USB env through the adapter API; eval = insertion depth. TODO: half-occluded port variant.
 - [x] Touch skill + `insert_with_touch` + `--touch`. TODO: full LLM run on `--task usb` (256 px head cam sees
       the 12 mm port as ~3 px: needs wrist-camera alignment).
+      First full `main.py` run (gemini, `outputs/usb_main/`): never grasped. Perception boxed plug + pedestal
+      as one "upright" object and the grasp landed ~4.5 cm off in y. **Sim bug**: a finger landing on the
+      plug edge then closing (finger kp 2500) flings the 12 g plug 0.1–1 m; kp 100 does not, extra finger
+      damping (kv 200–600, 70 N cap) does not fix it. Needs a contact-stable grasp model before LLM runs.
 - [ ] Slip + joint-direction follow-ups (kettle grasp, `helpers/pull_proprio.py`).
 
 ## Reproduce
@@ -141,7 +145,7 @@ $env:PYTHONIOENCODING="utf-8"
 C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_genesis\python.exe research\touch\genesis_touch_probe.py --exp push   # ~150 s CPU
 ...  --exp grip | press | slot | slip | creep | render
 ...  --exp search --trials 5 --seed 0 --methods naive touch   # ~5-10 min per seed
-...  --exp search --video   # naive vs touch review videos -> outputs/touch/video/
+...  --exp search --trials 1 --seed 1 --video outputs/touch/video/usb_insert.mp4   # naive vs touch review videos (seed 0 = hard case, jams)
 C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_genesis\python.exe research\touch\usb_pipeline_e2e.py [--no-touch]  # ~3 min
 python -m pytest tests\\test_touch_insertion.py tests\\test_touch_sim_runner.py -q
 ```

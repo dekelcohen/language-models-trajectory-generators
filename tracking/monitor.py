@@ -120,9 +120,12 @@ class MonitorRunner:
                 return cls(compile_monitor(spec["source"], spec.get("name")), logger=logger)
             if "builtin" in spec:
                 factory = getattr(monitors_lib, spec["builtin"], None)
-                if factory is None:
+                if factory is None or spec["builtin"] not in monitors_lib.__all__:
                     raise ValueError(f"unknown built-in monitor {spec['builtin']!r}")
-                return cls(factory(**spec.get("kwargs", {})), logger=logger)
+                # Nested specs (combine(...) arguments) are rebuilt recursively.
+                args = [cls.from_spec(a).monitor if isinstance(a, dict) else a
+                        for a in spec.get("args", [])]
+                return cls(factory(*args, **spec.get("kwargs", {})), logger=logger)
         raise TypeError(f"Unsupported monitor spec of type {type(spec).__name__}")
 
     def __call__(self, state) -> MonitorResult:

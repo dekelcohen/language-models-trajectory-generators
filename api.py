@@ -635,6 +635,9 @@ class API:
         if isinstance(monitor, (str, dict)):
             return monitor
         builtin_module = "tracking.monitors"
+        spec = getattr(monitor, "spec", None)
+        if spec is not None:
+            return spec
         if getattr(monitor, "__module__", None) == builtin_module:
             return {"builtin": monitor.__name__}
         import inspect

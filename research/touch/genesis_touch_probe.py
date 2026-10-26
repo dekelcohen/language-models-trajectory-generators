@@ -94,9 +94,15 @@ POCKET = 0.014                                  # port depth
 scene = gs.Scene(
     sim_options=gs.options.SimOptions(dt=args.dt, substeps=args.substeps),
     rigid_options=gs.options.RigidOptions(box_box_detection=True, noslip_iterations=args.noslip),
+    # Genesis defaults (ambient 0.1, near-black background) render very dark; use the
+    # GenesisAdapter exposure plus a fill light from the robot side for the close-ups.
+    vis_options=gs.options.VisOptions(
+        ambient_light=(0.30, 0.30, 0.30), background_color=(0.85, 0.88, 0.92), shadow=True,
+        lights=[{"type": "directional", "dir": (-1.0, -1.0, -1.0), "color": (1.0, 1.0, 1.0), "intensity": 4.0},
+                {"type": "directional", "dir": (1.0, 0.5, -0.6), "color": (1.0, 1.0, 1.0), "intensity": 2.0}]),
     show_viewer=False,
 )
-scene.add_entity(gs.morphs.Plane())
+scene.add_entity(gs.morphs.Plane(), surface=gs.surfaces.Default(color=(0.62, 0.66, 0.74)))
 franka = scene.add_entity(gs.morphs.MJCF(file="xml/franka_emika_panda/panda.xml"),
                           material=gs.materials.Rigid(gravity_compensation=1.0))  # like the real controller's g(q) model
 

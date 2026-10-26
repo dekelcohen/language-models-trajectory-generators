@@ -11,6 +11,8 @@ All of them are stateful closures (they count consecutive violating frames) so a
 noisy frame - a tracker blip, one occluded keyframe - never aborts a rollout.
 """
 
+import functools
+
 import numpy as np
 
 import config
@@ -26,6 +28,21 @@ __all__ = [
 ]
 
 
+def _with_spec(factory):
+    """Tag each built monitor with ``spec = {"builtin", "args", "kwargs"}``: the closure cannot
+    cross the IPC hop to the simulator, so it is rebuilt there from this (MonitorRunner.from_spec).
+    Monitor arguments (``combine``) are stored as their own specs; None if any has none."""
+    @functools.wraps(factory)
+    def make(*args, **kwargs):
+        monitor = factory(*args, **kwargs)
+        parts = [getattr(a, "spec", None) if callable(a) else a for a in args]
+        ok = all(p is not None for p, a in zip(parts, args) if callable(a))
+        monitor.spec = {"builtin": factory.__name__, "args": parts, "kwargs": dict(kwargs)} if ok else None
+        return monitor
+    return make
+
+
+@_with_spec
 def attached_to_gripper(name, max_dist=None, grace_frames=None, status=STATUS_ABORT,
                         engage_dist=None, grace_s=None, unknown_after_s=None):
     """Object must stay near the gripper once it has ever been grasped.
@@ -133,6 +150,7 @@ def attached_to_gripper(name, max_dist=None, grace_frames=None, status=STATUS_AB
     return monitor
 
 
+@_with_spec
 def object_not_lost(name, patience=None, status=STATUS_RECORD):
     """Escalate when no camera can localise the object for ``patience`` frames.
 
@@ -175,6 +193,7 @@ def object_not_lost(name, patience=None, status=STATUS_RECORD):
     return monitor
 
 
+@_with_spec
 def stays_within(name, box, status=STATUS_ABORT, grace_frames=2):
     """Object must stay inside an axis-aligned world box ``((xmin,ymin,zmin),(xmax,ymax,zmax))``."""
     lo = np.asarray(box[0], dtype=float)
@@ -200,6 +219,7 @@ def stays_within(name, box, status=STATUS_ABORT, grace_frames=2):
     return monitor
 
 
+@_with_spec
 def moved_at_least(name, dist, after_frames=10, status=STATUS_RECORD):
     """Progress check: the object should have moved ``dist`` metres by ``after_frames``.
 
@@ -229,6 +249,7 @@ def moved_at_least(name, dist, after_frames=10, status=STATUS_RECORD):
     return monitor
 
 
+@_with_spec
 def combine(*monitors):
     """Run several monitors; the worst status wins (abort > record > warn > ok)."""
     monitors = [m for m in monitors if m is not None]
@@ -252,6 +273,7 @@ def combine(*monitors):
     return monitor
 
 
+@_with_spec
 def default_monitor(names=None, max_dist=None):
     """The invariant used when the agent supplies no monitor.
 
