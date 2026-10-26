@@ -352,6 +352,20 @@ class ShippedSkillsTest(unittest.TestCase):
         self.assertIn("angle_long", body)
         self.assertIn("Sliding cabinet", body)
 
+    def test_touch_skill_listed_only_on_genesis_with_touch(self):
+        from types import SimpleNamespace
+        from agent_runner import make_skill_session
+
+        def names(sim, touch):
+            ctx = SimpleNamespace(skills_root=skill_registry.DEFAULT_SKILLS_DIR, logger=None,
+                                  args=SimpleNamespace(sim=sim, touch=touch))
+            return {m.name for m in make_skill_session(ctx, "subtask").index}
+
+        self.assertIn("touch-guided-insertion", names("genesis", True))
+        self.assertNotIn("touch-guided-insertion", names("genesis", False))
+        self.assertNotIn("touch-guided-insertion", names("pybullet", True))
+        self.assertIn("open-close-door-cabinet-drawer", names("pybullet", True))
+
     def test_command_history_seed_file_exists_after_move(self):
         from helpers.command_utils import REPO_HISTORY_FILE
 

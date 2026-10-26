@@ -48,7 +48,7 @@ class InsertConfig:
     # before the motion first turns slow can: ~12 mm when seated, ~2 mm when wedged on an edge.
     slow_speed: float = 0.006     # m/s
     slow_window: float = 0.2      # s
-    seat_depth: float = 0.009     # m of advance past the contact point = seated (judged at stall)
+    seat_depth: float = 0.007     # m of advance past the contact point = seated (judged at stall)
     seat_depth_max: Optional[float] = 0.018   # m; far more advance than the 12 mm tip = it slides in the grasp
     k_lat_search: float = 5000.0  # N/m lateral stiffness while spiralling (track the spiral despite face friction)
     k_lat_insert: float = 800.0   # N/m lateral stiffness while inserting (compliant: the walls centre the plug)

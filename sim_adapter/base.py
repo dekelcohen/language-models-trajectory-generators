@@ -297,6 +297,26 @@ class SimAdapter(ABC):
         """
         return None
 
+    # ------------------------------------------------------------------ torque control (optional)
+    # Used only by touch-guided skills (touch/sim_runner.py). The real-robot analogue is
+    # libfranka's torque interface: J(q) and the gravity vector g(q) come from the robot's own
+    # model, never from the scene. Simulators that cannot do this keep the defaults.
+    def supports_torque_control(self) -> bool:
+        return False
+
+    def get_link_jacobian(self, body: Any, link: Any, joints: Sequence[Any], local_point=None):
+        """6 x len(joints) world-frame Jacobian [linear; angular] of a point on ``link``
+        (``local_point`` in the link frame, default its origin)."""
+        raise NotImplementedError(f"{type(self).__name__} has no Jacobian access")
+
+    def get_gravity_torques(self, body: Any, joints: Sequence[Any]):
+        """Joint torques that hold ``body`` against gravity at its current configuration."""
+        raise NotImplementedError(f"{type(self).__name__} has no gravity model access")
+
+    def set_joint_torques(self, body: Any, joints: Sequence[Any], torques: Sequence[float]) -> None:
+        """Direct torque/force command; a later position command switches the joint back."""
+        raise NotImplementedError(f"{type(self).__name__} has no torque control")
+
     @abstractmethod
     def inverse_kinematics(self, body: Any, link: Any, position,
                            orientation_q=None, lower_limits=None, upper_limits=None,

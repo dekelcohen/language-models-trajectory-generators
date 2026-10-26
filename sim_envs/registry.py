@@ -32,6 +32,19 @@ _SUITES = {
 }
 
 
+#: Genesis-only tasks (need torque control / its contact solver); not in list_task_ids().
+GENESIS_TASKS = ("usb",)
+
+
+def scene_options_for(task_name):
+    """Solver options a task needs before its scene is created (Genesis), else None."""
+    if (task_name or "").strip().lower() == "usb":
+        from sim_envs.genesis.usb import SCENE_OPTIONS
+
+        return SCENE_OPTIONS
+    return None
+
+
 def list_task_ids():
     """Return every selectable task id (namespaced suites + legacy names)."""
     ids = ["grasp", "door", "door:hidden"]
@@ -62,6 +75,10 @@ def get_simenv(task_name, sim=None):
         return SimEnvDoor(sim, hide_door_with_object=False)
     if lowered_full == "door:hidden":
         return SimEnvDoor(sim, hide_door_with_object=True)
+    if lowered_full == "usb":
+        from sim_envs.genesis.usb import SimEnvUSB
+
+        return SimEnvUSB(sim)
 
     if ":" in name:
         suite, _, task = name.partition(":")

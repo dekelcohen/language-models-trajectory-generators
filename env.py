@@ -14,7 +14,7 @@ from providers.env_sim_util import _rotmat_to_quat_xyzw
 from sim_adapter import get_adapter
 from sim_envs.registry import get_simenv
 from config import OK, PROGRESS, FAIL, ENDC
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX, CLEAR_GRASP_MARKERS
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, GET_ROBOT_STATE, GET_STATE, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX, CLEAR_GRASP_MARKERS, TOUCH_INSERT
 from config import START_TRACKING, STOP_TRACKING, GET_TRACKING_REPORT
 # --- Debug helpers ------------------------------------------------------
 # These build app-level overlays (bounding boxes, grasp poses, trajectory previews) out of
@@ -434,6 +434,34 @@ def _gripper_proprio(sim, robot):
             "max_tilt_since_close": tilt}
 
 
+def _touch_insert(sim, env, robot, spec, logger):
+    """TOUCH_INSERT: touch-guided insertion of the held part (touch/sim_runner.py).
+
+    Reply ``[message, result]``; result is proprioceptive only (outcome, events, advance_mm...).
+    """
+    if not sim.supports_torque_control() or robot.robot != "franka":
+        return [FAIL + "Touch insertion is not available on this simulator/robot." + ENDC,
+                {"outcome": "unsupported"}]
+    try:
+        from touch.insertion import InsertConfig
+        from touch.sim_runner import run_touch_insert
+
+        arm_n = robot.profile.arm_joint_count
+        cfg = InsertConfig(**{k: float(v) for k, v in (spec.get("config") or {}).items()})
+        res = run_touch_insert(
+            sim, robot.id, robot.ee_index, robot.joint_indices[:arm_n], list(robot.gripper_joint_indices),
+            step=lambda: robot.step_env_and_record(env), dt=config.control_dt,
+            axis=spec["axis"], tool_offset=spec.get("tool_offset", (0.0, 0.0, 0.0)),
+            grip_force=float(spec.get("grip_force", 20.0)), max_s=float(spec.get("max_s", 20.0)),
+            cfg=cfg, log=lambda m: logger.info(PROGRESS + m + ENDC))
+        robot.step_env_and_record(env, force_record=True)
+        ok = res.get("outcome") == "seated"
+        return [(OK if ok else FAIL) + f"Touch insertion finished: {res.get('outcome')}" + ENDC, res]
+    except Exception as e:
+        logger.info(FAIL + f"TOUCH_INSERT failed: {e}\n{traceback.format_exc()}" + ENDC)
+        return [FAIL + f"Touch insertion failed: {e}" + ENDC, {"outcome": "error", "error": str(e)}]
+
+
 def _hand_tilt(sim, robot):
     """Measured hand tilt from upright: (degrees, unit [dx, dy] of the side that went DOWN).
 
@@ -571,6 +599,9 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
     env.load()
 
     robot = Robot(args, logger, sim)
+    # Optional per-task robot tweak (e.g. gripper squeeze); most tasks do not define it.
+    if hasattr(env.simenv, "configure_robot"):
+        env.simenv.configure_robot(robot)
     # Some simulators (Genesis) forbid adding entities after this point; PyBullet no-ops.
     sim.build()
     # Hold ids for visual debug spheres of trajectory points between requests
@@ -943,6 +974,9 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 grasp_marker_ids = []
                 logger.info(PROGRESS + f"[vis-grasp] cleared {removed} grasp marker(s)." + ENDC)
                 env_connection.send([OK + f"Cleared {removed} grasp marker(s)." + ENDC])
+
+            elif env_connection_received[0] == TOUCH_INSERT:
+                env_connection.send(_touch_insert(sim, env, robot, env_connection_received[1] or {}, logger))
 
             elif env_connection_received[0] == VISUALIZE_BOUNDING_BOX:
                 box_cubes = env_connection_received[1]

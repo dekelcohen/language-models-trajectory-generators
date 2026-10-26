@@ -78,7 +78,10 @@ def make_adapter(args):
     """
     from sim_adapter.genesis_adapter import GenesisAdapter
 
-    sim = GenesisAdapter(backend=args.backend, dt=config.control_dt)
+    from sim_envs.registry import scene_options_for
+
+    sim = GenesisAdapter(backend=args.backend, dt=config.control_dt,
+                         scene_options=scene_options_for(getattr(args, "task", None)))
     sim.reserve_camera(config.image_width, config.image_height,
                        fov=config.fov, near=config.near_plane, far=config.far_plane)
     return sim

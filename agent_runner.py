@@ -411,7 +411,12 @@ def make_skill_session(ctx, scope):
     """Create the per-agent skill loading state for `scope` ('planner' or 'subtask')."""
     from skill_registry import SkillSession
 
-    return SkillSession(ctx.skills_root, scope, ctx.logger, enabled=ctx.skills_root is not None)
+    session = SkillSession(ctx.skills_root, scope, ctx.logger, enabled=ctx.skills_root is not None)
+    args = ctx.args
+    # Skills that need touch (torque control) are listed only where it exists: genesis + --touch.
+    if not (getattr(args, "touch", True) and getattr(args, "sim", None) == "genesis"):
+        session.index = [m for m in session.index if "touch" not in (m.metadata.get("requires") or [])]
+    return session
 
 
 # --- Agent context ------------------------------------------------------

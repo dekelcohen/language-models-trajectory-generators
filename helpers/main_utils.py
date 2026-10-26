@@ -34,6 +34,8 @@ def get_exec_locals(api, logger):
         "side_grasp_pose": common_utils.side_grasp_pose,
         # Tilt-to-pour pose for a held object; documented only by the pour skill.
         "pour_pose": common_utils.pour_pose,
+        # Force-feedback insertion of a held part; documented only by the touch skill.
+        "insert_with_touch": api.insert_with_touch,
         "api": api,
         "math": math,
         "np": np,

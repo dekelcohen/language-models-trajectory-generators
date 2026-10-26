@@ -134,8 +134,11 @@ class GenesisAdapter(SimAdapter):
     name = "genesis"
     depth_encoding = DEPTH_LINEAR_METRIC
 
-    def __init__(self, backend=None, dt=None, gravity=(0.0, 0.0, -9.81)):
+    def __init__(self, backend=None, dt=None, gravity=(0.0, 0.0, -9.81), scene_options=None):
         self.scene = None
+        #: Per-task solver settings ({"substeps": int, "rigid": {RigidOptions kwargs}}), e.g. the
+        #: contact-rich USB task. None keeps the Genesis defaults every other task was tuned on.
+        self._scene_options = dict(scene_options or {})
         self.viewer_options = None
         self._backend = backend
         self._dt = float(dt) if dt is not None else float(getattr(config, "control_dt", 1.0 / 240.0))
@@ -195,7 +198,9 @@ class GenesisAdapter(SimAdapter):
         import genesis as gs
 
         kwargs = {
-            "sim_options": gs.options.SimOptions(dt=self._dt, gravity=self._gravity),
+            "sim_options": gs.options.SimOptions(dt=self._dt, gravity=self._gravity,
+                                                 **({"substeps": int(self._scene_options["substeps"])}
+                                                    if self._scene_options.get("substeps") else {})),
             "show_viewer": self._gui,
             # Genesis defaults to a dark, near-black studio (ambient 0.1, background
             # 0.04/0.08/0.12). PyBullet's TinyRenderer is much brighter, and the whole
@@ -219,8 +224,10 @@ class GenesisAdapter(SimAdapter):
                 camera_lookat=tuple(float(v) for v in config.camera_target_position),
                 camera_fov=float(getattr(config, "fov", 60.0)),
             )
+        if self._scene_options.get("rigid"):
+            kwargs["rigid_options"] = gs.options.RigidOptions(**self._scene_options["rigid"])
         self.scene = gs.Scene(**kwargs)
-        _log(f"scene created (gravity={self._gravity}, viewer={self._gui})")
+        _log(f"scene created (gravity={self._gravity}, viewer={self._gui}, options={self._scene_options or 'default'})")
         return self.scene
 
     def disconnect(self):
@@ -319,6 +326,14 @@ class GenesisAdapter(SimAdapter):
                 # keep going so the rest of the scene is still inspectable.
                 _log(f"WARNING: deferred op '{description}' failed after build: "
                      f"{type(exc).__name__}: {exc}")
+
+    def run_after_build(self, description, fn):
+        """Public :meth:`_defer`: Genesis-only scene profiles tune solver params that exist after build."""
+        self._defer(description, fn)
+
+    def native_entity(self, handle):
+        """The ``gs`` entity behind a handle, for Genesis-only scene profiles (e.g. the USB task)."""
+        return self._body(handle).entity
 
     # ------------------------------------------------------------------ bodies
     def _body(self, handle):
@@ -759,6 +774,41 @@ class GenesisAdapter(SimAdapter):
                  f"holding at {np.round(hold, 4).tolist()}")
 
         self._defer(f"configure_motor_gains(body={body})", apply)
+
+    # ------------------------------------------------------------------ torque control
+    def supports_torque_control(self):
+        return True
+
+    def get_link_jacobian(self, body, link, joints, local_point=None):
+        import torch
+
+        entry = self._body(body)
+        lp = None if local_point is None else torch.tensor([float(v) for v in local_point])
+        J = _to_numpy(entry.entity.get_jacobian(entry.links[int(link)], local_point=lp))
+        return J[:, self._dofs_many(body, joints)]
+
+    def get_gravity_torques(self, body, joints):
+        """g(q) = sum_l J_com,l^T m_l (-gravity), from the robot's own link masses/COMs."""
+        import torch
+
+        entry = self._body(body)
+        dofs = self._dofs_many(body, joints)
+        up = -np.asarray(self._gravity, dtype=np.float64)
+        tau = np.zeros(len(dofs))
+        for gs_link in entry.links:
+            m = float(gs_link.inertial_mass or 0.0)
+            if m <= 0.0:
+                continue
+            com = torch.tensor(np.asarray(gs_link.inertial_pos, dtype=np.float32).reshape(3))
+            J = _to_numpy(entry.entity.get_jacobian(gs_link, local_point=com))[:3, dofs]
+            tau += J.T @ (m * up)
+        return tau
+
+    def set_joint_torques(self, body, joints, torques):
+        entity = self._body(body).entity
+        dofs = self._dofs_many(body, joints)
+        entity.control_dofs_force(np.asarray([float(t) for t in torques], dtype=np.float64),
+                                  dofs_idx_local=dofs)
 
     def inverse_kinematics(self, body, link, position, orientation_q=None,
                            lower_limits=None, upper_limits=None, joint_ranges=None,

@@ -16,7 +16,7 @@ from sim_adapter import transforms
 from PIL import Image
 from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
 from config import OK, PROGRESS, FAIL, ENDC, WARNING
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX, CLEAR_GRASP_MARKERS
+from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_EEF, VISUALIZE_GRASP_POSE, VISUALIZE_BOUNDING_BOX, CLEAR_GRASP_MARKERS, TOUCH_INSERT
 from helpers.image_utils import list_file_paths
 from task_state import TaskState
 
@@ -452,6 +452,32 @@ class API:
                 self.logger.info(PROGRESS + f"Saved segmentation mask [{i}] ({label}) to {path}" + ENDC)
             except Exception as e:
                 self.logger.info(PROGRESS + f"Warning: failed to save segmentation mask [{i}] ({label}): {e}" + ENDC)
+
+    def insert_with_touch(self, axis, tool_length=0.025, max_s=20.0, grip_force=20.0):
+        """Push the held part along world ``axis`` into a hole/port, guided by force feedback.
+
+        Start with the part's tip a few mm in front of the opening, aligned by vision. The robot
+        then probes, spirals on the face to find the opening (vision is ~1-2 mm off) and pushes it
+        in. ``tool_length``: fingertip centre -> part tip along ``axis`` (m). Returns a dict with
+        ``outcome`` ('seated' | 'jammed' | 'search_exhausted' | 'no_contact' | 'over_force' |
+        'timeout' | 'unsupported' | 'disabled'), ``advance_mm`` and ``events`` (proprioception only).
+        """
+        if not getattr(self.args, "touch", True):
+            print("insert_with_touch: touch is disabled (--no-touch).")
+            return {"outcome": "disabled"}
+        a = np.asarray(axis, dtype=float)
+        a = a / np.linalg.norm(a)
+        spec = {"axis": a.tolist(), "tool_offset": (a * float(tool_length)).tolist(),
+                "max_s": float(max_s), "grip_force": float(grip_force)}
+        self.logger.info(PROGRESS + f"[touch] insert_with_touch {spec}" + ENDC)
+        self.main_connection.send([TOUCH_INSERT, spec])
+        msg, res = self.main_connection.recv()
+        self.logger.info(msg)
+        for ev in res.get("events", []):
+            self.logger.info(PROGRESS + f"[touch]   {ev}" + ENDC)
+        summary = {k: v for k, v in res.items() if k != "events"}
+        print(f"insert_with_touch: {summary}")
+        return res
 
     def execute_trajectory(self, trajectory):
         # Rebuild into a plain Trajectory before anything is sent: a custom class from the

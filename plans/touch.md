@@ -98,6 +98,25 @@ Findings on the Genesis bench (start error <= 2 mm lateral, +-2 deg yaw, 0.5 N f
 | touch spiral (default) | 10/15 | 1 false "seated" (9.5 mm), 2 seated-but-reported-exhausted, 1 jam |
 | touch, `--f_search 1.5` | 8/15 | more `search_exhausted` |
 
+## 3b. Pipeline integration (Genesis only)
+- `--touch/--no-touch` (default on). Skill `prompts/skills/touch-guided-insertion` (metadata `requires: [touch]`)
+  is listed only for `-s genesis` + `--touch`; nothing added to always-on prompts.
+- Agent API `insert_with_touch(axis, tool_length, max_s, grip_force)` -> IPC `TOUCH_INSERT` -> `env._touch_insert`
+  -> `touch/sim_runner.run_touch_insert` (Cartesian impedance at the TCP through the new optional adapter
+  torque API: `supports_torque_control / get_link_jacobian / get_gravity_torques / set_joint_torques`; PyBullet
+  and MetaWorld return `unsupported`). Felt force = impedance error + noise (no contact lists).
+- Task `--task usb -s genesis -r franka` (`sim_envs/genesis/usb.py`): laptop side port, plug on a pedestal;
+  solver options via `GenesisAdapter(scene_options=...)`; eval-only `get_state` (depth, lateral error).
+- Sim fixes found by the scripted e2e (`research/touch/usb_pipeline_e2e.py`, real IPC, port seen 1.2/0.8 mm off):
+  finger kp 2500 for this task (~20 N squeeze, like the Franka Hand; kp 100 dropped the plug), and pad-patch
+  torsional friction 0.05 N·m on the plug (URDF mesh fingers are near-point contacts: the plug pivoted 10–20°
+  in the grasp during the carry). Agent-side: close the loop on measured `eef_pos` (arm settles 3–4 mm off) and
+  re-measure the in-hand offset after lifting (closing shifted the plug 3 mm). `seat_depth` 9 -> 7 mm.
+- Result: touch **seated 12.1 mm, lateral 0.2 mm** (hole found at r = 1.0 mm); naive push from the same pose
+  jams at the face (depth 0). Logs `outputs/touch/e2e_touch_ok.log`, `outputs/touch/e2e_naive.log`.
+- Regressions: full pytest 18 failed / 7 errors (= baseline), Genesis tests = baseline; pybullet `main.py`
+  grasp / door / door:hidden runs in `outputs/regression/` (skill never listed outside Genesis).
+
 ## 4. Hardware shortlist (≤ $1–2k)
 Panda built-in external wrench estimate (free) · DIGIT (~$350/pad) · GelSight Mini (~$500) · AnySkin (DIY,
 cheap, magnetic) · low-cost wrist F/T (e.g. Bota/OnRobot are above budget; DIY strain-gauge or SO-101
@@ -111,8 +130,9 @@ servo load as a coarse fallback).
       `review_every_s` VLM hook.
 - [ ] Insertion robustness: detect in-grasp pitch (taxels) and re-reference the spiral; fix missed seats
       after search (2/15).
-- [ ] USB env through the adapter API, visible vs half-occluded port; eval = insertion depth.
-- [ ] Touch skill (`prompts/skills/touch-guided-contact/SKILL.md`), LLM runs (gemini-3.8-flash).
+- [x] USB env through the adapter API; eval = insertion depth. TODO: half-occluded port variant.
+- [x] Touch skill + `insert_with_touch` + `--touch`. TODO: full LLM run on `--task usb` (256 px head cam sees
+      the 12 mm port as ~3 px: needs wrist-camera alignment).
 - [ ] Slip + joint-direction follow-ups (kettle grasp, `helpers/pull_proprio.py`).
 
 ## Reproduce
@@ -121,5 +141,7 @@ $env:PYTHONIOENCODING="utf-8"
 C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_genesis\python.exe research\touch\genesis_touch_probe.py --exp push   # ~150 s CPU
 ...  --exp grip | press | slot | slip | creep | render
 ...  --exp search --trials 5 --seed 0 --methods naive touch   # ~5-10 min per seed
-python -m pytest tests\\test_touch_insertion.py -q
+...  --exp search --video   # naive vs touch review videos -> outputs/touch/video/
+C:\Users\dekelco\AppData\Local\miniconda3\envs\vlm_genesis\python.exe research\touch\usb_pipeline_e2e.py [--no-touch]  # ~3 min
+python -m pytest tests\\test_touch_insertion.py tests\\test_touch_sim_runner.py -q
 ```

@@ -66,6 +66,7 @@ ap.add_argument("--max_s", type=float, default=20.0, help="search: controller ti
 ap.add_argument("--f_search", type=float, default=3.0, help="search: press force while spiralling, N")
 ap.add_argument("--trace", type=int, default=0, help="search: print an eval-only sim-truth trace (debug)")
 ap.add_argument("--verbose", type=int, default=1, help="search: print controller events for the first N trials")
+ap.add_argument("--video", default="", help="search: record the first trial of each method to this .mp4 (suffixed)")
 args = ap.parse_args()
 
 gs.init(backend=gs.cpu, precision="32", logging_level="warning")
@@ -126,6 +127,11 @@ table = scene.add_entity(gs.morphs.Box(pos=(0.5, 0.25, 0.05), size=(0.15, 0.15, 
 plug = scene.add_entity(gs.morphs.URDF(file=f"{ASSETS}/usb_plug.urdf", pos=(0.3, -0.3, HOUSING[2] / 2)),
                         material=gs.materials.Rigid(friction=0.6))
 cam = scene.add_camera(res=(640, 480), pos=(0.2, -0.2, 0.3), lookat=tuple(PORT), fov=40, GUI=False)
+# Close-ups for --video: oblique from the robot side, and from above (eval/review only).
+cam_close = scene.add_camera(res=(640, 480), pos=(FACE_X - 0.08, PORT[1] - 0.07, PORT[2] + 0.06), lookat=tuple(PORT),
+                             fov=35, GUI=False)
+cam_top = scene.add_camera(res=(640, 480), pos=(FACE_X - 0.03, PORT[1] - 0.001, PORT[2] + 0.11),
+                           lookat=(FACE_X - 0.01, PORT[1], PORT[2]), fov=40, GUI=False)
 cam_side = scene.add_camera(res=(640, 480), pos=(FACE_X - 0.22, -0.12, 0.14), lookat=(FACE_X, 0.02, RISER + 0.01),
                             fov=50, GUI=False)
 
@@ -403,6 +409,18 @@ def search_trial(method, ey, ez, yaw, rng, verbose=False):
         return p + r, v + np.cross(w, r), R
 
     p0, _, R0 = ee()
+    frames = [] if (args.video and verbose) else None
+    hud = {"phase": method, "F": 0.0}
+
+    def grab():
+        import cv2
+        img = np.concatenate([np.asarray(c.render(rgb=True)[0]) for c in (cam_close, cam_top)], axis=1).copy()
+        tp, _ = tip_end_pose()
+        for i, txt in enumerate((f"{method}  err dy {ey*1000:+.2f} dz {ez*1000:+.2f} mm yaw {yaw:+.1f} deg",
+                                 f"t {st['t']:5.2f}s  phase {hud['phase']:8s}  felt F_axial {hud['F']:5.1f} N",
+                                 f"[eval only] true tip depth {(tp[0] - FACE_X)*1000:6.2f} mm")):
+            cv2.putText(img, txt, (10, 24 + 24 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        frames.append(img)
     rel0 = R0.T @ (np_(plug.get_pos()) - np_(hand.get_pos()))
     st = {"t": 0.0, "p_des": p0.copy(), "K": 1500.0, "K_lat": args.k_lat}
 
@@ -411,6 +429,8 @@ def search_trial(method, ey, ez, yaw, rng, verbose=False):
         drive_impedance(st["p_des"], R_des, n, K=st["K"], Kr=args.kr, q_rest=q_rest, push_dir=axis, K_lat=st["K_lat"],
                         tcp_local=tcp_local)
         st["t"] += n * args.dt
+        if frames is not None and int(round(st["t"] / period)) % 2 == 0:
+            grab()
 
     def read_state():
         # Proprioception only: EE pose (FK) and the external force the impedance controller is resisting
@@ -423,8 +443,10 @@ def search_trial(method, ey, ez, yaw, rng, verbose=False):
     if method == "naive":
         for s in np.linspace(0, 1, 9)[1:]:
             st["p_des"] = p0 + axis * 0.030 * s
-            advance(0.1)
-        advance(1.2)
+            for _ in range(5):
+                advance(0.02)
+        for _ in range(60):
+            advance(0.02)
         res = {"outcome": "pushed", "duration_s": st["t"], "events": []}
     else:
         def send(cmd):
@@ -432,6 +454,7 @@ def search_trial(method, ey, ez, yaw, rng, verbose=False):
             st["K_lat"] = cmd.k_lateral or args.k_lat
         ctrl = SpiralInsertController(axis, InsertConfig(f_search=args.f_search), log=(lambda m: print("   ", m, flush=True)) if verbose else None)
         def debug_tick(ts, cmd):   # eval-only trace (sim truth), printed for debugging, never fed back
+            hud["phase"], hud["F"] = cmd.phase, ts.axial_resistance(axis)
             if verbose and args.trace and int(round(ts.t / 0.02)) % 10 == 0:
                 tp, _ = tip_end_pose()
                 Rh = gu.quat_to_R(np_(hand.get_quat()))
@@ -441,6 +464,16 @@ def search_trial(method, ey, ez, yaw, rng, verbose=False):
                       f"| true depth {1000 * (tp[0] - FACE_X):6.2f} tip_yz_err {np.round(1000 * (tp[1:] - PORT[1:]), 2)} "
                       f"slip {sl:.2f}", flush=True)
         res = run_reactive(ctrl, read_state, send, advance, max_s=args.max_s, period_s=0.02, on_tick=debug_tick)
+    if frames:
+        import cv2
+        out = args.video.replace(".mp4", f"_{method}.mp4")
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        h, w = frames[0].shape[:2]
+        vw = cv2.VideoWriter(out, cv2.VideoWriter_fourcc(*"mp4v"), 25, (w, h))   # 2 ticks/frame = 1x real time
+        for f in frames + [frames[-1]] * 25:
+            vw.write(cv2.cvtColor(f, cv2.COLOR_RGB2BGR))
+        vw.release()
+        print(f"  video -> {out} ({len(frames)} frames)", flush=True)
     tip, _ = tip_end_pose()
     depth = tip[0] - FACE_X                                               # eval only (sim truth)
     R1 = gu.quat_to_R(np_(hand.get_quat()))

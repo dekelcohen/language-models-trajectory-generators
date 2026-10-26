@@ -62,6 +62,7 @@ def build_arg_parser():
 
     simg = parser.add_argument_group("simulator, robot & task")
     simg.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")
+    simg.add_argument("--touch", action=argparse.BooleanOptionalAction, default=True, help="touch-guided skills (force-feedback insertion via insert_with_touch); active only on simulators with torque control (genesis). --no-touch hides the skill and disables the API (default: True)")
     simg.add_argument("-s", "--sim", choices=["pybullet", "genesis", "metaworld"], default="pybullet", help="select simulator backend (genesis runs in its own conda env; see GENESIS_PYTHON / GENESIS_CONDA_ENV)")
     simg.add_argument("--transport", choices=["auto", "pipe", "ws"], default="auto", help="connection transport override; auto: pipe for pybullet, ws for metaworld")
     simg.add_argument("--task", type=str, default="sawyer_door_v3",
@@ -144,6 +145,8 @@ def print_task_ids():
         print(f"\n  {suite}:  (forces -r franka)")
         for task in tasks:
             print(f"    {suite}:{task}")
+    from sim_envs.registry import GENESIS_TASKS
+    print(f"\nGenesis only (-s genesis -r franka): {', '.join(GENESIS_TASKS)}")
     print("\nMetaWorld (-s metaworld) uses MetaWorld env ids instead, e.g. sawyer_door_v3.")
     print("Inspect any scene in a GUI with:  python env.py --task <id>")
 

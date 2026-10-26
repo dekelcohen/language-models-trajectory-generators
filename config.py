@@ -157,6 +157,7 @@ START_TRACKING = 23
 STOP_TRACKING = 24
 GET_TRACKING_REPORT = 25
 CLEAR_GRASP_MARKERS = 26
+TOUCH_INSERT = 27      # touch-guided insertion (impedance + force feedback); simulators with torque control only
 
 # --- Rollout tracking -------------------------------------------------------
 # Tracking is opt-in (--tracking). When disabled nothing in the capture path changes,
