@@ -32,6 +32,12 @@ ap.add_argument("--touch", action=argparse.BooleanOptionalAction, default=True,
 ap.add_argument("--err", default="0.0012,0.0008", help="perception error of the port (dy,dz) m")
 ap.add_argument("--out", default="outputs/touch/e2e")
 ap.add_argument("--rot", type=float, default=None, help="gripper yaw for the grasp (auto if omitted)")
+ap.add_argument("--grasp-off", default="0,0,0",
+                help="grasp position error dx,dy,dz m (an imperfect pick, like an LLM-planned grasp)")
+ap.add_argument("--step", type=float, default=0.002,
+                help="max waypoint spacing m (1 sim step each); LLM trajectories use ~0.015 (20 points / 30 cm)")
+ap.add_argument("--llm-z", action="store_true",
+                help="send targets like the LLM does (pose z = object z, no depth-offset compensation)")
 args = ap.parse_args()
 os.makedirs(args.out, exist_ok=True)
 
@@ -102,7 +108,7 @@ STANDOFF = 0.004
 
 #: Pipeline convention: a top-down trajectory point is gripper_depth_offset above the fingertip centre
 #: (the reported eef_pos). Targets below are fingertip-centre positions.
-DZ = np.array([0.0, 0.0, config.gripper_depth_offset_franka])
+DZ = np.array([0.0, 0.0, 0.0 if args.llm_z else config.gripper_depth_offset_franka])
 
 
 def go(points, desc):
@@ -126,8 +132,10 @@ def go_exact(target, desc, tol=0.0005, iters=3):
     return st
 
 
-def line(a, b, n, step=0.002):
+def line(a, b, n, step=None):
     """Waypoints a->b; at most `step` m apart (1 sim step per point: 1 mm = 0.24 m/s, gentle on a held part)."""
+    step = step or args.step
+    n = n if args.step <= 0.002 else 2
     n = max(n, int(np.ceil(np.linalg.norm(np.asarray(b) - np.asarray(a)) / step)) + 1)
     return [np.asarray(a) + (np.asarray(b) - np.asarray(a)) * s for s in np.linspace(0, 1, n)[1:]]
 
@@ -136,15 +144,17 @@ def line(a, b, n, step=0.002):
 # near-points with little torsional friction, so an off-centre grasp lets the plug pitch in the fingers.
 BALANCE = np.array([0.003, 0.0, 0.0])
 seen_plug = plug.copy()
-plug = plug + BALANCE
+plug = plug + BALANCE + np.array([float(v) for v in args.grasp_off.split(",")])
 above = plug + np.array([0, 0, 0.10])
 call([config.OPEN_GRIPPER], reply=False)
 st = robot_state()
 go(line(np.asarray(st["eef_pos"]), above, 30), "above plug")
 go(line(above, plug, 25), "down to plug")
-st = go_exact(plug, "centred on plug")
+st = go([plug], "at LLM grasp z") if args.llm_z else go_exact(plug, "centred on plug")
+print(f"[e2e] (eval) plug before close: {truth().get('plug_pos')}", flush=True)
 call([config.CLOSE_GRIPPER], reply=False)
 st = go([st["eef_pos"]], "closed")
+print(f"[e2e] (eval) plug after close: {truth().get('plug_pos')}", flush=True)
 
 lift = plug + np.array([0, 0, 0.08])
 go(line(plug, lift, 15), "lifted")

@@ -129,6 +129,9 @@ class SimEnvUSB(SimEnvBase):
         def apply():
             plug = self.sim.native_entity(self.plug_id)
             plug.set_dofs_armature(np.array([PLUG_ARMATURE] * 3 + [PLUG_ARMATURE * 4e-4] * 3))
+            # Armature is inertia without weight: alone it cuts the plug's free-fall to ~g/40, so a
+            # dropped plug floats and drifts metres over the floor. Give that inertia its weight too.
+            plug.control_dofs_force(np.array([-PLUG_ARMATURE * 9.81]), dofs_idx_local=[2])
             plug.set_dofs_frictionloss(np.array(FREE_FRICTION))
             plug.joints[0].set_sol_params(np.array([2 * dt, 1.0, 0.9999, 0.9999, 0.001, 0.5, 2.0]))
         self.sim.run_after_build("usb plug conditioning", apply)

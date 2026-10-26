@@ -353,6 +353,20 @@ class TestPullProprio(unittest.TestCase):
         self.assertIn("STALE", hint)
         self.assertIn("[-1.00, +0.00, +0.00]", hint)                # the earlier failed pull
 
+    def test_door_wording_is_skipped_for_insert_tasks(self):
+        # a USB insert review must not get "handle slipped" evidence from the plug grasp
+        from types import SimpleNamespace
+        from api import API
+        recs = self.attempt([0, 0, 0], slipped=True)
+        fake = SimpleNamespace(task=SimpleNamespace(command="Insert the USB plug into the laptop USB port"),
+                               motion_log=recs, logger=SimpleNamespace(info=lambda m: None))
+        self.assertEqual(API._pull_proprio_review_evidence(fake, 0), (None, None))
+        fake.task.command = ("Insert the grasped USB plug into the port, translate left to push the "
+                             "plug firmly into the port")            # planner rewrite says "push"
+        self.assertEqual(API._pull_proprio_review_evidence(fake, 0), (None, None))
+        fake.task.command = "Open the door"
+        self.assertIsNotNone(API._pull_proprio_review_evidence(fake, 0)[0])
+
 
 if __name__ == "__main__":
     unittest.main()

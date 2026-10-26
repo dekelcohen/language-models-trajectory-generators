@@ -901,8 +901,12 @@ class API:
         Built from the arm's own per-trajectory log (commanded vs reached hand motion,
         finger width) - what a real arm reports; no scene/joint state of the sim is used.
         """
-        from helpers.pull_proprio import summarize_pull_proprio, format_pull_proprio
+        from helpers.pull_proprio import summarize_pull_proprio, format_pull_proprio, is_articulated_task
         if not getattr(config, "review_pull_proprio", True):
+            return None, None
+        if not is_articulated_task(self.task.command):
+            # handle/door wording; pick/insert tasks get the gripper-width evidence instead
+            self.logger.info(PROGRESS + "Review: pull proprioception skipped (not an open/close/pull task)" + ENDC)
             return None, None
         records = [r for r in (self.motion_log or []) if int(r.get("step_start", 0)) >= int(start_idx)]
         try:

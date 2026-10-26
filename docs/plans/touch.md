@@ -137,7 +137,17 @@ servo load as a coarse fallback).
       as one "upright" object and the grasp landed ~4.5 cm off in y. **Sim bug**: a finger landing on the
       plug edge then closing (finger kp 2500) flings the 12 g plug 0.1–1 m; kp 100 does not, extra finger
       damping (kv 200–600, 70 N cap) does not fix it. Needs a contact-stable grasp model before LLM runs.
-- [ ] Slip + joint-direction follow-ups (kettle grasp, `helpers/pull_proprio.py`).
+      **Root-caused** (harness `--llm-z --step 0.015` reproduces it): (1) depth convention: fingertips end
+      0.06 m below the commanded pose z (`gripper_depth_offset_franka`), not stated to the LLM, so z = plug top
+      drives the palm into the plug and closing squeezes it out -> skill line added. (2) `robot.move` passed
+      1200 Nm / 1000 N as Genesis force ranges, overriding the profile's real Franka limits (87/12 Nm, 100 N)
+      -> adapter now clamps to the profile caps. (3) the plug's 0.5 kg translational armature (needed: 0 and
+      0.05 both drop the centred grasp) cuts effective gravity ~40x, so a squeezed-out plug flies metres; kept
+      and documented as a sim artefact. (4) small-part perception: box merged plug + stand -> skill line (use
+      the affordance x,y). (5) pull-proprio door/handle wording leaked into insert reviews -> gated to
+      open/close/pull tasks.
+- [ ] Slip + joint-direction follow-ups (kettle grasp, `helpers/pull_proprio.py`). Door/drawer touch plan:
+      `docs/plans/touch_pull.md`.
 
 ## Reproduce
 ```

@@ -42,6 +42,13 @@ MIN_MOTION_M = 0.02
 ARTICULATED_TASK_RE = re.compile(
     r"\b(open|close|shut|pull|push|slide|door|drawer|cabinet|cupboard|handle|lid|hatch|hinge|"
     r"fridge|oven|microwave|dishwasher)\b", re.IGNORECASE)
+#: Peg/plug insertion wording ("push the plug into the port") is not an articulated pull.
+INSERT_TASK_RE = re.compile(r"\b(insert\w*|plug|socket|peg|connector|usb)\b", re.IGNORECASE)
+
+
+def is_articulated_task(text):
+    text = str(text or "")
+    return bool(ARTICULATED_TASK_RE.search(text)) and not INSERT_TASK_RE.search(text)
 
 
 def _arr(v):
@@ -187,7 +194,7 @@ def measured_no_motion_veto(facts, task_text):
     the hand (slipped out / blocked), and no later open/empty-hand motion could have pushed
     it (every later motion is a retreat back along the approach).
     """
-    if not facts or not ARTICULATED_TASK_RE.search(str(task_text or "")):
+    if not facts or not is_articulated_task(task_text):
         return None
     if facts["outcome"] != "part_did_not_move" or facts["possible_push_after_pull"]:
         return None

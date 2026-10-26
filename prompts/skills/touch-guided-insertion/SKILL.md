@@ -14,6 +14,9 @@ metadata:
 # Touch-guided insertion
 
 1. Grasp the part across its body (not the tip), fingertip centre near its middle; lift; check `gripper_holding`.
+   Depth: the fingertips end ~0.06 m below the commanded pose z, so command z = part centre z + 0.06
+   (z = part top crushes it). Close across the narrow width (rotation 0 closes along world x).
+   Small parts: take x,y from the affordance point, not the detection box centre (the box may merge the stand).
 2. Align by vision: the part's tip must point along the insertion `axis` (world unit vector, into
    the hole). Stop with the tip **3-5 mm in front of the opening**, centred on it; approach the
    last ~3 cm slowly along the axis. Never push into the face yourself.

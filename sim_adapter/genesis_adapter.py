@@ -150,6 +150,9 @@ class GenesisAdapter(SimAdapter):
         self._bodies = {}
         self._next_handle = 1
         self._asset_root = None
+        #: id(entity) -> {dof: max |force|}: the actuator limits set by configure_motor_gains
+        #: (e.g. Franka 87/12 Nm, hand 100 N). PyBullet-style ``forces=`` cannot exceed them.
+        self._force_caps = {}
 
         # Mutations issued before build(); Genesis forbids them on an unbuilt scene but
         # PyBullet allows them, so the app layer is written that way and we replay here.
@@ -713,9 +716,10 @@ class GenesisAdapter(SimAdapter):
 
         self._defer(f"set_joint_velocity(body={body}, joint={joint})", apply)
 
-    @staticmethod
-    def _apply_force_range(entity, dofs, force):
-        """PyBullet's ``forces=[F, ...]`` maps to a symmetric Genesis force range."""
+    def _apply_force_range(self, entity, dofs, force):
+        """PyBullet's ``forces=[F, ...]`` maps to a symmetric Genesis force range, clamped to the
+        actuator limits from ``configure_motor_gains`` (the app layer asks 1200 Nm / 1000 N, a
+        PyBullet-era "always reach the target" value; a real Franka joint gives 87/12 Nm)."""
         if np.isscalar(force):
             magnitudes = np.full(len(dofs), abs(float(force)))
         else:
@@ -726,6 +730,14 @@ class GenesisAdapter(SimAdapter):
                 # set_joint_positions gets one force per *joint*; a multi-DOF joint
                 # expands to several DOFs, so fall back to a uniform value.
                 magnitudes = np.full(len(dofs), values[0] if values else 0.0)
+        caps = self._force_caps.get(id(entity), {})
+        if caps:
+            capped = np.array([min(m, caps.get(d, m)) for m, d in zip(magnitudes, dofs)])
+            if not np.array_equal(capped, magnitudes) and not getattr(self, "_cap_logged", False):
+                _log(f"force range {np.round(magnitudes, 1).tolist()} clamped to the actuator limits "
+                     f"{np.round(capped, 1).tolist()} (logged once)")
+                self._cap_logged = True
+            magnitudes = capped
         entity.set_dofs_force_range(-magnitudes, magnitudes, dofs_idx_local=dofs)
 
     def configure_motor_gains(self, body, joints, kp=None, kv=None, force_range=None):
@@ -762,6 +774,8 @@ class GenesisAdapter(SimAdapter):
                 limits = sized(force_range)
                 entity.set_dofs_force_range(-np.abs(limits), np.abs(limits),
                                             dofs_idx_local=dofs)
+                self._force_caps.setdefault(id(entity), {}).update(
+                    {d: abs(float(v)) for d, v in zip(dofs, limits)})
             # PyBullet arms do not collapse under gravity when nothing has commanded
             # them yet: every joint has a default motor enabled. In Genesis, setting
             # kp/kv alone leaves the DOFs uncontrolled, so the arm free-falls out of
