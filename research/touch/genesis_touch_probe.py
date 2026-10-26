@@ -5,7 +5,7 @@ that faces the robot (collision = 5 boxes leaving a real-size 12.5 x 5.1 x 14 mm
 plug (URDF: 25x16x8 mm housing + 12x12x4.5 mm tip) and a small table block. USB retention springs are
 modelled as 12 N Coulomb friction on the plug while its tip is in the port (env physics only).
 
-Experiments (each prints RESULT lines; see plans/touch.md for the conclusions):
+Experiments (each prints RESULT lines; see docs/plans/touch.md for the conclusions):
   press  - closed fingers pressed onto the table block. Compares the true contact force on hand+
            fingers with the end-effector wrench estimated from the 7 joint-torque sensors, the way
            libfranka estimates O_F_ext_hat_K from tau_J (motor-current analogue).

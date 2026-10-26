@@ -6,7 +6,7 @@ set-point for a Cartesian impedance controller with stiffness ``k_axial`` along 
 axis (stiff laterally). Pushing "with force F" is a set-point ``F / k_axial`` ahead of the
 current EE position, which is how force is commanded on an impedance-controlled Franka.
 
-Signals it relies on (measured on the Genesis USB bench, plans/touch.md section 3):
+Signals it relies on (measured on the Genesis USB bench, docs/plans/touch.md section 3):
 * free motion ~1-4 N, USB retention ~12-16 N, a jam on the port face 20+ N with no progress;
 * the plug drops ~0.5 mm into the opening when it is laterally aligned (retention then stops it);
 * a firm push (> retention, < grip-slip ~24 N) seats an aligned plug.

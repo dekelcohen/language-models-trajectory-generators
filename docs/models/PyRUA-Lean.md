@@ -2,7 +2,7 @@
 
 Reference notes on an external embodied agent that is close to this repo: a frontier LLM writes Python
 against a robot object, composing analytic primitives, SAM3 perception and (optionally) frozen VLA skills.
-These notes describe *their* system. Ideas we could adopt are in `plans/other_agents_ideas.md`.
+These notes describe *their* system. Ideas we could adopt are in `docs/plans/other_agents_ideas.md`.
 
 - Project docs: https://dagroup-pku.github.io/PyRUA-Lean/docs/
 - Paper: *Fewer Tokens, Better Action: GPT-6 Astra Robot Agents with 14% Higher Success Rate but 65% Fewer

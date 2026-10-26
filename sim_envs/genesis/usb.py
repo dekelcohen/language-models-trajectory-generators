@@ -3,7 +3,7 @@
 Scene (world frame, robot base at the origin facing +y): a laptop on a 5 cm riser with its USB-A
 port on the side that faces -x, and a USB plug lying on a narrow pedestal (fingers pass on both
 sides of it), its tip pointing +x, i.e. toward the port side. Geometry and contact physics are the
-ones measured on the bench (research/touch/genesis_touch_probe.py, plans/touch.md section 3).
+ones measured on the bench (research/touch/genesis_touch_probe.py, docs/plans/touch.md section 3).
 
 The robot gets nothing from here except camera images; port pose and depth are evaluation only.
 Genesis-only: needs ``sim.native_entity`` / ``run_after_build`` and the solver options below.

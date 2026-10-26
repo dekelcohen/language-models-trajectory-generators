@@ -1,6 +1,6 @@
 # Self / Teacher Distillation Variants: Survey and Choice for Training Our Local Robot-Code Model
 
-*Research date: 2026-10-26. Context: PyRUA-Lean Coder trains Qwen3.5-4B with full-model GRPO, using 3,840 sim episodes, about 12 h on 8 GPUs. Can on-policy self-distillation with a privileged same-model teacher plus LoRA (the 'OPSD' idea in `plans/other_agents_ideas.md` 18b) do it cheaper?*
+*Research date: 2026-10-26. Context: PyRUA-Lean Coder trains Qwen3.5-4B with full-model GRPO, using 3,840 sim episodes, about 12 h on 8 GPUs. Can on-policy self-distillation with a privileged same-model teacher plus LoRA (the 'OPSD' idea in `docs/plans/other_agents_ideas.md` 18b) do it cheaper?*
 
 ## Executive Summary
 
@@ -192,7 +192,7 @@ graph LR
    - entropy collapse;
    - training curves, not just endpoints[^4][^15].
 7. **Cheapest fallback:** SFT on successful hinted episodes (the K1 pattern) before any RL[^12].
-8. **Compute-limited path (1-2 H100):** teacher-data SFT, then iterated RFT, then optional DPO, with only a short final GRPO run. See `plans/other_agents_ideas.md` section 18c.
+8. **Compute-limited path (1-2 H100):** teacher-data SFT, then iterated RFT, then optional DPO, with only a short final GRPO run. See `docs/plans/other_agents_ideas.md` section 18c.
 
 ---
 
