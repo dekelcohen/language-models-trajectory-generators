@@ -121,7 +121,7 @@ def build_arg_parser():
     io.add_argument("--images-root", type=str, default=None, metavar="DIR",
                         help="root folder for images/videos/trajectory output (default: ./images, or $IMAGES_ROOT). "
                              "Set this to run 2+ concurrent experiments on the same checkout without overwriting ")
-    io.add_argument("--delete-images", action="store_true", help="delete image folders before recreating them")
+    io.add_argument("--delete-images", action=argparse.BooleanOptionalAction, default=True, help="delete image folders before recreating them (default: True, use --no-delete-images to keep them)")
     return parser
 
 

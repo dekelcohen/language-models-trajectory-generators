@@ -99,7 +99,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `--seg-provider` | `moondream` | 2D segmentation: `langsam` \| `sam3` \| `moondream`. |
 | `--depth-format` | `norm_1m` | Depth reconstruction: `norm_1m` \| `norm_zfar` \| `raw`. |
 | `--timeout` | `15.0` | Timeout secs; `<=0` disables. |
-| `--delete-images` | off | Wipe image folders before recreating. |
+| `--delete-images` / `--no-delete-images` | on | Wipe image folders before recreating. |
 | `--images-root DIR` | `./images` (or `$IMAGES_ROOT`) | Root folder for all image/video/trajectory output (`config.images_folder` and every path derived from it). Parsed from `sys.argv` *before* `config`/other modules import, via `_apply_early_images_root()` at the top of `main.py`, so it must reach every module regardless of import order. Set this per run to allow 2+ concurrent experiments on the same checkout without overwriting each other's outputs, e.g. `--images-root ./images_run1` / `./images_run2`. |
 | `--review-provider` | `vlm` | Success check: `vlm`, `vlm:<model>` (e.g. `vlm:or-openai/gpt-5.5`), or `xmem`. |
 | `--planner-perception-vlm` | `gemini-3.8-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
@@ -1781,7 +1781,7 @@ has no `shapely` and nothing on the tracking path needs it.
   clip / full video (`helpers/video_utils.py`) and the generic
   `debug/dbg_utils.create_video_from_images` default output dir point there (previously the
   parent of the frames folder, i.e. `./images`). `common_utils.ensure_image_dirs_exist`
-  creates (and with `--delete-images` clears) it alongside `images/trajectory` and
+  creates (and, unless `--no-delete-images`, clears) it alongside `images/trajectory` and
   `images/overlay`; the IPC/metaworld tests assert the new location.
 
 - **VLM reviewer takes VIDEO instead of dozens of key frames**:
