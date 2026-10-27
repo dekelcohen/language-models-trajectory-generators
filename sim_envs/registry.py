@@ -35,13 +35,20 @@ _SUITES = {
 #: Genesis-only tasks (need torque control / its contact solver); not in list_task_ids().
 GENESIS_TASKS = ("usb",)
 
+#: Door scenes: noslip stops the soft-contact friction creep that slid the gripped lever out
+#: of the fingers at ~10 N pull with ~70 N of friction available (real friction does not creep).
+DOOR_SCENE_OPTIONS = {"rigid": {"noslip_iterations": 5}}
+
 
 def scene_options_for(task_name):
     """Solver options a task needs before its scene is created (Genesis), else None."""
-    if (task_name or "").strip().lower() == "usb":
+    name = (task_name or "").strip().lower()
+    if name == "usb":
         from sim_envs.genesis.usb import SCENE_OPTIONS
 
         return SCENE_OPTIONS
+    if name == "door:hidden" or (":" not in name and any(k in name for k in _LEGACY_DOOR_KEYWORDS)):
+        return DOOR_SCENE_OPTIONS
     return None
 
 

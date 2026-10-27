@@ -92,9 +92,11 @@ def franka_profile():
         ee_to_finger_contact=0.0,  # panda_grasptarget sits at the pad centre
         finger_length=0.054,
         finger_half_spread=config.gripper_goal_position_open_franka,
-        genesis_kp=[4500, 4500, 3500, 3500, 2000, 2000, 2000, 100, 100],
-        genesis_kv=[450, 450, 350, 350, 200, 200, 200, 10, 10],
-        genesis_force_range=[87, 87, 87, 87, 12, 12, 12, 100, 100],
+        # Fingers: kp 100 squeezed a 4 cm door lever with ~2 N/finger and it slid out on any pull;
+        # 2000 N/m capped at 70 N approximates the Franka Hand's force-limited grasp (70 N cont.).
+        genesis_kp=[4500, 4500, 3500, 3500, 2000, 2000, 2000, 2000, 2000],
+        genesis_kv=[450, 450, 350, 350, 200, 200, 200, 40, 40],
+        genesis_force_range=[87, 87, 87, 87, 12, 12, 12, 70, 70],
         links_to_keep=("panda_link8", "panda_hand", "panda_grasptarget"),
     )
 

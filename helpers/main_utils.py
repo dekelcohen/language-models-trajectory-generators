@@ -9,6 +9,12 @@ import common_utils
 from tracking import monitors as tracking_monitors
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
 
+
+def _touch_recovery():
+    from touch import recovery
+
+    return recovery
+
 def get_exec_locals(api, logger):
     """Returns the local variables dictionary for the exec environment."""
     # Assuming math and numpy (as np) are imported globally in main.py
@@ -36,6 +42,9 @@ def get_exec_locals(api, logger):
         "pour_pose": common_utils.pour_pose,
         # Force-feedback insertion of a held part; documented only by the touch skill.
         "insert_with_touch": api.insert_with_touch,
+        # Force-feedback pull / open of a grasped handle; documented only by the touch-pull skill.
+        "pull_with_touch": api.pull_with_touch,
+        "open_with_touch": lambda *a, **k: _touch_recovery().open_with_touch(api, *a, **k),
         "api": api,
         "math": math,
         "np": np,

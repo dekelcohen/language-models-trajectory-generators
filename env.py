@@ -462,6 +462,30 @@ def _touch_insert(sim, env, robot, spec, logger):
         return [FAIL + f"Touch insertion failed: {e}" + ENDC, {"outcome": "error", "error": str(e)}]
 
 
+def _touch_pull(sim, env, robot, spec, logger):
+    """TOUCH_PULL: touch-guided pull of the grasped handle (touch/pull.py). Reply ``[message, result]``."""
+    if not sim.supports_torque_control() or robot.robot != "franka":
+        return [FAIL + "Touch pull is not available on this simulator/robot." + ENDC, {"outcome": "unsupported"}]
+    try:
+        from touch.pull import PullConfig
+        from touch.sim_runner import run_touch_pull
+
+        arm_n = robot.profile.arm_joint_count
+        cfg = PullConfig(**{k: (v if isinstance(v, (bool, dict)) or v is None else float(v))
+                            for k, v in (spec.get("config") or {}).items()})
+        res = run_touch_pull(
+            sim, robot.id, robot.ee_index, robot.joint_indices[:arm_n], list(robot.gripper_joint_indices),
+            step=lambda: robot.step_env_and_record(env), dt=config.control_dt, direction=spec["direction"],
+            grip_force=float(spec.get("grip_force", 30.0)), max_s=float(spec.get("max_s", 20.0)),
+            cfg=cfg, log=lambda m: logger.info(PROGRESS + m + ENDC))
+        robot.step_env_and_record(env, force_record=True)
+        ok = res.get("outcome") in ("opened", "end_stop")
+        return [(OK if ok else FAIL) + f"Touch pull finished: {res.get('outcome')}" + ENDC, res]
+    except Exception as e:
+        logger.info(FAIL + f"TOUCH_PULL failed: {e}\n{traceback.format_exc()}" + ENDC)
+        return [FAIL + f"Touch pull failed: {e}" + ENDC, {"outcome": "error", "error": str(e)}]
+
+
 def _hand_tilt(sim, robot):
     """Measured hand tilt from upright: (degrees, unit [dx, dy] of the side that went DOWN).
 
@@ -977,6 +1001,9 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
 
             elif env_connection_received[0] == TOUCH_INSERT:
                 env_connection.send(_touch_insert(sim, env, robot, env_connection_received[1] or {}, logger))
+
+            elif env_connection_received[0] == config.TOUCH_PULL:
+                env_connection.send(_touch_pull(sim, env, robot, env_connection_received[1] or {}, logger))
 
             elif env_connection_received[0] == VISUALIZE_BOUNDING_BOX:
                 box_cubes = env_connection_received[1]

@@ -59,6 +59,8 @@ Start from this procedure, verbatim:
 - **Grasp mid-bar**, half-way between door face and free tip: the inboard end is the spindle/rose, and the outermost affordance point sits at the tip, where the jaws slip off on the pull. Derive it from your own detect_object; a coordinate quoted in the task text is only a hint - discard it if it disagrees.
 - **Keep the unlatch press small (~0.02-0.03 m).** If the lever resists, pull anyway - pressing deeper frees nothing and just levers the jaws off the bar.
 - **Hold that z for the whole pull arc** - rising peels the jaws off.
+- **Lever parallel to the door face, ~0.1 m out:** a top-down hand hits the face; grasp it from the side (2b, `rotation = math.pi / 2`).
+  If the `touch-guided-pull` skill is listed, open with `open_with_touch()` instead of scripting the arc.
 
 - **Pull vs push** - pull is the common case. Push only when the door face (not its edge) is
   toward the robot and nothing affords pulling. Decide from: which side the hinge/frame is on,

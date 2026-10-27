@@ -839,8 +839,32 @@ class GenesisAdapter(SimAdapter):
         kwargs = {"link": gs_link, "pos": np.asarray([float(v) for v in position])}
         if orientation_q is not None:
             kwargs["quat"] = np.asarray(transforms.xyzw_to_wxyz(orientation_q))
-        qpos = entry.entity.inverse_kinematics(**kwargs)
-        return _vector(qpos)
+        # Continuity first: solve from the current qpos only. Genesis' default re-samples random
+        # seeds when that does not converge to 0.5 mm, which can return a far-away branch and
+        # fling the arm (seen next to the door panel). Fall back to sampling only if needed.
+        def solve(**extra):
+            q, e = entry.entity.inverse_kinematics(return_error=True, **kwargs, **extra)
+            e = np.asarray(e.cpu() if hasattr(e, "cpu") else e, dtype=float).ravel()
+            return q, float(np.linalg.norm(e[:3])), (0.0 if orientation_q is None else float(np.linalg.norm(e[3:6])))
+
+        def ok(pe, re_):
+            return pe < 0.005 and re_ < 0.05
+
+        qpos, pe, re_ = solve(max_samples=1, max_solver_iters=100)
+        if ok(pe, re_):
+            return _vector(qpos)
+        q2, pe2, re2 = solve(max_samples=1, max_solver_iters=500, init_qpos=qpos)
+        if ok(pe2, re2) or pe2 < 0.01:
+            return _vector(q2)
+        q3, pe3, re3 = solve()
+        cur = _to_numpy(entry.entity.get_qpos()).ravel()
+        jump = float(np.max(np.abs(_to_numpy(q3).ravel() - cur)))
+        # A re-sampled solution is often another branch: joint-interpolating to it swings the
+        # whole arm through the scene. Take it only if it stays close or continuity is far off.
+        use3 = pe3 + 0.1 * re3 < pe2 + 0.1 * re2 and (jump < 0.8 or pe2 > 0.05)
+        _log(f"IK: continuity solve off by {pe2 * 100:.1f}cm/{re2:.2f}rad; re-sampled {pe3 * 100:.1f}cm/{re3:.2f}rad "
+             f"(max joint jump {jump:.2f}rad) -> using the {'re-sampled' if use3 else 'continuity'} solution")
+        return _vector(q3 if use3 else q2)
 
     # ------------------------------------------------------------------ transforms
     # Delegated to PyBullet-convention numpy math (see sim_adapter/transforms.py) rather

@@ -1,6 +1,6 @@
 # Plan: touch-guided grasp-and-pull (doors, drawers, chairs) — no LLM in the loop
 
-Status: plan (not implemented). Branch `tactile`. Builds on `touch/` (USB insertion) and
+Status: implemented in Genesis (2025-10; see §8). Branch `tactile`. Builds on `touch/` (USB insertion) and
 `helpers/pull_proprio.py`. Sim2Real rules apply: inputs are EE pose (FK), estimated external
 wrench (joint torques), gripper width, camera tracking. No hinge axis, door angle or contact list.
 
@@ -127,3 +127,37 @@ grasp pose, handle type and a rough initial direction, which are perception task
 
 Targets: door success ≥ 8/10 scripted (today ~stochastic), no false `part_did_not_move` (the outcome
 comes from the felt pull, not from video).
+
+## 8. Implementation status (Genesis)
+
+Code: `touch/pull.py` (PullController), `touch/sim_runner.py::run_touch_pull` (impedance loop),
+IPC `TOUCH_PULL` -> `api.pull_with_touch`, `touch/recovery.py::open_with_touch` (pull, slip ->
+re-grasp, resume), skill `touch-guided-pull`. `--no-touch` returns `disabled` (A/B). Harness:
+`research/touch/door_pull_e2e.py [--touch|--no-touch] [--dir normal|skew|tangent] [--err dx,dy,dz]
+[--grip N] [--max-regrasps K] [--debug]` (Genesis python).
+
+Root causes found on the way (each one fixed):
+1. The door lever had no collision geometry -> fingers closed on nothing (URDF: Side Cap 1 now collides).
+2. Genesis IK re-sampled random seeds -> branch jumps that swung the arm through the door
+   (continuity solve first; a re-sampled branch only if the joint jump < 0.8 rad or continuity is > 5 cm off).
+3. Franka finger force ~2 N -> raised to kp 2000 / force 70 (real hand: 70 N continuous).
+4. A top-down grasp is infeasible (the lever is ~10 cm off the face) -> side approach, jaws vertical.
+5. Soft-contact creep: the lever slid out at ~7 N although friction capacity was ~70 N ->
+   `noslip_iterations=5` for door scenes (same as USB).
+6. A stiff wrist yaw fought the hinge through the rigid grasp (end stop at 42°) -> compliant yaw (`k_yaw` 3 Nm/rad).
+7. The swept angle was measured from the initial pull direction (wrong when skewed) -> angle about the fitted hinge.
+8. Re-grasp turning to the door's new normal is out of reach once the door swings -> keep the hand
+   orientation, re-approach a few cm, resume on the earlier hinge fit (short arcs fit badly).
+9. The lever escapes the pads past ~70° -> default target 65°.
+
+A/B (door angle at the end, eval only):
+
+| case | touch | open-loop |
+|---|---|---|
+| normal | 61.3° | 36.2° |
+| skew (30° off) | 62.1° | 9.7° |
+| perception error 1 cm | 61.3° | (37.8° earlier) |
+| tangent start | 61.2° | — |
+| weak grip 4 N (forced slip at 51°) + 1 re-grasp | 64.5° | — |
+
+Open: a re-grasp guided by detection (not only proprio + tracking); drawers and chairs untested in sim.

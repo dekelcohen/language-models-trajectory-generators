@@ -479,6 +479,28 @@ class API:
         print(f"insert_with_touch: {summary}")
         return res
 
+    def pull_with_touch(self, direction, max_s=20.0, grip_force=30.0, pull_config=None):
+        """Pull the grasped handle with force feedback; the mechanism steers the hand (hinge arc or slide).
+
+        ``direction``: initial world pull direction (horizontal part used). Returns a dict with
+        ``outcome`` ('opened' | 'end_stop' | 'blocked' | 'slipped' | 'timeout' | 'unsupported' |
+        'disabled'), ``travel_cm``, ``swept_deg``, ``direction`` (current estimate), ``hinge``
+        (fitted centre/radius or None), ``slip_pos`` and ``events`` (proprioception only).
+        """
+        if not getattr(self.args, "touch", True):
+            print("pull_with_touch: touch is disabled (--no-touch).")
+            return {"outcome": "disabled"}
+        spec = {"direction": [float(v) for v in direction], "max_s": float(max_s),
+                "grip_force": float(grip_force), "config": dict(pull_config or {})}
+        self.logger.info(PROGRESS + f"[touch] pull_with_touch {spec}" + ENDC)
+        self.main_connection.send([config.TOUCH_PULL, spec])
+        msg, res = self.main_connection.recv()
+        self.logger.info(msg)
+        for ev in res.get("events", []):
+            self.logger.info(PROGRESS + f"[touch]   {ev}" + ENDC)
+        print(f"pull_with_touch: {({k: v for k, v in res.items() if k != 'events'})}")
+        return res
+
     def execute_trajectory(self, trajectory):
         # Rebuild into a plain Trajectory before anything is sent: a custom class from the
         # model's own code block cannot be reconstructed in the simulator process.
