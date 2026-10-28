@@ -713,6 +713,24 @@ class GenesisAdapter(SimAdapter):
 
         self._defer(f"set_joint_velocity(body={body}, joint={joint})", apply)
 
+    def set_joint_armature(self, body, joint, armature):
+        def apply():
+            entity = self._body(body).entity
+            dofs = self._dofs(body, joint)
+            if dofs:
+                entity.set_dofs_armature(np.full(len(dofs), float(armature)), dofs_idx_local=dofs)
+
+        self._defer(f"set_joint_armature(body={body}, joint={joint})", apply)
+
+    def set_joint_friction(self, body, joint, torque):
+        def apply():
+            entity = self._body(body).entity
+            dofs = self._dofs(body, joint)
+            if dofs:
+                entity.set_dofs_frictionloss(np.full(len(dofs), abs(float(torque))), dofs_idx_local=dofs)
+
+        self._defer(f"set_joint_friction(body={body}, joint={joint})", apply)
+
     @staticmethod
     def _apply_force_range(entity, dofs, force):
         """PyBullet's ``forces=[F, ...]`` maps to a symmetric Genesis force range."""
