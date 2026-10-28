@@ -103,7 +103,9 @@ class SimEnvDoor(SimEnvBase):
                 self.sim.change_dynamics(self.door_id, self.door_handle_latch, lateralFriction=2.0, spinningFriction=1.0)
 
             if self.latch_index is not None:
-                self.sim.set_joint_position(self.door_id, self.latch_index, target=0.0, force=200)
+                # Soft return spring (~a real lever's 1-3 N*m), not a 200 N*m lock: a pressed
+                # lever must yield, otherwise "press to unlatch" pins the grasp for the whole pull.
+                self.sim.set_joint_position(self.door_id, self.latch_index, target=0.0, force=3.0)
 
             if self.hide_door_with_object:
                 self._load_pole()

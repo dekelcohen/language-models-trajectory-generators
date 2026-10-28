@@ -43,6 +43,12 @@ ap.add_argument("--depth", type=float, default=0.01, help="fingertip centre past
 ap.add_argument("--grip", type=float, default=30.0, help="touch grip force per finger, N")
 ap.add_argument("--no-cap", action="store_true", help="A/B: disable the actuator force caps")
 ap.add_argument("--out", default="outputs/touch/door_e2e")
+ap.add_argument("--sim", default="genesis", choices=("genesis", "pybullet"),
+                help="pybullet: open-loop only (touch control is Genesis-only)")
+ap.add_argument("--press", type=float, default=0.0, help="open-loop: press the lever down this much (m) first")
+ap.add_argument("--arc", type=float, default=0.0, help="open-loop: pull along the (eval) hinge arc this many deg")
+ap.add_argument("--arc-yaw", action="store_true", help="--arc: turn the wrist with the door (yaw += swept)")
+ap.add_argument("--hinge-err", type=float, default=0.0, help="--arc: hinge estimate pushed this far (m) further from the handle")
 ap.add_argument("--debug", action="store_true", help="trace each regrasp phase (eval door angle + image)")
 args = ap.parse_args()
 os.makedirs(args.out, exist_ok=True)
@@ -50,8 +56,13 @@ os.makedirs(args.out, exist_ok=True)
 from sim_envs.genesis import genesis_env  # noqa: E402
 
 eargs = genesis_env.build_arg_parser().parse_args(["--task", "door"])
-eargs.sim = "genesis"
-sim = genesis_env.make_adapter(eargs)
+eargs.sim = args.sim
+if args.sim == "pybullet":
+    from sim_adapter import get_adapter
+    sim = get_adapter("pybullet")
+    args.touch = False
+else:
+    sim = genesis_env.make_adapter(eargs)
 if args.no_cap:                                      # A/B: pre-5fcde9d behaviour (1200 Nm force ranges)
     class _NoCaps(dict):
         def setdefault(self, k, d=None):
@@ -92,6 +103,10 @@ def R_of(q):
 
 
 def frame(link):                                     # URDF link origin (eval/scripted perception only)
+    if args.sim == "pybullet":
+        import pybullet as pb
+        ls = pb.getLinkState(DOOR, int(link), computeForwardKinematics=True)
+        return np.asarray(ls[4], float), R_of(ls[5])
     gl = sim._body(DOOR).links[int(link)]
     p = np.asarray(gl.get_pos().cpu()).ravel()
     w, x, y, z = (float(v) for v in np.asarray(gl.get_quat().cpu()).ravel())
@@ -183,6 +198,8 @@ def lin(a, b, n=None, step=0.01):
 
 
 def finger_axis():
+    if args.sim == "pybullet":
+        return "n/a"
     body = [h for h in sim._bodies if "panda" in str(sim._bodies[h].source)][0]
     names = sim.list_link_names(body)
     d = np.asarray(sim.get_link_pose(body, names["panda_leftfinger"])[0]) - \
@@ -241,9 +258,35 @@ if args.touch:
     res = recovery.open_with_touch(api, direction=list(d0), approach_yaw=None if args.approach == "top" else yaw, rotation=rot if args.approach == "top" else math.pi / 2, max_regrasps=args.max_regrasps, grip_force=args.grip, pull_config={"k_yaw": args.k_yaw})
     print(f"[door] open_with_touch -> {json.dumps({k: v for k, v in res.items() if k != 'attempts'})}", flush=True)
 else:
-    endp = np.asarray(grasp[:3]) + d0 * args.pull
-    end = list(endp) + list(grasp[3:])
-    pts = lin(grasp, end, step=0.02)
+    start = list(grasp)
+    if args.press:
+        start = list(np.asarray(grasp[:3]) - [0, 0, args.press]) + list(grasp[3:])
+        exe(lin(grasp, start, step=0.005), "press", settle=3)
+    if args.arc:                                     # diagnosis only: the true arc (what a perfect plan does)
+        u_h = (hinge[:2] - np.asarray(start[:2])) / np.linalg.norm(hinge[:2] - np.asarray(start[:2]))
+        c0 = hinge[:2] + u_h * args.hinge_err
+        r0 = np.linalg.norm(np.asarray(start[:2]) - c0)
+        a0 = math.atan2(start[1] - c0[1], start[0] - c0[0])
+        sgn = 1.0 if np.dot(np.cross([0, 0, 1.0], [math.cos(a0), math.sin(a0), 0]), tangent) > 0 else -1.0
+        pts = []
+        for t in np.linspace(0, args.arc, int(args.arc / 3) + 1)[1:]:
+            th = sgn * math.radians(t) if args.arc_yaw else 0.0
+            if args.approach == "top" or not args.arc_yaw:
+                pt = [c0[0] + r0 * math.cos(a0 + sgn * math.radians(t)), c0[1] + r0 * math.sin(a0 + sgn * math.radians(t))] \
+                    + list(start[2:])
+                if args.approach == "top":
+                    pt[3] = start[3] + th
+            else:                                    # side: rotate the fingertip point and the approach axis
+                tip0 = np.asarray(start[:3]) + a * DZ
+                v = tip0[:2] - c0
+                cs, sn = math.cos(th), math.sin(th)
+                tip_t = np.r_[c0 + [cs * v[0] - sn * v[1], sn * v[0] + cs * v[1]], tip0[2]]
+                a_t = np.array([cs * a[0] - sn * a[1], sn * a[0] + cs * a[1], 0.0])
+                pt = side_grasp_pose(*(tip_t - a_t * DZ), math.pi / 2, yaw + th)
+            pts.append(pt)
+    else:
+        endp = np.asarray(start[:3]) + d0 * args.pull
+        pts = lin(start, list(endp) + list(start[3:]), step=0.02)
     for k, pt in enumerate(pts):
         exe([pt], f"pull {k}", settle=3, tip=np.asarray(st["eef_pos"]) + d0 * args.pull * (k + 1) / len(pts))
 lv, RLv = frame(latch_link)

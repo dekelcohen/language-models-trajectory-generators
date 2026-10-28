@@ -856,15 +856,30 @@ class GenesisAdapter(SimAdapter):
         q2, pe2, re2 = solve(max_samples=1, max_solver_iters=500, init_qpos=qpos)
         if ok(pe2, re2) or pe2 < 0.01:
             return _vector(q2)
-        q3, pe3, re3 = solve()
         cur = _to_numpy(entry.entity.get_qpos()).ravel()
-        jump = float(np.max(np.abs(_to_numpy(q3).ravel() - cur)))
-        # A re-sampled solution is often another branch: joint-interpolating to it swings the
-        # whole arm through the scene. Take it only if it stays close or continuity is far off.
-        use3 = pe3 + 0.1 * re3 < pe2 + 0.1 * re2 and (jump < 0.8 or pe2 > 0.05)
-        _log(f"IK: continuity solve off by {pe2 * 100:.1f}cm/{re2:.2f}rad; re-sampled {pe3 * 100:.1f}cm/{re3:.2f}rad "
-             f"(max joint jump {jump:.2f}rad) -> using the {'re-sampled' if use3 else 'continuity'} solution")
-        return _vector(q3 if use3 else q2)
+
+        def cand(name, q, pe_, re__):
+            return name, q, pe_, re__, float(np.max(np.abs(_to_numpy(q).ravel() - cur)))
+
+        # Continuity often stalls in a local minimum (cm off, e.g. against a wrist limit) while an
+        # exact solution exists nearby: seed around the current qpos before global re-sampling.
+        # A global sample is often another branch, and joint-interpolating to it swings the whole
+        # arm through the scene - so among accurate solutions take the smallest joint jump.
+        cands = [cand("continuity", q2, pe2, re2)]
+        rng = np.random.default_rng(0)
+        for sigma in (0.2, 0.2, 0.4, 0.4, 0.8, 0.8):
+            seed = cur + rng.normal(0.0, sigma, cur.shape)
+            cands.append(cand(f"local({sigma})", *solve(max_samples=1, max_solver_iters=300, init_qpos=seed)))
+        cands.append(cand("re-sampled", *solve()))
+        accurate = [c for c in cands if c[2] < 0.01 and c[3] < 0.05]
+        if accurate:
+            pick = min(accurate, key=lambda c: c[4])
+        else:
+            near = [c for c in cands if c[4] < 0.8]
+            pick = min(near, key=lambda c: c[2] + 0.1 * c[3]) if near else cands[0]
+        _log(f"IK: continuity solve off by {pe2 * 100:.1f}cm/{re2:.2f}rad -> using {pick[0]} "
+             f"({pick[2] * 100:.1f}cm/{pick[3]:.2f}rad, max joint jump {pick[4]:.2f}rad; {len(accurate)} accurate)")
+        return _vector(pick[1])
 
     # ------------------------------------------------------------------ transforms
     # Delegated to PyBullet-convention numpy math (see sim_adapter/transforms.py) rather

@@ -295,6 +295,16 @@ class TestPullProprio(unittest.TestCase):
         self.assertLess(abs(first[0]), 0.1, "first alternative must be sideways, not along the pull")
         self.assertGreater(abs(first[1]), 0.9)
 
+    def test_slip_along_an_arc_may_have_pushed_so_no_veto(self):
+        # door lever: the jaws slip off mid-arc yet keep shoving the panel open (pb8 run)
+        from helpers.pull_proprio import (summarize_pull_proprio, measured_no_motion_veto,
+                                          retry_direction_hint, format_pull_proprio)
+        f = summarize_pull_proprio(self.attempt([-0.05, 0.20, 0]))
+        self.assertEqual(f["outcome"], "part_did_not_move", f)
+        self.assertIsNone(measured_no_motion_veto(f, "open the door"))
+        self.assertIsNone(retry_direction_hint(f))
+        self.assertNotIn("did not start to open", format_pull_proprio(f))
+
     def test_blocked_pull_also_means_no_motion(self):
         from helpers.pull_proprio import summarize_pull_proprio
         h = np.array(self.HANDLE)

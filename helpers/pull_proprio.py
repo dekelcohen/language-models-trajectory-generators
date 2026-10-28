@@ -186,6 +186,23 @@ def summarize_pull_proprio(records, logger=None):
     return facts
 
 
+def slip_may_push(facts):
+    """True if a pull slipped while moving other than straight back off the handle.
+
+    After a slip the rest of that pull moves closed, empty fingers; going sideways/along an arc
+    they can still shove or hook the part along (seen on a door lever), backing straight out
+    along the approach line they cannot.
+    """
+    a = _unit(facts.get("approach_dir")) if facts.get("approach_dir") is not None else None
+    for p in facts["pulls"]:
+        if p["result"] != "slipped":
+            continue
+        d = _unit(p["dir"])
+        if a is None or d is None or float(d @ a) > -0.9:
+            return True
+    return False
+
+
 def measured_no_motion_veto(facts, task_text):
     """Reason string if a VLM "success" must be overruled, else ``None``.
 
@@ -198,7 +215,7 @@ def measured_no_motion_veto(facts, task_text):
         return None
     if facts["outcome"] != "part_did_not_move" or facts["possible_push_after_pull"]:
         return None
-    if facts.get("approach_dir") is None:
+    if facts.get("approach_dir") is None or slip_may_push(facts):
         return None
     how = ", ".join(f"'{p['desc']}': {p['result']} after {p['cmd_m'] * 100:.0f} cm commanded, "
                     f"{p['carried_m'] * 100:.0f} cm carried" for p in facts["pulls"])
@@ -266,7 +283,7 @@ def retry_direction_hint(facts, history_dirs=()):
         return None
     if facts["outcome"] == "part_moved_with_hand":
         return _moved_hint(facts, list(history_dirs))
-    if facts["outcome"] != "part_did_not_move":
+    if facts["outcome"] != "part_did_not_move" or slip_may_push(facts):
         return None
     tried = list(history_dirs) + list(facts["pull_dirs"])
     alts = alternative_directions(tried, facts.get("approach_dir"))
@@ -311,8 +328,14 @@ def format_pull_proprio(facts):
         lines.append(f"  - '{p['desc']}': commanded {p['cmd_m'] * 100:.0f} cm along {_vec(p['dir'])}, "
                      f"reached {p['reached_m'] * 100:.0f} cm; {res}; held part carried "
                      f"~{p['carried_m'] * 100:.0f} cm.")
+    slipped = facts["outcome"] == "part_did_not_move" and slip_may_push(facts)
+    if slipped:
+        words["part_did_not_move"] = (
+            f"the held part did NOT travel in the grip (max {facts['max_carried_m'] * 100:.0f} cm): "
+            "the fingers slipped off it. This does NOT show the part stayed put - the closed "
+            "fingers kept moving and can push it along; judge from the clips whether it moved.")
     lines.append("  - Verdict: " + words[facts["outcome"]])
-    if facts["outcome"] == "part_did_not_move":
+    if facts["outcome"] == "part_did_not_move" and not slipped:
         lines.append("  - If the part did not move, the task is NOT achieved, whatever the arm's "
                      "motion looks like in the clips.")
     return "\n".join(lines)

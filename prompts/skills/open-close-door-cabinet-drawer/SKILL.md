@@ -35,6 +35,8 @@ From the SCENE ANALYSIS, the affordance points (prefer the top-ranked point) and
 - **Geometry** - from the printed `detect_object` output for the handle, keep its position,
   `angle_long` (orientation along its longer side) and `angle_short` (along its shorter side).
   Note which edge of the door the handle sits near: the hinge is on the **opposite** edge.
+  Frames have a post on BOTH edges: a "hinge" detection within ~0.3 m of the handle is the
+  latch-side jamb, not the hinge (task-text claims about the hinge side may be wrong too).
 
 Then follow exactly one of sections 2, 3 or 4, and check section 2b for the approach
 direction.
@@ -56,9 +58,11 @@ Start from this procedure, verbatim:
 >    perpendicular vector math to fully open the door.
 
 - **Grasp the bar's mid-height, not the point you were given** - an affordance point's `z` is the depth-camera hit on the TOP of the bar, so subtract ~half its thickness (or use the detected handle's centre `z`) for the jaws to straddle it.
-- **Grasp mid-bar**, half-way between door face and free tip: the inboard end is the spindle/rose, and the outermost affordance point sits at the tip, where the jaws slip off on the pull. Derive it from your own detect_object; a coordinate quoted in the task text is only a hint - discard it if it disagrees.
+- **Detect with the arm out of view**: if the arm may hide the handle (e.g. right after a previous subtask), first move it up and back toward the base, then `detect_object`. After `closed_on_nothing`, the position was wrong - clear the arm and detect again; never reuse it.
+- **Grasp mid-bar**, half-way between the rose/spindle and the free tip: jaws near the rose hit its disc, at the tip they slip off on the pull. The handle detection's centre is pulled toward the rose, so shift ~0.05 m toward the tip. The rose is the bar end nearest the latch-side jamb; the tip points AWAY from that jamb (toward the hinge) - check the sign of your shift. Derive it from your own detect_object; a coordinate quoted in the task text is only a hint - discard it if it disagrees.
 - **Keep the unlatch press small (~0.02-0.03 m).** If the lever resists, pull anyway - pressing deeper frees nothing and just levers the jaws off the bar.
 - **Hold that z for the whole pull arc** - rising peels the jaws off.
+- **Pull along the hinge arc and turn the wrist with the door**: at swept angle `a`, top-down `rotation += a`, side `approach_yaw += a` (same sign as the arc). A fixed wrist twists the lever out of the jaws after ~20 deg. The hinge is the far door edge the lever's free tip points toward; if the door/hinge detections are implausible (far off, within ~0.3 m of the handle, or not where the tip points), put it ~0.4-0.8 m from the lever root along the tip direction - too far is safer than too near. ~45 deg is enough.
 - **Lever parallel to the door face, ~0.1 m out:** a top-down hand hits the face; grasp it from the side (2b, `rotation = math.pi / 2`).
   If the `touch-guided-pull` skill is listed, open with `open_with_touch()` instead of scripting the arc.
 
