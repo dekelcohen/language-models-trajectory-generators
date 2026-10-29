@@ -96,6 +96,36 @@ def save_xmem_image(masks):
     norm = xmem_array / max_val if max_val > 0 else xmem_array
     Image.fromarray((norm * 255).astype(np.uint8)).save(config.xmem_input_path)
 
+def _xy_rect_area(points):
+    if len(points) < 3:
+        return 0.0
+    rect = MultiPoint(points[:, :2]).minimum_rotated_rectangle
+    return float(rect.area) if isinstance(rect, Polygon) else 0.0
+
+
+def _drop_support_skirt(points):
+    """Remove floor/table points that bled into a small object's cluster.
+
+    A mask that spills past a small object (e.g. a plug on a stand) pulls in the support surface
+    around its base, and DBSCAN keeps it because the base touches it. That skirt is the lowest
+    horizontal slab of the cluster and it is much WIDER than everything above it, which shifts the
+    box centre several cm. Drop the slab only in that case: a tight mask (box, handle, door) has
+    a bottom slab no wider than the rest and is returned unchanged.
+    """
+    if len(points) < 20:
+        return points
+    z = points[:, 2]
+    slab = z <= z.min() + config.point_cloud_support_slab_m
+    above = points[~slab]
+    if len(above) < max(10, int(0.1 * len(points))) or slab.sum() < 10:
+        return points
+    if _xy_rect_area(points[slab]) <= config.point_cloud_support_skirt_ratio * _xy_rect_area(above):
+        return points
+    logger.info(PROGRESS + f"Dropped {int(slab.sum())} support-surface points under the object "
+                f"(z <= {z.min() + config.point_cloud_support_slab_m:.3f})" + ENDC)
+    return above
+
+
 def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_position, camera_orientation_q, segmentation_count, cam_info=None):
 
     image_width, image_height = image.size
@@ -138,6 +168,8 @@ def get_bounding_cube_from_point_cloud(image, masks, depth_array, camera_positio
             else:
                 # Fallback if clustering completely fails
                 target_points = contour_world_points_np
+
+            target_points = _drop_support_skirt(target_points)
 
             # ====================================================================
             # FIX 2: HYBRID TOP-SURFACE AND VOLUME BOUNDING BOX

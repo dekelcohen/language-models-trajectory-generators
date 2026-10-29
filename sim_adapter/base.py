@@ -105,6 +105,11 @@ class SimAdapter(ABC):
     #: ``tests/test_genesis_camera_semantics.py``.
     depth_encoding = DEPTH_OPENGL
 
+    #: True when ``draw_debug_*`` overlays appear in camera captures (Genesis). Such sims skip
+    #: the automatic per-detection bounding cubes, which would otherwise clutter every image
+    #: the planner, perception VLM and reviewer see. Opt-in overlays (--vis-*) still draw.
+    debug_draw_in_captures = False
+
     # ------------------------------------------------------------------ lifecycle
     @abstractmethod
     def connect(self, gui: bool = False) -> None:

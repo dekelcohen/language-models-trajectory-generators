@@ -151,7 +151,10 @@ class SimEnvDoor(SimEnvBase):
             visual_shape=pole_visual,
             position=pole_position,
         )
-        self.sim.change_dynamics(self.pole_id, -1, lateralFriction=1.0, spinningFriction=0.5)
+        # Rolling friction + damping: a knocked-over pole must come to rest on the floor, not
+        # roll off forever (it used to reach x~100 m and fall off the ground plane).
+        self.sim.change_dynamics(self.pole_id, -1, lateralFriction=1.0, spinningFriction=0.5,
+                                 rollingFriction=0.05, linearDamping=0.5, angularDamping=0.5)
         return self.pole_id
 
     def _load_board(self):

@@ -104,6 +104,10 @@ shoulder_camera_target_offset = [0.40, 0.20, 0.05]
 
 # Object grasping
 point_cloud_top_surface_filter = 0.06
+# utils._drop_support_skirt: the lowest slab (m) of a detected object's points is treated as
+# floor/table bleed when its XY footprint is > this ratio x the footprint of the points above it.
+point_cloud_support_slab_m = 0.008
+point_cloud_support_skirt_ratio = 2.0
 bounding_cube_depth_offset = 0.06
 gripper_depth_offset_franka = 0.06
 gripper_depth_offset_sawyer = -0.12

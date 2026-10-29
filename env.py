@@ -733,6 +733,8 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
             elif env_connection_received[0] == ADD_BOUNDING_CUBES:
 
                 bounding_cubes_world_coordinates = env_connection_received[1]
+                if getattr(sim, "debug_draw_in_captures", False):
+                    bounding_cubes_world_coordinates = []
 
                 for bounding_cube_world_coordinates in bounding_cubes_world_coordinates:
                     sim.draw_debug_line(bounding_cube_world_coordinates[0], bounding_cube_world_coordinates[1], [0, 1, 0], life_time=0)

@@ -133,6 +133,7 @@ class GenesisAdapter(SimAdapter):
 
     name = "genesis"
     depth_encoding = DEPTH_LINEAR_METRIC
+    debug_draw_in_captures = True  # cameras are created with debug=True
 
     def __init__(self, backend=None, dt=None, gravity=(0.0, 0.0, -9.81), scene_options=None):
         self.scene = None

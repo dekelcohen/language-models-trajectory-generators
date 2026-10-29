@@ -59,12 +59,21 @@ Start from this procedure, verbatim:
 
 - **Grasp the bar's mid-height, not the point you were given** - an affordance point's `z` is the depth-camera hit on the TOP of the bar, so subtract ~half its thickness (or use the detected handle's centre `z`) for the jaws to straddle it.
 - **Detect with the arm out of view**: if the arm may hide the handle (e.g. right after a previous subtask), first move it up and back toward the base, then `detect_object`. After `closed_on_nothing`, the position was wrong - clear the arm and detect again; never reuse it.
-- **Grasp mid-bar**, half-way between the rose/spindle and the free tip: jaws near the rose hit its disc, at the tip they slip off on the pull. The handle detection's centre is pulled toward the rose, so shift ~0.05 m toward the tip. The rose is the bar end nearest the latch-side jamb; the tip points AWAY from that jamb (toward the hinge) - check the sign of your shift. Derive it from your own detect_object; a coordinate quoted in the task text is only a hint - discard it if it disagrees.
+- **Grasp mid-bar**, half-way between the rose/spindle and the free tip: jaws near the rose hit its disc, at the tip they slip off on the pull. The handle detection's centre is pulled toward the rose, so shift ~0.05 m toward the tip. The rose sits near the door's latch EDGE; the tip points inward across the panel. Compute the sign, don't guess it - the tip points toward the door's FAR (hinge) edge:
+  ```python
+  axis = (math.cos(handle_angle_long), math.sin(handle_angle_long))
+  d = (math.cos(door_angle_long), math.sin(door_angle_long))      # detect_object("door") - the panel, not a jamb
+  door_width = max(door_w, door_l)                                  # the panel's long side
+  edges = [(door_x + s * door_width / 2 * d[0], door_y + s * door_width / 2 * d[1]) for s in (1, -1)]
+  far = max(edges, key=lambda e: math.hypot(e[0] - handle_x, e[1] - handle_y))
+  tip_dir = axis if axis[0] * (far[0] - handle_x) + axis[1] * (far[1] - handle_y) > 0 else (-axis[0], -axis[1])
+  ```
+  Print `tip_dir` and the shifted grasp xy. Derive it from your own detect_object; a coordinate quoted in the task text is only a hint - discard it if it disagrees.
 - **Keep the unlatch press small (~0.02-0.03 m).** If the lever resists, pull anyway - pressing deeper frees nothing and just levers the jaws off the bar.
 - **Hold that z for the whole pull arc** - rising peels the jaws off.
 - **Pull along the hinge arc and turn the wrist with the door**: at swept angle `a`, top-down `rotation += a`, side `approach_yaw += a` (same sign as the arc). A fixed wrist twists the lever out of the jaws after ~20 deg. The hinge is the far door edge the lever's free tip points toward; if the door/hinge detections are implausible (far off, within ~0.3 m of the handle, or not where the tip points), put it ~0.4-0.8 m from the lever root along the tip direction - too far is safer than too near. ~45 deg is enough.
-- **Lever parallel to the door face, ~0.1 m out:** a top-down hand hits the face; grasp it from the side (2b, `rotation = math.pi / 2`).
-  If the `touch-guided-pull` skill is listed, open with `open_with_touch()` instead of scripting the arc.
+- **Lever parallel to the door face, ~0.1 m out:** stay top-down - step 4's short-axis offset drops one jaw into the lever-door gap. This is NOT a 2b trigger; go to the side only on 2b trigger 3 (a top-down attempt on this lever already failed geometrically).
+  If the `touch-guided-pull` skill is listed, follow it instead (it grasps from the side) and open with `open_with_touch()` rather than scripting the arc.
 
 - **Pull vs push** - pull is the common case. Push only when the door face (not its edge) is
   toward the robot and nothing affords pulling. Decide from: which side the hinge/frame is on,
