@@ -17,6 +17,9 @@ from sim_envs.pybullet.grasp import SimEnvGrasp
 # Keywords that select the Adroit door scene when no suite prefix is given.
 _LEGACY_DOOR_KEYWORDS = ["door", "open_door", "opendoor", "sawyer_door_v3", "franka_door", "door:hidden"]
 
+# RoboDojo-style insert-and-turn key task (single-arm Panda).
+_INSERT_KEY_NAMES = {"insert_key", "insert-key", "robodojo:insert_key"}
+
 
 def _franka_kitchen_suite():
     # Imported lazily: the kitchen assets/profile pull in more modules and are
@@ -54,7 +57,7 @@ def scene_options_for(task_name):
 
 def list_task_ids():
     """Return every selectable task id (namespaced suites + legacy names)."""
-    ids = ["grasp", "door", "door:hidden"]
+    ids = ["grasp", "door", "door:hidden", "insert_key"]
     for suite, loader in _SUITES.items():
         try:
             task_ids, _cls = loader()
@@ -86,6 +89,11 @@ def get_simenv(task_name, sim=None):
         from sim_envs.genesis.usb import SimEnvUSB
 
         return SimEnvUSB(sim)
+
+    if lowered_full in _INSERT_KEY_NAMES:
+        from sim_envs.pybullet.insert_key import SimEnvInsertKey
+
+        return SimEnvInsertKey(sim)
 
     if ":" in name:
         suite, _, task = name.partition(":")
