@@ -46,9 +46,23 @@ ARTICULATED_TASK_RE = re.compile(
 INSERT_TASK_RE = re.compile(r"\b(insert\w*|plug|socket|peg|connector|usb)\b", re.IGNORECASE)
 
 
+#: Relocating a free object (clearing an occluder that stands in front of a door). Such a
+#: subtask mentions the door only as context ("...without knocking it shut or open").
+RELOCATE_TASK_RE = re.compile(
+    r"\b(out of the way|aside|to the side|move|remove|relocate|topple|knock\w* (?:\w+ )?over|"
+    r"pick (?:\w+ )?up|place|put)\b", re.IGNORECASE)
+#: An explicit open/close action ON an articulated part ("open the wooden door").
+OPEN_INTENT_RE = re.compile(
+    r"\b(open|close|shut|pull|slide)\s+(?:(?:the|a|an|this|that|its)\s+)?(?:[\w-]+\s+){0,2}"
+    r"(door|drawer|cabinet|cupboard|lid|hatch|panel|fridge|oven|microwave|dishwasher|handle|lever)s?\b",
+    re.IGNORECASE)
+
+
 def is_articulated_task(text):
     text = str(text or "")
-    return bool(ARTICULATED_TASK_RE.search(text)) and not INSERT_TASK_RE.search(text)
+    if not ARTICULATED_TASK_RE.search(text) or INSERT_TASK_RE.search(text):
+        return False
+    return not (RELOCATE_TASK_RE.search(text) and not OPEN_INTENT_RE.search(text))
 
 
 def _arr(v):

@@ -1,7 +1,7 @@
 # Status: open door, no touch (`door`, `door:hidden`)
 
 Living status log so work can resume after an interruption. Branch `tactile`.
-Last update: 2026-10-28, commit `a5a345b`.
+Last update: 2026-10-29 (fixes 9-11).
 
 ## Request
 "Open the door" (no touch) never succeeded, even without the grey-cylinder occlusion; both
@@ -29,6 +29,9 @@ No code regression was found. The task failed for several independent reasons:
 | 6 | Detection with the arm in front of the door (e.g. after the pole subtask) gives junk positions, and retries reused them. | Skill: clear the arm, then detect; after `closed_on_nothing`, detect again. | door skill, section 2 |
 | 7 | Genesis IK kept inaccurate continuity solutions (3-20 cm off) or jumped branches, flinging the arm. | Local seeded solves around the current qpos; pick the accurate one (<1 cm, <0.05 rad) with the smallest joint jump. | `sim_adapter/genesis_adapter.py` `inverse_kinematics` |
 | 8 | The reviewer was told "the door did not start to open" when the fingers slipped, but slipped fingers moving along an arc still push the door. | `slip_may_push()`: no veto, no "did not move" retry hint, neutral wording. A test was added. | `helpers/pull_proprio.py`, `tests/test_tracking_review_evidence.py` |
+| 9 | Skill line "lever parallel to the door face → grasp from the side" (added for Genesis touch) pushed every PyBullet run to a side grasp; jaws landed near the rose and the press stalled. | Lever stays top-down (step-4 offset into the gap); side only on 2b trigger 3. Tip direction computed from the panel's far edge, printed. | door skill, section 2 (`4548ee1`) |
+| 10 | Toppled pole rolled forever (no rolling friction): x 3 → 100 m, then fell off the plane. | `rollingFriction=0.05`, linear/angular damping 0.5; it now stops ~0.8 m away. | `sim_envs/pybullet/door.py` `_load_pole` (`4548ee1`) |
+| 11 | Pole-clearing subtask: VLM said success, but the pull-proprio veto overruled it (the prompt says "door"; the hand slipped off the pole = "handle never travelled"). The planner then re-ran the clearing subtask twice against a pole already on the floor. | `is_articulated_task`: a relocate subtask (move / out of the way / place / topple...) is articulated only with an explicit open/close intent on a part ("open the door"). Checked on all 27 subtask prompts of the 2026-10-29 rollouts; test added. | `helpers/pull_proprio.py`, `tests/test_tracking_review_evidence.py` |
 
 ## Results (door angle from sim state; for evaluation only)
 | Run | Sim / task | Outcome |
@@ -38,6 +41,11 @@ No code regression was found. The task failed for several independent reasons:
 | gn6 | Genesis `door --no-touch` | Success; handle moved ~37 cm. |
 | pb8, pb9 | PyBullet `door:hidden` | Pole cleared and the door opened 60-100°, yet the reviewer (gemini-3.8-flash) rejected every attempt. |
 | gn1-gn5, pb3-pb6 | Before fixes 4-8 | Failed: `closed_on_nothing`, wrong hinge, IK fling. |
+| door_pb (10-29) | PyBullet `door`, before fix 9 | Side grasp near the rose, press blocked every attempt; killed. |
+| door_pb2 (10-29) | PyBullet `door`, after fixes 9-10 | Success on attempt 1, top-down; handle moved ~27 cm. |
+| door_hidden_pb2 (10-29) | PyBullet `door:hidden`, after fixes 9-10 | Pole toppled and stopped on the floor; door opened (handle ~29 cm), top-down. Pole subtask wrongly vetoed → fix 11. |
+
+Videos + logs: `outputs/rollouts_20261029_final/<run>/`.
 
 Harness numbers (`research/touch/door_pull_e2e.py`, scripted, no LLM):
 - PyBullet press + arc + yaw-follow: 44° (side approach), 40° (top-down).

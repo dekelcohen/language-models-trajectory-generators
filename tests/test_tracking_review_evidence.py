@@ -289,6 +289,12 @@ class TestPullProprio(unittest.TestCase):
         self.assertEqual(f["pulls"][0]["result"], "slipped")
         self.assertIsNotNone(measured_no_motion_veto(f, "open the right cabinet"))
         self.assertIsNone(measured_no_motion_veto(f, "pick up the mug"))
+        # Clearing an occluder in front of a door is not a door pull (door:hidden pole subtask).
+        self.assertIsNone(measured_no_motion_veto(
+            f, "A gray cylinder stands in front of a wooden door, hiding the door's handle. Move the "
+               "cylinder out of the way. Avoid knocking the door shut or open."))
+        self.assertIsNotNone(measured_no_motion_veto(
+            f, "Open the wooden door. The cylinder was pushed aside; do not move it."))
         hint = retry_direction_hint(f)
         self.assertIn("Do NOT repeat", hint)
         first = np.asarray(alternative_directions(f["pull_dirs"], f["approach_dir"])[0][1])
