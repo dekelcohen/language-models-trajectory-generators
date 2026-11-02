@@ -718,6 +718,7 @@ def build_prompt(arm, name, index):
     if evidence:
         media += evidence + "\n\n"
     prompt = (REVIEW_PROMPT.replace("[INSERT TASK]", TASK)
+              .replace("[INSERT OVERALL COMMAND SECTION]", "")
               .replace("[INSERT 3D COORDINATES PROMPT SECTION]",
                        "World frame in metres, z up. The door hinge is vertical.")
               .replace("[INSERT SCENE ANALYSIS SECTION]", scene)

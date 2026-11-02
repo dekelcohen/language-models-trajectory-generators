@@ -332,6 +332,8 @@ class API:
 
         utils.save_xmem_image(masks)
 
+        self._snapshot_detections(rgb_image_head, depth_array, masks, segmentation_texts)
+
         self.task.segmentation_texts.extend(segmentation_texts)
 
         self.logger.info(PROGRESS + "Adding bounding cubes to the environment..." + ENDC)
@@ -370,6 +372,83 @@ class API:
 
         self.task.segmentation_count += 1
 
+    def _snapshot_detections(self, rgb_image_head, depth_array, masks, segmentation_texts):
+        """First detection of each label in this subtask -> displacement snapshot (pixels + depth).
+
+        Labels first seen before the robot moved at all in this run are also kept as run-level
+        baselines (``self.run_displacement_snaps``), so a later subtask's reviewer can tell that
+        e.g. the door was already pushed open by an earlier subtask.
+        """
+        if not getattr(config, "review_displacement_evidence", True):
+            return
+        from helpers import object_displacement as od
+        if not hasattr(self, "run_displacement_snaps"):
+            self.run_displacement_snaps = {}
+            self.run_start_trajectory_step = self.trajectory_step
+        run_ok = self.trajectory_step <= self.run_start_trajectory_step
+        start = getattr(self.task, "start_trajectory_step", None)
+        if start is not None and self.trajectory_step > start:
+            # after the robot moved, a "first" detection shows the object where it was moved TO;
+            # comparing against that would report a relocated object as "in place"
+            return
+        try:
+            depth_m = None
+            for mask, text in zip(masks, segmentation_texts):
+                key = str(text).strip().lower()
+                if not key or key in self.task.displacement_snaps:
+                    continue
+                if depth_m is None:
+                    depth_m = od.metric_depth(depth_array, self.cam_info)
+                snap = od.snapshot(text, np.array(rgb_image_head), depth_m, np.asarray(mask),
+                                   camera_position=self.head_camera_position, step=self.trajectory_step)
+                if snap is not None:
+                    self.task.displacement_snaps[key] = snap
+                    if run_ok and key not in self.run_displacement_snaps:
+                        self.run_displacement_snaps[key] = snap
+                    self.logger.info(PROGRESS + f"Displacement: snapshot of '{text}' bbox={snap['bbox']} "
+                                     f"({int(snap['mask'].sum())} px) at step {self.trajectory_step}" + ENDC)
+        except Exception as e:                   # evidence is optional; never break detection
+            self.logger.info(WARNING + f"Displacement snapshot failed: {type(e).__name__}: {e}" + ENDC)
+
+    def _displacement_review_evidence(self):
+        """Fresh head RGB-D vs each detected object's first snapshot -> ``(facts_list, text)``.
+
+        Also compares the run-level baselines (taken before the robot first moved) that are
+        older than this subtask, reported as a separate "since the start of the command" block.
+        """
+        snaps = getattr(self.task, "displacement_snaps", None) or {}
+        start = getattr(self.task, "start_trajectory_step", None)
+        run_snaps = {k: s for k, s in (getattr(self, "run_displacement_snaps", None) or {}).items()
+                     if start is not None and s.get("step") is not None and s["step"] < start}
+        if (not snaps and not run_snaps) or not getattr(config, "review_displacement_evidence", True):
+            return [], None
+        from helpers import object_displacement as od
+        try:
+            rgb, depth_raw = self._capture_head_image_and_depth()
+            depth_m = od.metric_depth(depth_raw, self.cam_info)
+            facts = [od.compare(s, np.array(rgb), depth_m, camera_position=self.head_camera_position)
+                     for s in snaps.values()]
+            run_facts = [od.compare(s, np.array(rgb), depth_m, camera_position=self.head_camera_position)
+                         for s in run_snaps.values()]
+        except Exception as e:
+            self.logger.info(WARNING + f"Review: displacement evidence failed: {type(e).__name__}: {e}" + ENDC)
+            return [], None
+        facts = [f for f in facts if f]
+        run_facts = [f for f in run_facts if f]
+        od.mark_shared_regions(list(snaps.values()), facts)
+        od.mark_shared_regions(list(run_snaps.values()), run_facts)
+        already = [lbl for lbl, v in (self.task.displacement_prev or {}).items() if v == "left_place"]
+        text = od.format_facts(facts, already=already)
+        run_text = od.format_run_facts(run_facts)
+        if run_text:
+            text = (text + "\n" + run_text) if text else run_text
+        for tag, fl in (("", facts), ("since command start ", run_facts)):
+            for f in fl:
+                self.logger.info(PROGRESS + f"Review: displacement {tag}'{f['label']}' -> {f['verdict']} "
+                                 f"farther={f['farther']} nearer={f['nearer']} changed={f['changed']} ncc={f['ncc']}"
+                                 + ENDC)
+        self.task.displacement_prev = {f["label"]: f["verdict"] for f in facts}
+        return facts, text
 
     def get_grasp_poses(self, object_name):
         """Return pre-computed grasp pose candidates for the given object.
@@ -453,21 +532,120 @@ class API:
             except Exception as e:
                 self.logger.info(PROGRESS + f"Warning: failed to save segmentation mask [{i}] ({label}): {e}" + ENDC)
 
-    def insert_with_touch(self, axis, tool_length=0.025, max_s=20.0, grip_force=20.0):
+    def locate_with_wrist_camera(self, description, max_points=4):
+        """Point at ``description`` in the wrist-camera image and return 3D world candidates.
+
+        For small features the head camera cannot resolve (a USB port on a side face): the
+        perception VLM (--planner-perception-vlm) points at every visible match in the wrist
+        RGB, each point is lifted to 3D with the wrist depth + calibrated wrist camera pose.
+        Returns a best-first list of ``{"label", "position": [x, y, z], "pixel": [u, v]}``;
+        entries without valid depth are dropped. Uses only camera images (Sim2Real safe).
+        """
+        from llm_providers.model_registry import get_model_info
+        self._capture_head_image_and_depth()
+        wrist_info = (self.cam_info or {}).get("wrist") if isinstance(self.cam_info, dict) else None
+        if self.wrist_camera_position is None or not wrist_info or wrist_info.get("viewMatrix") is None:
+            print("locate_with_wrist_camera: no calibrated wrist camera in this environment.")
+            return []
+        rgb = Image.open(config.rgb_image_wrist_path).convert("RGB")
+        width, height = rgb.size
+        self.wrist_image_size = rgb.size
+        depth_npy = os.path.splitext(config.depth_image_wrist_path)[0] + ".npy"
+        if not os.path.exists(depth_npy):
+            print("locate_with_wrist_camera: wrist depth unavailable.")
+            return []
+        depth = np.load(depth_npy).astype(np.float32)
+
+        self.task.wrist_locate_count = getattr(self.task, "wrist_locate_count", 0) + 1
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(description))[:40] or "target"
+        stem = os.path.join(config.images_folder, f"wrist_locate_{safe}_{self.trajectory_step}_{self.task.wrist_locate_count}")
+        image_path = stem + ".png"
+        rgb.save(image_path)
+
+        model = self.args.planner_perception_vlm
+        coords_key = get_model_info(model).pointing_coords_format
+        coords_format = config.affordance_coords_format_by_key[coords_key]
+        prompt = (
+            "This image is from a robot's wrist camera (the white robot gripper is in view). "
+            f"Point at EVERY visible instance of: {description}. Best match first, at most {int(max_points)}. "
+            "Point at the centre of each instance; skip ones hidden by the gripper. "
+            f"Coordinates format: {coords_format}. Answer ONLY a JSON list like "
+            '[{"point": [..], "label": "short label"}]; [] if none is visible.'
+        )
+        try:
+            messages = models.call_llm_cached(
+                self.main_connection, self.client, model, prompt, [], role="user", image_paths=[image_path],
+                options={"max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort,
+                         "cache": self.llm_cache, "conversation_key": "wrist_locate"},
+            )
+            text = (messages[-1]["content"] if messages and isinstance(messages[-1], dict) else "") or ""
+        except Exception as e:
+            print(f"locate_with_wrist_camera: perception VLM failed: {e}")
+            return []
+        m = re.search(r"\[.*\]", text, re.DOTALL)
+        try:
+            items = json.loads(m.group(0)) if m else []
+        except Exception:
+            items = []
+        if isinstance(items, dict):
+            items = [items]
+
+        results = []
+        for item in items[: int(max_points)]:
+            p = item.get("point") if isinstance(item, dict) else None
+            if not isinstance(p, (list, tuple)) or len(p) < 2:
+                continue
+            if coords_key == "yx_norm_1000":
+                from features_markers.bbox_providers.gemini_bbox_provider import denormalize_yx_point_to_xy_pixels
+                u, v = denormalize_yx_point_to_xy_pixels(p, width, height)
+            else:
+                u, v = float(p[0]), float(p[1])
+            ui, vi = int(round(u)), int(round(v))
+            if not (0 <= ui < width and 0 <= vi < height):
+                continue
+            z, _info = utils.sample_surface_depth(depth, ui, vi)
+            if z is None or not np.isfinite(z):
+                continue
+            world = utils.get_world_point_world_frame(
+                self.wrist_camera_position, self.wrist_camera_orientation_q, "wrist",
+                (width, height), [ui, vi, z], cam_info=self.cam_info)
+            results.append({"label": str(item.get("label") or description),
+                            "position": [round(float(c), 4) for c in np.asarray(world).flatten()[:3]],
+                            "pixel": [ui, vi]})
+
+        try:
+            import cv2
+            img = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
+            for i, r in enumerate(results):
+                cv2.circle(img, tuple(r["pixel"]), 4, (0, 0, 255), 1)
+                cv2.putText(img, str(i + 1), (r["pixel"][0] + 5, r["pixel"][1] - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
+            cv2.imwrite(stem + "_points.png", img)
+        except Exception:
+            pass
+        self.logger.info(PROGRESS + f"[wrist-locate] '{description}': {results} (image {image_path})" + ENDC)
+        print(f"locate_with_wrist_camera('{description}'): {len(results)} candidate(s), best first:")
+        for i, r in enumerate(results):
+            print(f"  {i + 1}. {r['label']}: {r['position']}")
+        return results
+
+    def insert_with_touch(self, axis, tool_length=0.025, max_s=20.0, grip_force=20.0, tool_offset=None):
         """Push the held part along world ``axis`` into a hole/port, guided by force feedback.
 
         Start with the part's tip a few mm in front of the opening, aligned by vision. The robot
         then probes, spirals on the face to find the opening (vision is ~1-2 mm off) and pushes it
-        in. ``tool_length``: fingertip centre -> part tip along ``axis`` (m). Returns a dict with
-        ``outcome`` ('seated' | 'jammed' | 'search_exhausted' | 'no_contact' | 'over_force' |
-        'timeout' | 'unsupported' | 'disabled'), ``advance_mm`` and ``events`` (proprioception only).
+        in. ``tool_length``: fingertip centre -> part tip along ``axis`` (m). ``tool_offset``: optional
+        measured world vector eef_pos -> part tip (overrides ``tool_length``). Returns a dict with
+        ``outcome`` ('seated' | 'jammed' | 'search_exhausted' | 'no_contact' | 'slipped' | 'over_force' |
+        'timeout' | 'unsupported' | 'disabled'), ``advance_mm``, ``tip_pos`` and ``events`` (proprioception only).
         """
         if not getattr(self.args, "touch", True):
             print("insert_with_touch: touch is disabled (--no-touch).")
             return {"outcome": "disabled"}
         a = np.asarray(axis, dtype=float)
         a = a / np.linalg.norm(a)
-        spec = {"axis": a.tolist(), "tool_offset": (a * float(tool_length)).tolist(),
+        off = (np.asarray(tool_offset, dtype=float) if tool_offset is not None else a * float(tool_length))
+        spec = {"axis": a.tolist(), "tool_offset": off.tolist(),
                 "max_s": float(max_s), "grip_force": float(grip_force)}
         self.logger.info(PROGRESS + f"[touch] insert_with_touch {spec}" + ENDC)
         self.main_connection.send([TOUCH_INSERT, spec])
@@ -477,7 +655,46 @@ class API:
             self.logger.info(PROGRESS + f"[touch]   {ev}" + ENDC)
         summary = {k: v for k, v in res.items() if k != "events"}
         print(f"insert_with_touch: {summary}")
+        self._record_touch("insert", res)
         return res
+
+    def get_robot_state(self):
+        """Measured proprioception: {'eef_pos': [x, y, z], 'gripper_open', 'gripper_width' (m),
+        'gripper_holding' (closed but stalled on an object)}. Values are None when not reported."""
+        state = {"eef_pos": None, "gripper_open": None, "gripper_width": None, "gripper_holding": None}
+        try:
+            self.main_connection.send([config.GET_ROBOT_STATE, {}])
+            resp = self.main_connection.recv() or {}
+        except Exception as e:
+            self.logger.info(WARNING + f"get_robot_state failed: {e}" + ENDC)
+            return state
+        for k in state:
+            if resp.get(k) is not None:
+                state[k] = resp[k]
+        if state["eef_pos"] is not None:
+            state["eef_pos"] = [float(v) for v in state["eef_pos"]]
+        print(f"get_robot_state: {state}")
+        return state
+
+    def gripper_holding(self):
+        """True if the closed fingers are stalled on an object (measured finger width), else False;
+        None if the gripper does not report it."""
+        return self.get_robot_state()["gripper_holding"]
+
+    def _record_touch(self, kind, res):
+        recs = getattr(self.task, "touch_results", None)
+        if recs is not None and isinstance(res, dict):
+            recs.append({"kind": kind, "step": self.trajectory_step, "result": res})
+
+    def _touch_review_evidence(self, start_idx):
+        from helpers.touch_evidence import format_touch_evidence
+        recs = [r for r in (getattr(self.task, "touch_results", None) or [])
+                if int(r.get("step", 0)) >= int(start_idx)]
+        text = format_touch_evidence(recs)
+        if text:
+            self.logger.info(PROGRESS + "Review: force feedback -> "
+                             + "; ".join(f"{r['kind']}:{r['result'].get('outcome')}" for r in recs) + ENDC)
+        return text
 
     def pull_with_touch(self, direction, max_s=20.0, grip_force=30.0, pull_config=None):
         """Pull the grasped handle with force feedback; the mechanism steers the hand (hinge arc or slide).
@@ -490,7 +707,9 @@ class API:
         if not getattr(self.args, "touch", True):
             print("pull_with_touch: touch is disabled (--no-touch).")
             return {"outcome": "disabled"}
-        spec = {"direction": [float(v) for v in direction], "max_s": float(max_s),
+        d = [float(v) for v in direction][:3]
+        d += [0.0] * (3 - len(d))  # a horizontal [dx, dy] is fine
+        spec = {"direction": d, "max_s": float(max_s),
                 "grip_force": float(grip_force), "config": dict(pull_config or {})}
         self.logger.info(PROGRESS + f"[touch] pull_with_touch {spec}" + ENDC)
         self.main_connection.send([config.TOUCH_PULL, spec])
@@ -499,12 +718,22 @@ class API:
         for ev in res.get("events", []):
             self.logger.info(PROGRESS + f"[touch]   {ev}" + ENDC)
         print(f"pull_with_touch: {({k: v for k, v in res.items() if k != 'events'})}")
+        self._record_touch("pull", res)
         return res
 
-    def execute_trajectory(self, trajectory):
+    def execute_trajectory(self, trajectory, max_speed=None, max_rot_speed=None):
+        """Run a Trajectory. ``max_speed`` (m/s) / ``max_rot_speed`` (rad/s): optional hand speed
+        limits - poses are interpolated so the arm moves smoothly instead of lunging between sparse
+        waypoints (e.g. 0.1 m/s and 0.5 rad/s when carrying or tilting a container of liquid)."""
         # Rebuild into a plain Trajectory before anything is sent: a custom class from the
         # model's own code block cannot be reconstructed in the simulator process.
         trajectory = common_utils.Trajectory.normalize(trajectory)
+        if max_speed or max_rot_speed:
+            n0 = len(trajectory.points)
+            trajectory = common_utils.Trajectory(
+                common_utils.limit_speed(trajectory.points, max_speed, max_rot_speed), trajectory.desc)
+            self.logger.info(PROGRESS + f"Speed limit max_speed={max_speed} max_rot_speed={max_rot_speed}: "
+                             f"{n0} -> {len(trajectory.points)} poses" + ENDC)
 
         # Downsample preview to max 3 points: start, middle, end
         _preview = trajectory
@@ -917,7 +1146,7 @@ class API:
                 "direct physical measurement, more reliable than small details in the low-resolution clips):\n"
                 "  - " + verdict)
 
-    def _pull_proprio_review_evidence(self, start_idx):
+    def _pull_proprio_review_evidence(self, start_idx, camera_moved=()):
         """Measured grasp-and-pull facts of this attempt -> ``(facts, prompt_text)`` or ``(None, None)``.
 
         Built from the arm's own per-trajectory log (commanded vs reached hand motion,
@@ -940,15 +1169,24 @@ class API:
             self.logger.info(PROGRESS + f"Review: no pull proprioception ({len(records)} trajectories, "
                              "no closed-gripper motion or no width sensor)" + ENDC)
             return None, None
-        text = format_pull_proprio(facts)
+        text = format_pull_proprio(facts, camera_moved=camera_moved)
         self.logger.info(PROGRESS + f"Review: pull proprioception -> outcome={facts['outcome']} "
                          f"max_carried={facts['max_carried_m']} pulls={len(facts['pulls'])}" + ENDC)
         return facts, text
 
-    def _apply_pull_proprio_verdict(self, facts, success, reason, improvement_steps):
-        """Measured-veto + retry direction bookkeeping -> (success, reason, improvement_steps)."""
+    def _apply_pull_proprio_verdict(self, facts, success, reason, improvement_steps, camera_moved=()):
+        """Measured-veto + retry direction bookkeeping -> (success, reason, improvement_steps).
+
+        ``camera_moved``: labels the head camera measured as having left their place; then the
+        part DID move (pushed, not carried), so neither the veto nor "wrong direction" applies.
+        """
         from helpers.pull_proprio import measured_no_motion_veto, retry_direction_hint
         if not facts:
+            return success, reason, improvement_steps
+        if camera_moved and facts["outcome"] == "part_did_not_move":
+            self.logger.info(PROGRESS + f"Review: pull proprioception says not carried, but camera saw "
+                             f"{camera_moved} leave their place -> no veto / direction change" + ENDC)
+            self.task.retry_direction_hint = None
             return success, reason, improvement_steps
         veto = measured_no_motion_veto(facts, self.task.command)
         if success and veto:
@@ -984,6 +1222,7 @@ class API:
             REVIEW_PROMPT, REVIEW_SCENE_ANALYSIS_SECTION,
             REVIEW_MEDIA_FRAMES_SECTION, REVIEW_MEDIA_VIDEO_SECTION,
             REMAINING_MEDIA_SENTENCE_FRAMES, REMAINING_MEDIA_SENTENCE_VIDEO,
+            REVIEW_OVERALL_COMMAND_SECTION,
         )
         start_idx = self.task.start_attempt_trajectory_step
         # Determine review model: "vlm" uses main model, "vlm:<model>" uses specified model
@@ -997,19 +1236,14 @@ class API:
         video_paths = [p for p in (self.task.review_clips or []) if p and os.path.exists(p)]
         use_video = bool(video_paths) and models.model_supports_video(review_model)
 
-        # Subsample every 5th frame from head RGB, starting at the attempt's first step
-        frame_paths = list_file_paths(
-            root=config.trajectory_folder,
-            base_name=config.trajectory_image_base,
-            start_idx=start_idx,
-        )
-        # Subsample every 7th frame from wrist RGB camera, aligned to the same start_idx
-        frame_paths += list_file_paths(
-            root=config.trajectory_folder,
-            base_name=config.trajectory_wrist_image_base,
-            start_idx=start_idx,
-            skip=7,
-        )
+        # Key frames (image-only review models): change-aware selection that always keeps the
+        # first and FINAL frame of each camera (helpers/review_frames.py).
+        from helpers.review_frames import select_key_frames, frames_listing
+        head_frames = select_key_frames(config.trajectory_folder, config.trajectory_image_base, start_idx,
+                                        getattr(config, "review_key_frames_head", 24))
+        wrist_frames = select_key_frames(config.trajectory_folder, config.trajectory_wrist_image_base, start_idx,
+                                         getattr(config, "review_key_frames_wrist", 14))
+        frame_paths = [p for _, p in head_frames] + [p for _, p in wrist_frames]
 
         # No trajectory frames/clips since the attempt started => the robot never moved.
         # Reviewing on conversation text alone lets the VLM hallucinate a success
@@ -1051,9 +1285,18 @@ class API:
             # GPT-5 in azure limits to 50 images in a request - test if it confuses the model (the cutoff of wrist images ....)
             max_frames = config.max_allowed_vlm_images - 1 - (1 if has_scene_image else 0)
             if len(frame_paths) > max_frames:
-                self.logger.info(WARNING + f"Cutoff wrist frames from the end. frame_paths in preview > config.max_allowed_vlm_images ({config.max_allowed_vlm_images})" + ENDC)
-                frame_paths = frame_paths[:max_frames]
-            media_section = REVIEW_MEDIA_FRAMES_SECTION.replace("[INSERT FRAME PATHS]", "\n".join(frame_paths))
+                # keep the final frames: drop evenly from the middle of the wrist list first
+                self.logger.info(WARNING + f"Key frames {len(frame_paths)} > cap {max_frames}: thinning wrist frames" + ENDC)
+                excess = len(frame_paths) - max_frames
+                if excess < len(wrist_frames) - 1:
+                    drop = set(np.linspace(1, len(wrist_frames) - 2, excess).round().astype(int).tolist())
+                    wrist_frames = [f for j, f in enumerate(wrist_frames) if j not in drop]
+                else:
+                    wrist_frames = wrist_frames[-1:]
+                    head_frames = head_frames[:max(1, max_frames - 2)] + head_frames[-1:]
+                frame_paths = [p for _, p in head_frames] + [p for _, p in wrist_frames]
+            media_section = REVIEW_MEDIA_FRAMES_SECTION.replace("[INSERT FRAME PATHS]",
+                                                                frames_listing(head_frames, wrist_frames))
             remaining_media_sentence = REMAINING_MEDIA_SENTENCE_FRAMES
             if video_paths:
                 self.logger.info(WARNING + f"Review model {review_model} has no video input - falling back to {len(frame_paths)} key frames." + ENDC)
@@ -1075,12 +1318,24 @@ class API:
         gripper_text = self._gripper_review_evidence()
         if gripper_text:
             media_section = media_section + "\n\n" + gripper_text + "\n"
-        pull_facts, pull_text = self._pull_proprio_review_evidence(start_idx)
+        disp_facts, disp_text = self._displacement_review_evidence()
+        camera_moved = [f["label"] for f in disp_facts
+                        if f.get("verdict") == "left_place" and not f.get("same_region_as")]
+        pull_facts, pull_text = self._pull_proprio_review_evidence(start_idx, camera_moved)
         if pull_text:
             media_section = media_section + "\n\n" + pull_text + "\n"
+        touch_text = self._touch_review_evidence(start_idx)
+        if touch_text:
+            media_section = media_section + "\n\n" + touch_text + "\n"
+        if disp_text:
+            media_section = media_section + "\n\n" + disp_text + "\n"
 
+        overall = str(getattr(self.task, "overall_command", None) or "").strip()
+        overall_section = (REVIEW_OVERALL_COMMAND_SECTION.replace("[INSERT OVERALL COMMAND]", overall)
+                           if overall and overall != str(self.task.command).strip() else "")
         # Build prompt with placeholders
         prompt = REVIEW_PROMPT.replace("[INSERT TASK]", str(self.task.command)) \
+                              .replace("[INSERT OVERALL COMMAND SECTION]", overall_section) \
                               .replace("[INSERT 3D COORDINATES PROMPT SECTION]", self.coords_section) \
                               .replace("[INSERT SCENE ANALYSIS SECTION]", scene_section) \
                               .replace("[INSERT MEDIA SECTION]", media_section)
@@ -1094,7 +1349,9 @@ class API:
         # provider image caps (e.g. Bedrock max 20) and focuses the reviewer.
         messages = self.task.conversation_messages
         models.strip_images_from_messages(messages)
-        media_desc = f"{len(video_paths)} video(s)" if use_video else f"{len(frame_paths)} frames (stride=5)"
+        media_desc = f"{len(video_paths)} video(s)" if use_video else (
+            f"{len(frame_paths)} key frames (head steps {[i for i, _ in head_frames]}, "
+            f"wrist steps {[i for i, _ in wrist_frames]})")
         self.logger.info(PROGRESS + f"==================== VLM review using {media_desc}, start_idx={start_idx}, scene_image={'yes' if has_scene_image else 'no'}, model={review_model}." + ENDC)
         messages = models.call_llm_cached(self.main_connection, self.client, review_model, prompt, messages, "user", file=sys.stderr, image_paths=review_image_paths, video_paths=video_paths, options={"log_msgs": True, "max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort, "cache": self.llm_cache, "conversation_key": f"{self.task.conversation_key}-review"})
         # Drop the fresh review media now that the review is done, so it doesn't persist in the shared conversation
@@ -1131,7 +1388,16 @@ class API:
                     improvement_steps = (str(improvement_steps) + "\n" + rec).strip()
                 self.logger.info(PROGRESS + f"Review: added to improvement steps -> {rec}" + ENDC)
         success, reason, improvement_steps = self._apply_pull_proprio_verdict(
-            pull_facts, success, reason, improvement_steps)
+            pull_facts, success, reason, improvement_steps, camera_moved)
+        if not success:
+            from helpers.object_displacement import retry_hint
+            dhint = retry_hint(disp_facts, self.task.command)
+            if dhint:
+                self.logger.info(PROGRESS + f"Review: displacement retry hint -> {dhint}" + ENDC)
+                if isinstance(improvement_steps, list):
+                    improvement_steps = [dhint] + improvement_steps
+                else:
+                    improvement_steps = (dhint + "\n" + str(improvement_steps or "")).strip()
         self.task.review_reason = reason
         self.task.review_improvement_steps = improvement_steps
         self.logger.info((OK if success else FAIL) + f"Review: success={success} | task=\"{self.task.title()}\". See details in above json" + ENDC)
@@ -1168,6 +1434,24 @@ class API:
 
         # On the final attempt, skip review and accept the result
         # (in replay mode, ignore max_attempts so all blocks execute)
+        if (not is_replay and self.task.attempt_number >= max_attempts
+                and getattr(self.task, "overall_command", None)
+                and str(self.args.review_provider).startswith("vlm")):
+            # Under the planner the final attempt is still reviewed: otherwise the planner gets
+            # success=False with the PREVIOUS attempt's reason, even when this attempt did it.
+            self.logger.info(PROGRESS + "Waiting to execute all generated trajectories..." + ENDC)
+            self.main_connection.send([TASK_COMPLETED])
+            [env_connection_message] = self.main_connection.recv()
+            self.logger.info(env_connection_message)
+            self.logger.info(PROGRESS + f"VLM review of final attempt {self.task.attempt_number}/{max_attempts} | "
+                             f"task=\"{self.task.title()}\"..." + ENDC)
+            try:
+                self.run_vlm_review()
+            except Exception as e:
+                self.logger.info(FAIL + f"VLM review failed: {e}" + ENDC)
+            self.task.failed_task = False
+            self.task.completed_task = True
+            return
         if not is_replay and self.task.attempt_number >= max_attempts:
             self.task.completed_task = True
             self.task.accepted_without_review = True

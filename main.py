@@ -57,8 +57,8 @@ def build_arg_parser():
     lm.add_argument("--max-tokens", type=int, default=60000, help="max completion tokens for LLM responses")
     lm.add_argument("--reasoning-effort", type=str, default=None, choices=["xhigh", "high", "medium", "low", "minimal", "none"], help="reasoning effort for reasoning models (OpenRouter, Gemini)")
     lm.add_argument("--llm-cache", dest="llm_cache_enabled", action=argparse.BooleanOptionalAction, default=True, help="cache LLM responses on disk (default: True, use --no-llm-cache to disable)")
-    lm.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="gemini-3.8-flash", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
-    lm.add_argument("--review-provider", default="vlm", help="review provider for success verification: 'vlm' (uses main model), 'vlm:<model>' (e.g. vlm:or-openai/gpt-5.5), or 'xmem'")
+    lm.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="copilot-gpt-6.1-terra", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
+    lm.add_argument("--review-provider", default="vlm:copilot-gpt-6.1-terra", help="review provider for success verification: 'vlm' (uses main model), 'vlm:<model>' (e.g. vlm:or-openai/gpt-5.5), or 'xmem'")
 
     simg = parser.add_argument_group("simulator, robot & task")
     simg.add_argument("-r", "--robot", choices=["sawyer", "franka"], default="sawyer", help="select robot")

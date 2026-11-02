@@ -9,7 +9,8 @@ after an interruption.
 - Keep `prompts/skills/pour-from-held-container/SKILL.md` short and simpler.
 
 ## Decisions
-- **Genesis rejected for this task** (measured): Genesis 1.3.3 is in the `vlm_genesis` conda
+- **Genesis rejected for this task** (measured; superseded below by "Genesis native water", which
+  accepts slower-than-real-time): Genesis 1.3.3 is in the `vlm_genesis` conda
   env with CPU-only torch (RTX A1000, 4 GB). A minimal SPH scene (512 particles, no
   kitchen/robot) ran 26 ms/step = 6.4x slower than real time. The kitchen is PyBullet-only
   (`franka_kitchen/simenv.py` calls `p.*` directly). Not worth porting.
@@ -76,3 +77,98 @@ Conclusions so far:
 ## Related parallel work (background agents)
 - Tracker uncommitted changes (CoTracker backfill): `docs/status/tracker_backfill.md`.
 - Slide-cabinet reviewer false positive: `docs/status/slide_cabinet_review.md`.
+
+## Genesis native water (`--sim genesis --task kettle_mug`)
+Separate Genesis task with real SPH liquid (the PyBullet version above is unchanged).
+
+Run:
+```
+python main.py -lm copilot-claude-opus-5.5 --sim genesis --task kettle_mug -r franka \
+  --planner-perception-vlm or-google/gemini-3.8-flash --review-provider vlm:or-google/gemini-3.8-flash \
+  --attempts 2 --max-planner-iter 4 --reasoning-effort medium -c "Pick up the kettle and pour water into the mug"
+# scripted (no LLM) grasp -> carry -> pour_pose tilt -> hold, prints water counts per phase:
+C:\Users\dekelco\.conda\envs\vlm_genesis\python.exe research\pour\genesis_kettle_mug_e2e.py --stage all --out outputs\pour\genesis_e2e --hold 240
+# tests (count_water anywhere; scene test needs genesis, ~90 s):
+python -m pytest tests\test_kettle_mug_genesis.py
+conda run -n vlm_genesis python -m unittest tests.test_kettle_mug_genesis
+```
+
+Decisions:
+- **Code**:
+  - `sim_envs/genesis/kettle_mug.py` (scene, URDF generation, water counting, `get_state`).
+  - Additive changes: `sim_adapter/genesis_adapter.py` (`sph` / `pbd` scene options pass-through) and `sim_envs/registry.py` (`GENESIS_TASKS += kettle_mug`, scene options, simenv).
+- **SPH, not PBD**:
+  - Material: DFSPH, 8 mm particles, `mu=0.002`, 4 substeps (1 ms).
+  - PBD liquid's rigid coupling blew the kettle away.
+  - SPH `mu` 0.005 is unstable at a 1 ms substep.
+- **Water**: 624 particles, filling the kettle bottom 3 cm (~0.3 kg).
+- **Kettle (hollow, physically honest)**:
+  - Box-compound URDF: bottom, 16 wall boxes, lid, an open spout duct (38°, 6.5 cm) through a hole in the wall, and a bar handle on two posts.
+  - Smooth trimesh visual meshes.
+  - Nothing is spawned or teleported; water leaves only through the spout.
+- **Mug**: compound (disc + 20 wall boxes), r 0.05, h 0.09.
+- **Grip** (no weld; contact + friction only). Genesis contacts are points, so a squeezed handle spins freely about the finger axis (= the pour axis). Fixes:
+  - `RigidOptions.enable_torsional_friction` with `kettle.set_friction_torsional(0.012)` (pad patch).
+  - `noslip_iterations=5`.
+  - Finger kp 6000, which saturates the profile's 70 N cap.
+  - Lighter kettle (0.3 kg) with a lower handle (bar 0.20 above the bottom), to cut the tilt torque.
+- **Layout**:
+  - Kettle at (0, 0.25), yawed so the spout points +y. Mug at (0, 0.52) on the spout side.
+  - Handle bar along y, so the natural top-down grasp is **rotation 0**. Reason: the subtask prompt always says "rotation value at 0" (hard-coded in `prompts/main_prompt.py`), so with a held object the LLM always assumes rot 0.
+  - The first layout (spout +x, grasp rot π/2) made the pour subtask tilt about the wrong axis and drop the kettle (run 3).
+  - Mug at y 0.72 is too far: the tilted pose is out of reach.
+- **Head camera**: spherical, from -x (yaw 270, pitch -20, distance 1.0, target z 0.35), 512² captures.
+  - Framed up to z ~0.85 so a kettle lifted by the planner's default 50 cm pick-up stays visible.
+  - The default fixed head camera lost it (run 1).
+- **Rendering**: `vis_mode="particle"`, translucent blue. Recon surface (`LMTG_WATER_VIS=recon`, pysplashsurf) looks smoother but was ~25x slower (358 s vs 14 s per move), so it is off.
+- **Skill**: `pour-from-held-container` hold changed from 30 → 240 points (~1 s). SPH needs time to drain; 30 points (0.125 s) poured only ~45 %.
+- **No GPU**: `vlm_genesis` torch is CPU-only, so `gs.gpu` is not available; the CPU backend is used.
+
+Step time (CPU, robot + 624 particles + 2 cameras):
+- ~0.10-0.11 s per control step (1/240 s), i.e. ~25x slower than real time.
+- ~0.17 s/step during the active pour, with recording.
+- Env start-up: 60-100 s.
+- One full LLM run: ~9 min.
+
+Scripted e2e (`genesis_kettle_mug_e2e.py`, tilt 0.8, hand 3 cm past the mug, mug top + 0.30):
+
+| run | setup | result (in mug / 624) |
+|---|---|---|
+| 1-6 | first kettle (0.5 kg, handle 0.25 m) | kettle slipped or spun in the grip; no pour |
+| 7-8 | lighter kettle, lower handle; hold 30 | 44-48 % |
+| 9, 11 | hold 240, spout +x layout | **576 (92 %)**, 0 outside |
+| 12 | same, pour height mug + 0.50 | 462 (74 %) |
+| 13 | spout +y, mug y 0.72 | out of reach: tilt only 20°, 0 % |
+| 14 | mug y 0.58 | 420 (67 %) |
+| 15 | mug y 0.52 (final) | 410 (66 %), 153 outside (early gush during the fast tilt overshoots) |
+
+LLM runs (`outputs/rollouts_20261102/kettle_mug_gn/`):
+
+| run | LM | result |
+|---|---|---|
+| 1 | gpt-6.1-terra | Grasp + lift OK, but the lifted kettle left the fixed head camera's view. The LLM looped on "cannot verify". Fixed with the camera above. |
+| 2 | gpt-6.1-terra | Over-cautious: never descended (handle-height detection 0.177 judged unreliable). Stopped. |
+| 3 | claude-opus-5.5 | Old layout: grasp at rot π/2, then the pour subtask (told "rotation 0") tilted about the wrong axis. Attempt 2 dropped the kettle. Fixed by the layout change. |
+| 4 | claude-opus-5.5 | **Success**: 2 subtasks (pick up: attempt 2 passed; pour: attempt 1 passed), `plan_completed`. **352/624 = 56 % in the mug**, 15 outside, 257 still in the kettle (pour height mug + 0.28). Video: `run4_head_full.mp4`. |
+
+Open issues:
+- The subtask prompt hard-codes "rotation value at 0". The real grasp yaw (from proprioception) should be reported; the layout above works around it.
+- The early gush during the 30-point tilt overshoots the mug. A slower tilt would spill less.
+- The water inside the mug is barely visible from the side camera.
+- gpt-6.1-terra stalls on perception uncertainty in this scene.
+
+## 2026-11-02: gentle pour
+
+The fast tilt made an early gush that overshot the mug. Fix:
+- `common_utils.limit_speed` + `execute_trajectory(..., max_speed, max_rot_speed)`: re-samples a trajectory so no segment exceeds the linear / angular speed. Exact end poses are kept; mixed 4/6-value poses interpolate position only.
+- Skill `pour-from-held-container`: gentle-motion rule (`max_speed=0.1` m/s, `max_rot_speed=0.5` rad/s on the approach, tilt and tilt-back).
+
+| run | setup | in mug / 624 | outside |
+|---|---|---|---|
+| baseline (run 15) | fast tilt | 410 | 153 |
+| gentle2 (scripted) | 0.1 m/s, 0.5 rad/s | **594** | 30 |
+| kettle_tt1 (LLM, claude-opus-5.5, all perception/review = gpt-6.1-terra) | skill's gentle rule | **598** | **10** (16 left in kettle) |
+
+- kettle_tt1: picked up, then poured on attempt 1. The reviewer (terra) accepted it: "spout tilted over the opening and water entered the mug". `plan_completed`.
+- Rollouts: `outputs/2026-11-02/kettle_pour_gentle_scripted_SUCCESS`, `outputs/2026-11-02/kettle_pour_LLM_ALLterra_gentle`.
+- Harness: `research\pour\genesis_kettle_mug_e2e.py --stage all --hold 240 --max-speed 0.1 --max-rot-speed 0.5`.

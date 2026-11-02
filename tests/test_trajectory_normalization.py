@@ -206,6 +206,34 @@ class ConstructorEnforcesTheInvariant(unittest.TestCase):
         self.assertIs(Trajectory.normalize(traj), traj)
 
 
+class LimitSpeedTest(unittest.TestCase):
+    DT = 0.01
+
+    def test_position_and_rotation_steps_are_capped(self):
+        pts = common_utils.limit_speed([[0, 0, 0, 0], [0.1, 0, 0, 0.0], [0.1, 0, 0, 1.0]],
+                                       max_speed=1.0, max_rot_speed=10.0, waypoint_dt=self.DT)
+        steps = np.diff(np.array(pts), axis=0)
+        self.assertLessEqual(np.linalg.norm(steps[:, :3], axis=1).max(), 0.01 + 1e-9)
+        self.assertLessEqual(np.abs(steps[:, 3]).max(), 0.1 + 1e-9)
+        self.assertEqual(pts[-1], [0.1, 0, 0, 1.0])
+
+    def test_angle_wraps_the_short_way(self):
+        pts = common_utils.limit_speed([[0, 0, 0, 3.1], [0, 0, 0, -3.1]], max_rot_speed=10.0,
+                                       waypoint_dt=self.DT)
+        self.assertLessEqual(len(pts), 3)
+
+    def test_no_limit_returns_input(self):
+        pts = [[0, 0, 0, 0], [1, 0, 0, 0]]
+        self.assertIs(common_utils.limit_speed(pts), pts)
+
+    def test_mixed_pose_formats_interpolate_position(self):
+        pts = common_utils.limit_speed([[0, 0, 0, 3.14, 0.5, 0], [0.05, 0, 0, 0.0]],
+                                       max_speed=1.0, waypoint_dt=self.DT)
+        self.assertEqual(len(pts), 6)
+        self.assertEqual(len(pts[1]), 4)
+        self.assertEqual(pts[-1], [0.05, 0, 0, 0.0])
+
+
 if __name__ == "__main__":
     unittest.main()
 

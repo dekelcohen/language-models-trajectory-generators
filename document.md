@@ -1203,9 +1203,17 @@ URDFs + meshes + textures); implementation in `sim_envs/pybullet/franka_kitchen/
   ≥1 cm below the body centre, one sphere every 8 steps spawns at the tip with the kettle's
   velocity + 0.15 m/s along the spout (particle-kettle collisions off). `get_state()["water"]`
   = `{total, in_kettle, in_mug, outside_mug}`; success (`goal_pour.min_fraction`) = ≥50 % of the
-  particles inside the mug's inner cylinder. Genesis SPH was measured and rejected (CPU-only
-  torch here: 512 particles at 6.4x slower than real time, and the kitchen is PyBullet-only).
-  Measured pour: hand ~3 cm past the mug centre along the spout direction, z ≈ rim + 0.33,
+  particles inside the mug's inner cylinder.
+  **Genesis native-water variant** (`--sim genesis --task kettle_mug`, `sim_envs/genesis/kettle_mug.py`):
+  hollow box-compound kettle (top handle, open spout duct) + mug on a board, 624 real SPH
+  particles (DFSPH, 8 mm, mu 0.002, 4 substeps) that flow out of the spout when tilted. Grip
+  needs `enable_torsional_friction` + `noslip_iterations` + finger kp 6000 (point contacts
+  otherwise let the kettle spin about the finger axis). Same `get_state()["water"]` / ≥50 %
+  success. Kettle spout faces +y with the mug on that side, so the top-down grasp is rotation 0
+  (subtask prompts always report rotation 0). Head camera: spherical from -x, framed to z ~0.85.
+  CPU only: ~0.1-0.17 s/step (~25-40x slower than real time). Scripted pour 66-92 % in the mug;
+  LLM run (opus-5.5) 56 %, `plan_completed`. Details: status log, "Genesis native water".
+  Measured pour (PyBullet): hand ~3 cm past the mug centre along the spout direction, z ≈ rim + 0.33,
   tilt 0.8 → 38/40 in the mug; 6 cm past → 9/40. The kettle hangs ~0.15-0.18 m below the hand,
   so a lower carry knocks the mug over. Status log: `docs/status/kettle_mug_pour.md`.
 - Success uses MuJoCo's `OBS_ELEMENT_GOALS` + `BONUS_THRESH = 0.3` (kettle: a `0.12 m`
@@ -1353,6 +1361,7 @@ constants, not `config.*`.
 | `tests/test_2d_pixel_coords_to_3d_world_coords.py` | Parametrized over `door` + all 7 kitchen tasks. Runs the **production** path (`env.Environment` → `Robot.get_camera_image` → `utils.project_3d_world_pos_to_2d_pixel` → `utils.get_world_point_world_frame`) against ground-truth link positions. Two-tier assertion: reprojection round-trip ≤ 1 px always; distance-to-target ≤ 0.12 m **unless** the depth sample is ≥ 0.05 m nearer the camera than the target (occlusion), in which case the task must be listed in `KNOWN_OCCLUDED_TASKS`. Kitchen: 7/7 at 2–5 cm, 0 px. |
 | `tests/test_franka_kitchen_ipc.py` | Walks every IPC message for kitchen semantics: handshake (coords + task state + EEF above the counter), `CAPTURE_IMAGES` (head cam on `-x`), `RESET_EEF` (re-home above the counter — this is the assertion that caught the bug above), gripper commands, `EXECUTE_TRAJECTORY`, `ADD_BOUNDING_CUBES` / `ADD_TRAJECTORY_POINTS` / `GET_ROBOT_STATE`. Passes `robot = "sawyer"` deliberately, to prove the sim-env forces franka. `TestKettleHeldAcrossSubtaskBoundary` grasps + lifts the kettle (no LLM), then runs the subtask-boundary path (`log_world_state` + `_build_main_prompt`) and asserts the next prompt says the gripper is CLOSED and the kettle stays in hand through a 20 s idle (the review window, plain contact physics), that a `pour_pose` tilt is recorded as `max_tilt_since_close`, then that `open_gripper` drops it. |
 | `tests/test_kettle_mug_water.py` | `kettle_mug` particle water (headless, no robot): an upright kettle releases nothing; a kettle fixed tilted with its spout over the mug releases all 40 particles, ≥80 % land inside, and `check_success()` passes. |
+| `tests/test_kettle_mug_genesis.py` | Genesis `kettle_mug`: `count_water` mug/kettle/outside classification (numpy, runs anywhere) + a scene test (skipped unless `genesis` imports; run in vlm_genesis with `python -m unittest tests.test_kettle_mug_genesis`, ~90 s) that builds the SPH scene and asserts all water rests in the kettle and no success. |
 | `tests/test_franka_kitchen_head_camera.py` | 21 tests (3 × 7 tasks). Scores head-camera framing with `tests/tools/tune_kitchen_head_camera.py`: target must be in frame, ≤ 15 % occluded by the arm, ≤ 0.35 off frame centre and ≥ 60 px. Guards against the arm creeping back in front of a target when camera params are touched. |
 
 `KNOWN_OCCLUDED_TASKS = ["door"]`: in the door scene's head view a free-standing pole sits

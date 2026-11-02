@@ -7,6 +7,9 @@ PRINT_OUTPUT_PROMPT = \
 # Sent when the assistant response contained no executable code block.
 NO_TOOL_CALL_PROMPT = \
 """No tool call detected. You must emit a ```python block calling actions or task_completed().
+If the attempt cannot continue (part dropped, blocked, or nothing left to try), call task_completed() now: \
+it ends the attempt and an independent reviewer judges the result - it is NOT a claim of success, and a \
+failed review starts a fresh attempt.
 """
 
 # INPUT: [INSERT EXECUTED BLOCKS], [INSERT TOTAL BLOCKS], [INSERT FIRST SKIPPED BLOCK]

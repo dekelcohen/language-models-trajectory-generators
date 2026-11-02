@@ -726,6 +726,7 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 # Build cam_info with head intrinsics and view matrix                
                 cam_info = {
                     "head": {"viewMatrix": view_head if "view_head" in locals() else None, "projectionMatrix": proj_head if "proj_head" in locals() else None, "znear": float(config.near_plane), "zfar": float(config.far_plane)},
+                    "wrist": {"viewMatrix": view_wrist, "projectionMatrix": proj_wrist, "znear": float(config.near_plane), "zfar": float(config.far_plane)},
                     "depth_encoding": sim.depth_encoding, "new_3d_proj" : True
                 }
                 env_connection.send([head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message, cam_info])

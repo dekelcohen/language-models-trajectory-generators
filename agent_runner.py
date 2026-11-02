@@ -71,7 +71,8 @@ EEF_POS_SNIPPET = 'Current end-effector pos (x,y,z): {eef_pos}'
 # ending on an assistant message, which some providers reject).
 CONTINUE_TASK_PROMPT = (
     "The previous code block executed successfully with no output. "
-    "Continue with the next step of the task, or call task_completed() if the task is now complete."
+    "Continue with the next step of the task, or call task_completed() if the task is now complete "
+    "or the attempt cannot continue (the reviewer judges the result; a failed review starts a new attempt)."
 )
 
 
@@ -168,6 +169,8 @@ def log_world_state(main_connection, logger, tag):
                     pass
         if isinstance(sim_state.get("water"), dict):
             poses["water"] = sim_state["water"]
+        if sim_state.get("door_angle_deg") is not None:
+            poses["door_angle_deg"] = sim_state["door_angle_deg"]
     eef = [round(v, 3) for v in robot_state["eef_pos"]] if robot_state["eef_pos"] else None
     logger.info(PROGRESS + f"[world-state] {tag}: eef_pos={eef} gripper_open={robot_state['gripper_open']} "
                 f"gripper_width={robot_state['gripper_width']} holding={robot_state['gripper_holding']} "
@@ -936,12 +939,31 @@ def run_task_agent_loop(ctx, task, prompt, scene_analysis, attempt_summaries):
     Returns: final messages list.
     """
     messages = task.conversation_messages
+    idle_turns, attempt_turns, last_step = 0, 0, ctx.api.trajectory_step
+    max_idle = getattr(config, "max_idle_agent_turns", 10)
+    max_turns = getattr(config, "max_agent_turns_per_attempt", 25)
     while not task.completed_task:
         feedback = execute_python_blocks(ctx, task, messages[-1]["content"])
         if task.completed_task:
             break
+        if not task.failed_task:
+            # An LLM that refuses to end the attempt (keeps answering without moving the robot, or
+            # keeps retrying the same motion forever) would never be reviewed: end the attempt.
+            step = ctx.api.trajectory_step
+            idle_turns = idle_turns + 1 if step == last_step else 0
+            attempt_turns += 1
+            last_step = step
+            reason = (f"{idle_turns} agent turns without robot motion" if idle_turns >= max_idle else
+                      f"{attempt_turns} agent turns in this attempt" if attempt_turns >= max_turns else None)
+            if reason:
+                ctx.logger.info(WARNING + f"{reason} and no task_completed(): ending the attempt for review." + ENDC)
+                idle_turns = attempt_turns = 0
+                ctx.api.task_completed()
+                if task.completed_task:
+                    break
         if task.failed_task:
             messages = handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, feedback)
+            idle_turns, attempt_turns, last_step = 0, 0, ctx.api.trajectory_step
         else:
             messages = continue_task_turn(ctx, task, feedback)
     return task.conversation_messages
@@ -983,6 +1005,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     task = TaskState(command=prompt, max_attempts=max_attempts, start_trajectory_step=api.trajectory_step)
     task.scene_analysis = scene_analysis
     task.scene_analysis_image_path = ctx.scene_analysis_image_path
+    task.overall_command = getattr(ctx, "overall_command", None)
     task.skills = make_skill_session(ctx, "subtask")
     api.task = task
     messages = []
@@ -1090,6 +1113,7 @@ def run_plan(ctx, command, max_iterations=None):
 
     if max_iterations is None:
         max_iterations = args.max_planner_iter
+    ctx.overall_command = command    # shown to subtask reviewers (goal context)
 
     if args.no_plan:
         logger.info(PROGRESS + "Planner disabled (--no-plan): running command as a single task." + ENDC)

@@ -106,3 +106,8 @@ Owner: slide-cabinet agent. Branch `tracking`. Updated on every new conclusion/d
 
 ## Next steps
 - commit, push, cleanup (document.md section added: §7 'Measured pull proprioception' + changelog).
+
+## 2026-11-02: regression check, all gpt-6.1-terra (perception + reviewer)
+- cab_tt1: `-lm copilot-claude-opus-5.5`, terra perception/review, `--attempts 3`. **Success**: `target_link_pos` y 0.106 -> -0.221 (slid ~33 cm), `plan_completed`.
+- Planner subtask 1 failed all 3 attempts from hinge confusion: the panel was treated as a swing door. The planner re-planned subtask 2 as a slide, which succeeded. The same confusion was seen with gemini, so it is not a terra regression.
+- Rollout: `outputs/2026-11-02/slide_cabinet_ALLterra_regression`.

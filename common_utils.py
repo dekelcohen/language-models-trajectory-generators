@@ -78,6 +78,44 @@ class Trajectory:
         return Trajectory(trajectory)
 
 
+#: Physics steps the simulator spends on each trajectory waypoint (robot.move: one controller
+#: step + one closing step), i.e. a waypoint lasts WAYPOINT_STEPS * config.control_dt seconds.
+WAYPOINT_STEPS = 2
+
+
+def limit_speed(points, max_speed=None, max_rot_speed=None, waypoint_dt=None):
+    """Insert intermediate poses so the commanded hand speed stays under a limit.
+
+    Every waypoint lasts the same short time (``waypoint_dt``), so sparse points make the arm
+    lunge however few there are. ``max_speed`` (m/s) caps the position step between consecutive
+    poses, ``max_rot_speed`` (rad/s) the largest angle change (rotation / Euler components,
+    unwrapped). Poses are linearly interpolated; returns a new list (the input if no limit).
+    """
+    if not points or (not max_speed and not max_rot_speed):
+        return points
+    dt = float(waypoint_dt or WAYPOINT_STEPS * config.control_dt)
+    out = [list(points[0])]
+    for p in points[1:]:
+        prev = np.array(out[-1], dtype=float)
+        cur = np.array(p, dtype=float)
+        if len(cur) == len(prev) and len(cur) > 3:
+            ang = prev[3:] + (np.arctan2(np.sin(cur[3:] - prev[3:]), np.cos(cur[3:] - prev[3:])))
+            cur = np.concatenate([cur[:3], ang])
+        n = 1
+        if max_speed:
+            n = max(n, int(math.ceil(np.linalg.norm(cur[:3] - prev[:3]) / (float(max_speed) * dt))))
+        if max_rot_speed and len(cur) == len(prev) and len(cur) > 3:
+            n = max(n, int(math.ceil(float(np.max(np.abs(cur[3:] - prev[3:]))) / (float(max_rot_speed) * dt))))
+        for k in range(1, n):
+            if len(cur) == len(prev):
+                out.append([float(v) for v in prev + (cur - prev) * (k / n)])
+            else:                                # pose format changes (4 <-> 6): move position only
+                out.append([float(v) for v in prev[:3] + (cur[:3] - prev[:3]) * (k / n)]
+                           + [float(v) for v in cur[3:]])
+        out.append([float(v) for v in p])
+    return out
+
+
 
 # --- End-effector pose formats ------------------------------------------------
 #

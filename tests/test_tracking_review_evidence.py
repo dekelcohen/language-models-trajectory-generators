@@ -320,6 +320,19 @@ class TestPullProprio(unittest.TestCase):
         self.assertEqual(f["pulls"][0]["result"], "blocked", f)
         self.assertEqual(f["outcome"], "part_did_not_move", f)
 
+    def test_later_push_or_camera_motion_drops_not_achieved_claim(self):
+        # door_pb2: blocked press, grip lost, later arc segments shoved the door 24 cm open
+        from helpers.pull_proprio import summarize_pull_proprio, format_pull_proprio
+        h = np.array(self.HANDLE)
+        recs = self.attempt([-0.15, 0, 0], slipped=False)
+        recs[-1]["ee_end"] = list(h + [-0.01, 0, 0])
+        f = summarize_pull_proprio(recs)
+        self.assertIn("NOT achieved", format_pull_proprio(f))
+        self.assertNotIn("NOT achieved", format_pull_proprio(f, camera_moved=["door"]))
+        self.assertIn("'door' LEFT", format_pull_proprio(f, camera_moved=["door"]))
+        f["possible_push_after_pull"] = ["pull door along hinge arc, segment 8/9"]
+        self.assertNotIn("NOT achieved", format_pull_proprio(f))
+
     def test_sliding_pull_that_carries_the_handle_is_not_vetoed(self):
         from helpers.pull_proprio import summarize_pull_proprio, measured_no_motion_veto
         f = summarize_pull_proprio(self.attempt([0, -0.20, 0], slipped=False))

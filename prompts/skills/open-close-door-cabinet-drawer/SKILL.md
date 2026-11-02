@@ -73,7 +73,7 @@ Start from this procedure, verbatim:
 - **Hold that z for the whole pull arc** - rising peels the jaws off.
 - **Pull along the hinge arc and turn the wrist with the door**: at swept angle `a`, top-down `rotation += a`, side `approach_yaw += a` (same sign as the arc). A fixed wrist twists the lever out of the jaws after ~20 deg. The hinge is the far door edge the lever's free tip points toward; if the door/hinge detections are implausible (far off, within ~0.3 m of the handle, or not where the tip points), put it ~0.4-0.8 m from the lever root along the tip direction - too far is safer than too near. ~45 deg is enough.
 - **Lever parallel to the door face, ~0.1 m out:** stay top-down - step 4's short-axis offset drops one jaw into the lever-door gap. This is NOT a 2b trigger; go to the side only on 2b trigger 3 (a top-down attempt on this lever already failed geometrically).
-  If the `touch-guided-pull` skill is listed, follow it instead (it grasps from the side) and open with `open_with_touch()` rather than scripting the arc.
+  If the `touch-guided-pull` skill is listed: grasp + press as above, then open with `open_with_touch()` instead of scripting the arc.
 
 - **Pull vs push** - pull is the common case. Push only when the door face (not its edge) is
   toward the robot and nothing affords pulling. Decide from: which side the hinge/frame is on,

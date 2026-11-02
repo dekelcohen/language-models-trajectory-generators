@@ -178,6 +178,10 @@ review_tracking_evidence = True
 # "success" when the held handle provably never moved with the hand, and recommend an
 # untried opening direction for the retry. Needs no tracking.
 review_pull_proprio = True
+# Reviewer evidence from the fixed head camera (helpers/object_displacement.py): each label's
+# first detect_object mask + RGB-D vs a fresh capture at review time -> "left its original
+# place" / "still in place". CPU template match + depth; no tracking session needed.
+review_displacement_evidence = True
 # CoTracker3 provider (--tracker-provider cotracker). The online model is fetched once via
 # torch.hub into TORCH_HOME and reused offline afterwards; None honours the environment
 # and falls back to torch's user cache ~/.cache/torch (kept outside the repo).
@@ -554,6 +558,12 @@ trajectory_log_every = 5
 trajectory_folder = images_folder + "/trajectory"
 video_folder = images_folder + "/videos"
 trajectory_video_fps = 15
+# Trajectory frames are sampled on SIM time (robot.step_env_and_record): at most this rate while the
+# hand moves (== video fps -> real-time playback), and at this rate while it is still (so flowing
+# water / falling objects stay visible). Not one frame per waypoint (that time-warped the video).
+trajectory_record_fps = 15
+trajectory_record_idle_fps = 5
+# NB: a trajectory waypoint is 2 physics steps (robot.move), so N points take N/120 s of sim time.
 trajectory_image_base = "rgb_image"
 trajectory_wrist_image_base = "wrist_image"
 rgb_image_trajectory_path = trajectory_folder + "/rgb_image_{step}.png"
@@ -623,3 +633,11 @@ ENABLE_EEF_POS_IMAGE = False # Currently didn't help match
 
 # GPT-5 in azure limits to 50 images in a request 
 max_allowed_vlm_images = 50
+# Key-frame budgets per camera for image-only reviewers (helpers/review_frames.py)
+review_key_frames_head = 24
+review_key_frames_wrist = 14
+# Agent turns in a row without robot motion (and no task_completed) before the attempt is ended
+max_idle_agent_turns = 10
+# End an attempt for review after this many agent turns even if the robot keeps moving
+# (an LLM retrying the same failing motion forever, e.g. 20+ insertions in one attempt).
+max_agent_turns_per_attempt = 25

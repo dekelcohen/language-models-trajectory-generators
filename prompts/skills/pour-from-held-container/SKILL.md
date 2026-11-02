@@ -33,6 +33,9 @@ Pour = **rise -> carry upright -> tilt -> hold -> tilt back**, gripper closed th
   - height: **target top + 0.30**, but **never above robot base z + 0.50** (the arm is at full
     stretch there and the container slips out).
 - Rise first, then move horizontally, so the container clears the target's rim and fixtures.
+- **Move gently** (liquid sloshes out of a lunge): every `execute_trajectory` gets
+  `max_speed=0.10` (m/s); tilts also `max_rot_speed=0.5` (rad/s) - a slow tilt gives a thin stream
+  instead of a gush that overshoots the target.
 
 ## Code
 ```python
@@ -45,12 +48,13 @@ start = [hand[0], hand[1], hand[2], rot]
 up = [hand[0], hand[1], max(hand[2], pz), rot]
 carry = [px, py, pz, rot]
 poured = pour_pose(px, py, pz, rot, 0.8, pour_yaw)
+gentle = dict(max_speed=0.10, max_rot_speed=0.5)
 for t in (generate_linear_trajectory("rise upright", start, up),
           generate_linear_trajectory("carry upright over the target", up, carry),
-          generate_linear_trajectory("tilt to pour", carry, poured, num_points=30),
-          generate_linear_trajectory("hold the pour", poured, poured, num_points=30),
-          generate_linear_trajectory("tilt back upright", poured, carry, num_points=30)):
-    execute_trajectory(t)
+          generate_linear_trajectory("tilt to pour", carry, poured),
+          generate_linear_trajectory("hold the pour", poured, poured, num_points=240),  # ~1 s: liquid needs time to drain
+          generate_linear_trajectory("tilt back upright", poured, carry)):
+    execute_trajectory(t, **gentle)
 ```
 End upright and still holding unless the task says to put it down (separate step).
 

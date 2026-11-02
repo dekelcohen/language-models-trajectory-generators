@@ -316,8 +316,12 @@ def retry_direction_hint(facts, history_dirs=()):
             "open side of the track, away from the edge where its handle sits.")
 
 
-def format_pull_proprio(facts):
-    """Reviewer prompt block (measured facts only)."""
+def format_pull_proprio(facts, camera_moved=()):
+    """Reviewer prompt block (measured facts only).
+
+    ``camera_moved``: labels the fixed head camera measured as having LEFT their original
+    place (helpers.object_displacement) - a part can be pushed open without being carried.
+    """
     words = {
         "closed_on_nothing": "the gripper closed but its fingers closed fully every time: nothing "
                              "was HELD between them. This does NOT show the part stayed put - closed "
@@ -342,13 +346,21 @@ def format_pull_proprio(facts):
         lines.append(f"  - '{p['desc']}': commanded {p['cmd_m'] * 100:.0f} cm along {_vec(p['dir'])}, "
                      f"reached {p['reached_m'] * 100:.0f} cm; {res}; held part carried "
                      f"~{p['carried_m'] * 100:.0f} cm.")
-    slipped = facts["outcome"] == "part_did_not_move" and slip_may_push(facts)
+    pushes = facts.get("possible_push_after_pull") or []
+    slipped = facts["outcome"] == "part_did_not_move" and (slip_may_push(facts) or bool(pushes)
+                                                            or bool(camera_moved))
     if slipped:
+        later = (f" Later hand motions after losing the grip ({', '.join(repr(p) for p in pushes[:3])}) "
+                 "could have pushed it." if pushes else "")
         words["part_did_not_move"] = (
             f"the held part did NOT travel in the grip (max {facts['max_carried_m'] * 100:.0f} cm): "
-            "the fingers slipped off it. This does NOT show the part stayed put - the closed "
-            "fingers kept moving and can push it along; judge from the clips whether it moved.")
+            "the fingers lost it or it resisted. This does NOT show the part stayed put - moving "
+            "fingers can push it along." + later + " Judge from the clips and the camera "
+            "displacement measurement whether it moved.")
     lines.append("  - Verdict: " + words[facts["outcome"]])
+    if camera_moved and facts["outcome"] in ("part_did_not_move", "closed_on_nothing"):
+        lines.append(f"  - NOTE: the head camera measured {', '.join(repr(c) for c in camera_moved)} "
+                     "LEFT its original place - the part DID move (pushed rather than carried).")
     if facts["outcome"] == "part_did_not_move" and not slipped:
         lines.append("  - If the part did not move, the task is NOT achieved, whatever the arm's "
                      "motion looks like in the clips.")

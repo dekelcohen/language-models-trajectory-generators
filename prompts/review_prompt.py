@@ -2,6 +2,7 @@ REVIEW_PROMPT = (
     "You are a robotics VLM reviewer. Use the full conversation history you just saw (planning and execution). "
     "verify whether the robot executed the task as planned by inspecting the provided visual evidence.\n\n"
     "Task: [INSERT TASK]\n\n"
+    "[INSERT OVERALL COMMAND SECTION]"
     "3D Coordinates Context:\n[INSERT 3D COORDINATES PROMPT SECTION]\n\n"
     "[INSERT SCENE ANALYSIS SECTION]"
     "[INSERT MEDIA SECTION]"
@@ -22,7 +23,11 @@ REVIEW_PROMPT = (
 # --- [INSERT MEDIA SECTION] variants ------------------------------------------------
 # Frames mode (review model cannot take video): subsampled key frames are attached.
 REVIEW_MEDIA_FRAMES_SECTION = (
-    "Key frame file paths (chronological):\n[INSERT FRAME PATHS]\n\n"
+    "Key frames of THIS attempt (attached after the scene image, in this order: all head-camera frames, "
+    "then all wrist-camera frames; chosen where the image changes most, plus each camera's FINAL frame):\n"
+    "[INSERT FRAME PATHS]\n"
+    "The frames marked FINAL STATE decide success. Reference evidence as 'head cam step N' / "
+    "'wrist cam step N'.\n\n"
 )
 
 # Video mode (Gemini direct / via OpenRouter): one mp4 per camera, covering ONLY the
@@ -49,6 +54,23 @@ REVIEW_SCENE_ANALYSIS_SECTION = (
 
 REMAINING_MEDIA_SENTENCE_FRAMES = (
     "All the REMAINING attached images are the trajectory key frames, in the order listed below."
+)
+
+# Filled into [INSERT OVERALL COMMAND SECTION] when the Task is a planner subtask.
+REVIEW_OVERALL_COMMAND_SECTION = (
+    "OVERALL USER COMMAND (this Task is one planner step toward it): [INSERT OVERALL COMMAND]\n"
+    "Judge the Task by its GOAL and the END STATE (e.g. 'the occluder no longer blocks the target', 'the door "
+    "is open'), even if an earlier attempt already achieved it. "
+    "HOW-TO details the planner wrote into the Task text (where/how to grasp, exact distances, keep it "
+    "upright, avoid touching X) are suggestions, not success criteria: if the goal is met they do not make "
+    "it a failure. Amounts the planner chose ('about 12 cm higher', 'lift ~50 cm', 'at least 30 deg') "
+    "are approximate targets: within ~25% of them, or as far as the arm could reach, counts as met when "
+    "the qualitative goal holds (held, clearly lifted, visibly open). Process steps written as success conditions (e.g. 'the lever has been actuated', "
+    "'the latch released', 'grasped the handle first') are implied by the goal state when it is reached "
+    "(an open door means its latch was released): do not fail an achieved goal for lack of proof of how "
+    "it got there. A side effect that ADVANCES the overall command (e.g. the door swung open while the "
+    "pole was cleared) is not a failure either; only fail for side effects that make the overall command "
+    "harder or unsafe.\n\n"
 )
 REMAINING_MEDIA_SENTENCE_VIDEO = (
     "The REMAINING attachments are the trajectory VIDEOS of this attempt, in the order listed below."

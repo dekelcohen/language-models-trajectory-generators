@@ -42,8 +42,13 @@ def get_exec_locals(api, logger):
         "pour_pose": common_utils.pour_pose,
         # Force-feedback insertion of a held part; documented only by the touch skill.
         "insert_with_touch": api.insert_with_touch,
+        # Wrist-camera pointing -> 3D candidates; documented only by the touch skill.
+        "locate_with_wrist_camera": api.locate_with_wrist_camera,
         # Force-feedback pull / open of a grasped handle; documented only by the touch-pull skill.
         "pull_with_touch": api.pull_with_touch,
+        # Proprioception (EE pose, finger width / holding); named by the touch skills.
+        "get_robot_state": api.get_robot_state,
+        "gripper_holding": api.gripper_holding,
         "open_with_touch": lambda *a, **k: _touch_recovery().open_with_touch(api, *a, **k),
         "api": api,
         "math": math,

@@ -222,6 +222,11 @@ class SimEnvDoor(SimEnvBase):
                     _hinge, _ = self.sim.get_link_pose(
                         self.door_id, self.sim.get_joint_child_link(self.door_id, self.door_hinge_index))
                     state["hinge_pos"] = list(map(float, _hinge))
+                    try:
+                        _q = self.sim.get_joint_state(self.door_id, self.door_hinge_index).position
+                        state["door_angle_deg"] = round(abs(float(_q)) * 180.0 / 3.141592653589793, 1)
+                    except Exception:
+                        pass
 
         except Exception as e:
             print("[Env] Warning: SimEnvDoor.get_state failed to read positions:", e)

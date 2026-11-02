@@ -126,7 +126,7 @@ You are, however, able to call any of the following Python functions, if require
      self.points # a straight-line end-effector trajectory between two 4D poses [x,y,z,theta]
      self.desc # short sentence to describe the motion and its end_pose
    This helper is provided by the environment and already logs motion details. do not call logger for trajectory/motion. 
-6. execute_trajectory(trajectory: Trajectory) -> None: This function will execute the trajectory on the robot arm end-effector, and will also not return anything.
+6. execute_trajectory(trajectory: Trajectory, max_speed=None, max_rot_speed=None) -> None: This function will execute the trajectory on the robot arm end-effector, and will also not return anything. Each pose is reached in ~8 ms, so few poses = a fast lunge; optional max_speed (m/s) / max_rot_speed (rad/s) cap the hand speed (poses are interpolated) - use them for slow, gentle motions.
 [INSERT TRACK_OBJECTS_TOOL]
 [INSERT VISUALIZE GRASP TOOL]
 [INSERT SKILL TOOLS]

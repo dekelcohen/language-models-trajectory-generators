@@ -67,6 +67,53 @@ Harness numbers (`research/touch/door_pull_e2e.py`, scripted, no LLM):
 5. **Touch-guided pull is Genesis only** (`open_with_touch()`, `docs/plans/touch_pull.md`).
    It is unaffected by these fixes.
 
+## 2026-11-02: terra everywhere, reviewer / agent-loop fixes
+
+Models:
+- `-lm copilot-claude-opus-5.5` (default) or `-lm copilot-gpt-6-sol`.
+- Perception (`--planner-perception-vlm`) and reviewer (`--review-provider vlm:...`) now default to `copilot-gpt-6.1-terra`, which is cheaper than gemini-flash.
+- Copilot models accept images only, so the reviewer gets key frames instead of video (see "Key frames" below).
+
+Runs (PyBullet; rollout folders under `outputs/2026-11-02/`):
+
+| run | models (lm / perc / review) | result | folder |
+|---|---|---|---|
+| door_pb1 | claude / gemini / gemini | success | `door_gemini_baseline` |
+| door_pb2 | claude / gemini / terra | success after one false negative | `door_terra_falseneg_then_success` |
+| doorhid_pb1 | claude / gemini / terra | FAIL: pole loop | `door_hidden_terra_baseline_FAIL` |
+| doorhid_gm1 | claude / gemini / gemini | FAIL: the unreviewed final attempt was accepted | `door_hidden_gemini_FAIL_unreviewed_final` |
+| doorhid_pb3 / pb4 | claude / gemini / terra | **success** | `door_hidden_terra_newcode_SUCCESS`, `door_hidden_terra_finalreview_runbaseline` |
+| doorhid_tt1 | claude / terra / terra | **success** in 8 min, door 32.6° | `door_hidden_ALLterra_perc_review` |
+| door_g6 | gpt-6-sol / terra / terra | FAIL: door 27-31° rejected, then an idle loop | `door_gpt6sol_FAIL_reviewer_process_cond_and_idle_loop` |
+| door_g6b | gpt-6-sol / terra / terra | **success**, attempt 1, 16.4° | `door_gpt6sol_ALLterra_after_fixes` |
+
+Root causes and fixes:
+- **Pole re-removal loop (door:hidden).** The reviewer saw no change after the pole was already gone, and did not credit the pole's displacement.
+  - Displacement evidence: tracked object start→end shift, with run-level baselines, so a pole moved in an earlier attempt still counts.
+  - The planner's final attempt is now reviewed instead of accepted unreviewed.
+- **Reviewer demanded process proof (gpt-6-sol plans).** The plan said "Success = door open AND lever actuated", and terra wanted proof of the lever.
+  - `REVIEW_OVERALL_COMMAND_SECTION`: a reached goal state implies its process conditions.
+  - Planner-chosen amounts (e.g. "lift 50 cm") are approximate: within ~25 %, or as far as the arm can reach, counts as met.
+- **LLM refused to call `task_completed()` after a self-judged failure** (74+ turns).
+  - The idle guard ends the attempt for review after `config.max_idle_agent_turns` (10) turns without robot motion.
+  - `config.max_agent_turns_per_attempt` (25) ends an attempt that keeps moving forever (usb_tt3: 66 min in one attempt).
+  - The prompts say `task_completed()` ends the attempt for review and is not a success claim.
+- **Eval truth.** The handle moved only 2.5 cm in a "success". Door `get_state()` now has eval-only `door_angle_deg` (hinge joint), which is logged in `[world-state]`. Never put it in prompts.
+
+Key frames for image-only reviewers (`helpers/review_frames.py`):
+- Old: a fixed stride (head every 5th, wrist every 7th) from the attempt start, truncated from the end. The final wrist frames were cut first, and one USB review got only 4 frames.
+- New: a change-aware selector over the frames on disk.
+  - It always keeps the first frame, the final frame and one ~3 frames before the end.
+  - The remaining budget follows cumulative visual change (48×48 grey thumbnails, with a floor so static stretches still get frames).
+  - Budgets: `config.review_key_frames_head=24`, `review_key_frames_wrist=14`, under `max_allowed_vlm_images`.
+  - Frames are labelled "head cam step N" / "wrist cam step N", and the last one is marked "<- FINAL STATE".
+  - Over the cap, wrist frames are thinned from the middle; the end is never cut.
+
+Terra vs gemini:
+- Terra worked as perception and reviewer on door, door:hidden, grasp, slide_cabinet and kettle.
+- Terra is more literal: it rejected achieved goals over planner wording until the review-prompt rules above were added.
+- No terra-specific misperception was seen. The slide_cabinet hinge confusion also happens with gemini.
+
 ## How to debug
 - `main.py` logs are UTF-16. Grep with `Select-String -Encoding unicode`. Markers:
   - `[pull_proprio] outcome=`

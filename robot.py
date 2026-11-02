@@ -151,9 +151,11 @@ class Robot:
         self.sim_step_counter += 1
         self._tick_tracking(env)
 
-        # Rate limiter: max 5 FPS (48 steps at 240Hz). Ignore if we are forcing a keyframe.
-        steps_per_frame = int(1.0 / (config.control_dt * 5.0))
-        if not force_record and (self.sim_step_counter - self.last_record_step) < steps_per_frame:
+        # Rate limiter on sim time (config.trajectory_record_fps). Ignore if we are forcing a keyframe.
+        steps_since = self.sim_step_counter - self.last_record_step
+        steps_per_frame = max(1, round(1.0 / (config.control_dt * config.trajectory_record_fps)))
+        idle_steps_per_frame = max(1, round(1.0 / (config.control_dt * config.trajectory_record_idle_fps)))
+        if not force_record and steps_since < steps_per_frame:
             return
 
         # Get current state
@@ -180,7 +182,7 @@ class Robot:
                 moved_significantly = True
 
         # Save frame if motion detected or if it's a forced keyframe (settled)
-        if force_record or moved_significantly:
+        if force_record or moved_significantly or steps_since >= idle_steps_per_frame:
             self.get_camera_image("head", env, save_camera_image=True, rgb_image_path=config.rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
             self.get_camera_image("wrist", env, save_camera_image=True, rgb_image_path=config.wrist_rgb_image_trajectory_path.format(step=self.trajectory_step), depth_image_path=None)
             
@@ -341,7 +343,7 @@ class Robot:
                 self.sim.set_joint_position(self.id, gripper1_index, gripper_target_position, force=config.gripper_movement_force_franka)
                 self.sim.set_joint_position(self.id, gripper2_index, gripper_target_position, force=config.gripper_movement_force_franka)
 
-            # steps env and capture cameras images 
+            # steps env and capture cameras images (trajectory_step advances only when a frame is saved)
             self.step_env_and_record(env, force_record=False)
             
             # monitor torque of wrist joint motor (can replace with gripper1_index)
@@ -350,9 +352,6 @@ class Robot:
                 wrist_torque = self.get_joint_effort(actual_wrist_motor_index, body_id=self.id)
                 gripper_torque = self.get_gripper_effort(gripper1_index, gripper2_index)
                 self.logger.info(OK + f'wrist_torque: {wrist_torque} gripper_torque: {gripper_torque}' + ENDC)
-            
-            if is_trajectory:
-                self.trajectory_step += 1
 
             ee_current_position, ee_current_orientation_q = self.sim.get_link_pose(self.id, self.ee_index)
             ee_current_orientation_e = self.sim.euler_from_quat(ee_current_orientation_q)
@@ -387,8 +386,11 @@ class Robot:
             else:
                 if time_step > 99:
                     break
-        # Guarantee a frame exactly at the end of the movement
-        self.step_env_and_record(env, force_record=True)
+        # Each move() ends with one more physics step (part of the waypoint timing: 2 steps per
+        # trajectory waypoint). Standalone moves force a frame here; trajectory waypoints do not,
+        # since a frame per waypoint time-warps the video (slow motion while the arm lags, then a
+        # jump during env's settle loop, which forces the trajectory's final frame).
+        self.step_env_and_record(env, force_record=not is_trajectory)
 
     def _shoulder_camera_pose(self, env):
         """Return the base-mounted shoulder camera pose.

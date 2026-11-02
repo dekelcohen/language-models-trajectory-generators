@@ -36,7 +36,7 @@ _SUITES = {
 
 
 #: Genesis-only tasks (need torque control / its contact solver); not in list_task_ids().
-GENESIS_TASKS = ("usb",)
+GENESIS_TASKS = ("usb", "kettle_mug")
 
 #: Door scenes: noslip stops the soft-contact friction creep that slid the gripped lever out
 #: of the fingers at ~10 N pull with ~70 N of friction available (real friction does not creep).
@@ -48,6 +48,10 @@ def scene_options_for(task_name):
     name = (task_name or "").strip().lower()
     if name == "usb":
         from sim_envs.genesis.usb import SCENE_OPTIONS
+
+        return SCENE_OPTIONS
+    if name == "kettle_mug":
+        from sim_envs.genesis.kettle_mug import SCENE_OPTIONS
 
         return SCENE_OPTIONS
     if name == "door:hidden" or (":" not in name and any(k in name for k in _LEGACY_DOOR_KEYWORDS)):
@@ -89,6 +93,10 @@ def get_simenv(task_name, sim=None):
         from sim_envs.genesis.usb import SimEnvUSB
 
         return SimEnvUSB(sim)
+    if lowered_full == "kettle_mug":
+        from sim_envs.genesis.kettle_mug import SimEnvKettleMug
+
+        return SimEnvKettleMug(sim)
 
     if lowered_full in _INSERT_KEY_NAMES:
         from sim_envs.pybullet.insert_key import SimEnvInsertKey

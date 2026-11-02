@@ -230,6 +230,11 @@ class GenesisAdapter(SimAdapter):
             )
         if self._scene_options.get("rigid"):
             kwargs["rigid_options"] = gs.options.RigidOptions(**self._scene_options["rigid"])
+        # Particle solvers (e.g. the kettle -> mug task's SPH water) need their domain up front.
+        if self._scene_options.get("sph"):
+            kwargs["sph_options"] = gs.options.SPHOptions(**self._scene_options["sph"])
+        if self._scene_options.get("pbd"):
+            kwargs["pbd_options"] = gs.options.PBDOptions(**self._scene_options["pbd"])
         self.scene = gs.Scene(**kwargs)
         _log(f"scene created (gravity={self._gravity}, viewer={self._gui}, options={self._scene_options or 'default'})")
         return self.scene

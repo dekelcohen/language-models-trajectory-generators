@@ -27,6 +27,8 @@ class TaskState:
         self.attempt_number = 0
         # First trajectory image index of the current attempt (VLM review frame sampling)
         self.start_attempt_trajectory_step = start_trajectory_step
+        # First trajectory step of the whole subtask (displacement snapshots only before any motion)
+        self.start_trajectory_step = start_trajectory_step
 
         # Namespace the LLM's ```python blocks run in. It is the exec() globals dict itself
         # (module globals + injected tool handles + whatever the LLM defined), reused across
@@ -59,6 +61,12 @@ class TaskState:
         self.segmentation_texts = []
         self.segmentation_count = 0
         self.trajectory_length = 0
+        # helpers.object_displacement: first-detection snapshot per label (head RGB-D + mask)
+        # and the previous attempt's verdict per label ("left_place" before a retry).
+        self.displacement_snaps = {}
+        self.displacement_prev = {}
+        # insert_with_touch / pull_with_touch results ({"kind", "step", "result"}) -> reviewer
+        self.touch_results = []
 
         # Scene analysis (perception VLM) this task started from, plus the exact head
         # image it was computed from. Shown to the reviewer VLM so it knows the
