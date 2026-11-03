@@ -85,5 +85,5 @@ echo Git status:
 git status
 echo.
 echo copilot --add-dir "%ROBOTICS_HOME%\VLM_Robotics\robotic_perception"
-echo python main.py --task door -lm aws-eu.anthropic.claude-opus-4-8 -r franka --sim pybullet --seg-provider moondream  --review-provider vlm:or-google/gemini-3.7-flash --delete-images --planner-perception-vlm or-google/gemini-3.7-flash --reasoning-effort medium
+echo python main.py --task door -lm copilot-claude-opus-5.5 -r franka --sim pybullet --seg-provider moondream  --review-provider vlm:copilot-gpt-6.1-terra --delete-images --planner-perception-vlm copilot-gpt-6.1-terra --reasoning-effort medium
 echo Environment ready.
