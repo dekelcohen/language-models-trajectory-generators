@@ -85,7 +85,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 ### Argument reference
 | Arg | Default | Purpose |
 |-----|---------|---------|
-| `-lm, --language_model` | `azure-gpt-5` | Main LLM (planner + subtask + default reviewer). e.g. `gpt-4o`, `or-google/gemini-2.5-flash`. |
+| `-lm, --language_model` | `azure-gpt-5` | Main LLM (planner + subtask + default reviewer). e.g. `gpt-4o`, `or-google/gemini-2.5-flash`, `copilot-claude-opus-5.5`, `copilot-gpt-6-sol` (Copilot models go through the local `copilot` CLI). |
 | `--lm-images / --no-lm-images` | `True` | Attach images to LLM prompts. |
 | `--max-tokens` | `60000` | Max completion tokens. |
 | `--reasoning-effort` | `None` | `xhigh…none` for reasoning models. |
@@ -101,8 +101,8 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `--timeout` | `15.0` | Timeout secs; `<=0` disables. |
 | `--delete-images` / `--no-delete-images` | on | Wipe image folders before recreating. |
 | `--images-root DIR` | `./images` (or `$IMAGES_ROOT`) | Root folder for all image/video/trajectory output (`config.images_folder` and every path derived from it). Parsed from `sys.argv` *before* `config`/other modules import, via `_apply_early_images_root()` at the top of `main.py`, so it must reach every module regardless of import order. Set this per run to allow 2+ concurrent experiments on the same checkout without overwriting each other's outputs, e.g. `--images-root ./images_run1` / `./images_run2`. |
-| `--review-provider` | `vlm` | Success check: `vlm`, `vlm:<model>` (e.g. `vlm:or-openai/gpt-5.5`), or `xmem`. |
-| `--planner-perception-vlm` | `gemini-3.8-flash` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. |
+| `--review-provider` | `vlm:copilot-gpt-6.1-terra` | Success check: `vlm` (main model), `vlm:<model>` (e.g. `vlm:gemini-3.8-flash`, which gets video), or `xmem`. Terra is cheaper than gemini and gets key frames (images only). |
+| `--planner-perception-vlm` | `copilot-gpt-6.1-terra` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. `gemini-3.8-flash` also works. |
 | `--affordance-points` / `--no-affordance-points` | on | Ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis. Disable to drop the pointing block from the perception prompt entirely. |
 | `--attempts` | `2` | Global default per-task attempts (1 first + retries with review between). |
 | `--no-plan` | off | Skip planner; run command as a single `execute_task`. |
@@ -823,7 +823,11 @@ no-op (no IPC traffic). Tests: `tests/test_vis_grasp.py`.
 - `generate_linear_trajectory(desc, start_pose, end_pose, num_points=20)` → `Trajectory`
   (linear interp of position; see *pose formats* above for orientation); validates lengths,
   logs the 2D projection of the end pose; **no** side effects.
-- `execute_trajectory(trajectory)`:
+- `execute_trajectory(trajectory, max_speed=None, max_rot_speed=None)`:
+  - optional speed caps (m/s, rad/s): `common_utils.limit_speed` interpolates extra poses so
+    no step is faster (each pose is reached in ~8 ms, so few poses = a lunge). Generic for any
+    motion; skills choose the values (the pour skill uses 0.10 m/s and 0.5 rad/s, so the tilt
+    makes a thin stream instead of a gush);
   - optional `--vis-traj` preview (downsampled to ≤5 points) via `ADD_TRAJECTORY_POINTS`;
   - `EXECUTE_TRAJECTORY` → env moves the EE through each point (`robot.move`), records
     frames, returns `[msg, trajectory_step]`; `api.trajectory_step` updated (continuous
@@ -839,8 +843,14 @@ no-op (no IPC traffic). Tests: `tests/test_vis_grasp.py`.
     the robot never moved in this attempt (generated blocks did not reach the env), so the
     claim is rejected — `failed_task=True` (retry), or on the last attempt
     `completed_task=True` with `review_succeeded=False` (never `accepted_without_review`);
-  - **final attempt** (`attempt_number >= max_attempts`, non-replay) → accept without
-    review: `completed_task=True`, `accepted_without_review=True`;
+  - **final attempt** (`attempt_number >= max_attempts`, non-replay) is reviewed like the
+    others; the result is reported to the planner (an unreviewed accept had let a failed
+    attempt pass as success);
+  - **agent-loop guards** (`run_task_agent_loop`): an LLM that never calls `task_completed()`
+    is ended for review after `config.max_idle_agent_turns` (10) turns with no robot motion, or
+    `config.max_agent_turns_per_attempt` (25) turns in total. LLMs tend to skip
+    `task_completed()` when they believe they failed; the prompts say it ends the attempt for
+    review and is not a success claim;
   - else `TASK_COMPLETED` then dispatch review by `--review-provider`.
 
 #### Measured pull proprioception (`helpers/pull_proprio.py`, `config.review_pull_proprio`)
@@ -896,8 +906,14 @@ frame twice on every attempt).
 - **Video mode**: scene image first, then the 2 attempt clips (head, wrist); key frames are
   dropped entirely. Prompt uses `REVIEW_MEDIA_VIDEO_SECTION` (lists the clips + fps and
   asks for `cam @ MM:SS` references).
-- **Frames mode** (auto-fallback): the legacy stride-5 head + stride-7 wrist key frames,
-  capped by `config.max_allowed_vlm_images`; prompt uses `REVIEW_MEDIA_FRAMES_SECTION`.
+- **Frames mode** (auto-fallback, e.g. all `copilot-*` models): change-aware key frames from
+  `helpers/review_frames.py`. It always keeps the first frame, the final frame and one just
+  before the end, and spends the rest where the image changes most (budgets
+  `config.review_key_frames_head` = 24, `_wrist` = 14, within `config.max_allowed_vlm_images`).
+  Frames are labelled "head cam step N" and the last is marked "FINAL STATE". The old fixed
+  stride cut the final frames first. Prompt: `REVIEW_MEDIA_FRAMES_SECTION`.
+- Review rules (`REVIEW_OVERALL_COMMAND_SECTION`): a reached goal state implies the process
+  steps the planner wrote (e.g. "lever actuated"), and planner-chosen amounts are approximate.
 - The `REVIEW_SCENE_ANALYSIS_SECTION` sentence about "the remaining attachments" switches
   between `REMAINING_MEDIA_SENTENCE_VIDEO` / `..._FRAMES` accordingly.
 - `run_vlm_review()` (default `vlm`): attaches the attempt clips (video mode) or the
@@ -1691,6 +1707,13 @@ has no `shapely` and nothing on the tracking path needs it.
 ---
 
 ## Changelog
+
+- **gpt-6.1-terra as default perception + reviewer; review and agent-loop fixes** (§2, §7):
+  terra matched gemini on door, door:hidden, grasp, slide_cabinet and kettle at lower cost.
+  Change-aware key frames for image-only reviewers; the final attempt is reviewed; turn
+  guards end attempts the LLM never closes; `execute_trajectory` speed caps (gentle pour:
+  598/624 particles in the mug, 10 spilled). Status: `docs/status/open_door.md`,
+  `kettle_mug_pour.md`, `usb_insert.md`. Slides: `.github/skills/slidedeck-update`.
 
 - **Measured pull proprioception in review and retry** (§7): a reviewer false positive on
   `franka_kitchen:slide_cabinet` (the hand pulled a sliding panel straight out and nothing
