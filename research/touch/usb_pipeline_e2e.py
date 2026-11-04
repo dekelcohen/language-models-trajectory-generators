@@ -324,7 +324,7 @@ if args.touch:
         if args.rows is not None:
             sw["sweep_rows"] = args.rows
         n_rows = args.rows or 5
-        spec.update(max_s=args.sweep * (1 + 2 * n_rows) / 0.005 + 15.0, config=sw)
+        spec.update(max_s=args.sweep * (1 + 2 * n_rows) / 0.005 + 60.0, config=sw)
     reply = call([config.TOUCH_INSERT, spec])
     print(f"[e2e] TOUCH_INSERT -> {reply[0].strip()} {json.dumps({k: v for k, v in reply[1].items() if k != 'events'})}",
           flush=True)

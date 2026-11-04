@@ -509,6 +509,36 @@ tool/attempt-specific and only belongs in the subtask prompt).
 
 </details>
 
+### Execution limits (no endless loops)
+
+Every level of the loop has a hard cap. When a limit trips, the attempt ends and goes to review,
+so the planner still decides what to do next.
+
+| Level | Limit | Config |
+|---|---|---|
+| Planner | 4 iterations (`--max-planner-iter`) | CLI |
+| Subtask | ≤ 4 attempts (the planner's `max_attempts` is capped) | `max_subtask_attempts` |
+| Attempt | 25 LLM turns; 10 turns in a row without robot motion | `max_agent_turns_per_attempt`, `max_idle_agent_turns` |
+| Attempt | wall clock = clamp(2 × p90 of past attempts of this task, 240–2700 s), default 1200 s | `attempt_budget_*` |
+| Command | 5400 s for the whole planner run | `command_budget_s` |
+| Code block (no LLM cost) | 300 robot actions; 40 actions that keep the hand inside a 1 cm box without rotating (churn) | `max_motion_calls_per_block`, `churn_*` |
+| Move | 15 identical moves with no progress raise an error | `api._check_repeated_no_progress` |
+
+<details><summary>Details</summary>
+
+- `helpers/run_budget.py` (`RunBudget`) tracks the block, attempt and command clocks.
+- The attempt budget is learned from `outputs/run_budget_history.json`. Only normally ended
+  attempts are recorded, so killed outliers don't inflate it. Short tasks get short timeouts;
+  long tasks (pour, USB) get long ones.
+- `BudgetExceeded` derives from `BaseException`, so LLM code that catches `Exception` can't
+  swallow it.
+- Touch primitives (`insert_with_touch`, `move_until_contact`, `pull_with_touch`) count as one action with their own
+  internal time limit, so the many small corrections they make don't count against the
+  per-block action cap.
+- The main prompt states the limits, so the LLM writes loops that exit on "no progress".
+
+</details>
+
 ---
 
 ## 6. 2D segmentation + 3D perception — `detect_object` flow
@@ -1707,6 +1737,28 @@ has no `shapely` and nothing on the tracking path needs it.
 ---
 
 ## Changelog
+
+- **USB insertion by touch: edge finder** (`touch/insertion.py`, `docs/status/usb_insert.md`):
+  the wrist camera locates the port only to a few mm, but a USB-A tip needs ±0.25 mm. During the
+  line sweep, a push that is blocked yet still sinks ≥ 0.4 mm is a *partial catch*: the tip
+  centre is on a side edge of the opening. Two catches about one opening width apart (9–16 mm)
+  bracket the port, and their midpoint is the port centre to within ~0.3 mm. Next, a small
+  column raster (±0.9 mm along × ±4.5 mm across) finds the height. So the port is located
+  by touch, not the camera. Fewer sweep rows are needed. A sideways **seat check** (2 mm push;
+  a seated plug can't move) turns a false "seated" from an in-grasp slip into `slipped`.
+
+- **Execution limits** (§5): hard caps on planner iterations, subtask attempts, turns, code-block
+  actions and churn, identical moves, and a learned per-task attempt timeout.
+
+- **Rollout packaging for killed runs** (`helpers/rollout_report.py`): clips are written only
+  when an attempt ends. Killed or timed-out runs now get `videos/*_attempt_<s>_<e>_unfinished.mp4`
+  built from the trajectory frames, e.g. the USB insertion attempts.
+
+- **Door-hidden analysis** (`docs/status/open_door.md`): after the occluding pole is removed,
+  the arm parks in front of the lever. Segmentation then sees only the hub, the VLM ranks the
+  hub point first, and the hinge prior names the wrong edge. Grasps at the hub always slip. See
+  the status doc for the comparison with the plain door and the recommended fixes. Fixed: the
+  trajectory caption no longer leaks into perception or wrist-locate images (`robot.py`).
 
 - **gpt-6.1-terra as default perception + reviewer; review and agent-loop fixes** (§2, §7):
   terra matched gemini on door, door:hidden, grasp, slide_cabinet and kettle at lower cost.

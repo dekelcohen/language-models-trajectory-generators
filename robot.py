@@ -550,9 +550,10 @@ class Robot:
         
         if save_camera_image:
             rgb_image = Image.fromarray(rgb_array, mode="RGB")
-            # Render desc text at the bottom
-            if self.desc:
-                draw_text_overlay_image(self.desc, rgb_image)                
+            # Caption only the trajectory (video) frames: perception / wrist-locate captures must
+            # stay clean, since a VLM would read a stale caption as part of the scene.
+            if self.desc and os.path.abspath(rgb_image_path).startswith(os.path.abspath(config.trajectory_folder)):
+                draw_text_overlay_image(self.desc, rgb_image)
             rgb_image.save(rgb_image_path)
             if depth_image_path:           
                 n = config.near_plane

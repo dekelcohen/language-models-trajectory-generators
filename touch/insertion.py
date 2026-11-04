@@ -21,7 +21,8 @@ import numpy as np
 
 from touch.state import TouchState
 
-APPROACH, PROBE, SEARCH, INSERT, BACKOFF, DONE = "approach", "probe", "search", "insert", "backoff", "done"
+APPROACH, PROBE, SEARCH, INSERT, BACKOFF, VERIFY, DONE = ("approach", "probe", "search", "insert", "backoff",
+                                                     "verify", "done")
 
 
 @dataclass
@@ -59,6 +60,13 @@ class InsertConfig:
     backoff: float = 0.001        # m retreat after a failed insert
     backoff_s: float = 0.3
     max_inserts: int = 4
+    # Seat check: a seated plug cannot move sideways more than its clearance (~0.25 mm), but a plug
+    # that pivoted / slid back in the grasp while pressed on the face slides with the hand. After a
+    # "seated" stall, command verify_shift sideways (stiff, light axial push) for verify_s; moving
+    # more than verify_tol = not in the opening -> "slipped". 0 disables.
+    verify_shift: float = 0.002   # m
+    verify_s: float = 0.4         # s
+    verify_tol: float = 0.0008    # m
     # Line search instead of the spiral, for an opening known only along a line (e.g. its height
     # on a face, but not where along the face): raster passes +-sweep_half along sweep_dir (world,
     # made perpendicular to the axis) at spiral_speed; rows step sweep_pitch across it
@@ -67,6 +75,19 @@ class InsertConfig:
     sweep_half: float = 0.02      # m
     sweep_pitch: float = 0.0004   # m
     sweep_rows: float = 5
+    # Edge finder (line sweep only). A blocked probe that still advanced >= catch_adv is a "partial
+    # catch": the tip half overlaps the opening and tilts in. On the Genesis USB bench they occur where
+    # the tip centre crosses the opening's two side edges, i.e. ~one opening width apart. Two catches
+    # edge_min_sep..edge_max_sep apart along the line (defaults: USB-A, 12 mm wide) bracket the
+    # opening: rasterise columns across the line (+-cross_half) at their midpoint, col_pitch apart,
+    # out to +-col_half. Up to max_edge_cycles, then the raster resumes.
+    catch_adv: float = 0.0004     # m
+    edge_min_sep: float = 0.009   # m
+    edge_max_sep: float = 0.016   # m
+    cross_half: float = 0.0045    # m
+    col_pitch: float = 0.0003     # m (< 2x the port clearance)
+    col_half: float = 0.0009      # m
+    max_edge_cycles: int = 2
 
 
 @dataclass
@@ -105,6 +126,10 @@ class SpiralInsertController:
         self.offset = np.zeros(3)
         self._hist: List[tuple] = []
         self.d = self.p = None
+        self.mode = "raster"          # line sweep: raster -> columns (after two edge catches) -> raster
+        self.catches: List[tuple] = []    # (along, across) of partial catches in the current mode
+        self.path: List[np.ndarray] = []
+        self.n_cycles = 0
         if self.cfg.sweep_dir is not None:
             d = np.asarray(self.cfg.sweep_dir, float)
             d = d - self.a * float(d @ self.a)
@@ -148,8 +173,52 @@ class SpiralInsertController:
             return None
         return (pts[-1][1] - pts[0][1]) / (pts[-1][0] - pts[0][0])
 
+    def _xy(self, off):
+        return float(off @ self.d), float(off @ self.p)
+
+    def _pt(self, along, across):
+        return along * self.d + across * self.p
+
+    def _catch(self, t, adv):
+        """A blocked push that still advanced: record it as an edge of the opening (line sweep)."""
+        c = self.cfg
+        if self.d is None or adv < c.catch_adv:
+            return
+        along, across = self._xy(self.offset)
+        self.catches.append((along, across))
+        self._event(t, f"partial catch {1000 * adv:.2f}mm at along={1000 * along:.2f} across={1000 * across:.2f}mm")
+        if self.mode != "raster" or self.n_cycles >= c.max_edge_cycles:
+            return
+        lo, hi = min(a for a, _ in self.catches), max(a for a, _ in self.catches)
+        if c.edge_min_sep <= hi - lo <= c.edge_max_sep:
+            ca = 0.5 * (lo + hi)
+            self._event(t, f"edges along the line at {1000 * lo:.2f} / {1000 * hi:.2f}mm -> centre "
+                           f"{1000 * ca:.2f}mm, column raster +-{1000 * c.col_half:.1f} x +-{1000 * c.cross_half:.1f}mm")
+            self.mode, self.catches, self.path = "columns", [], []
+            n = int(round(c.col_half / c.col_pitch))
+            for i, j in enumerate([0] + [s * k for k in range(1, n + 1) for s in (1, -1)]):
+                h = c.cross_half if i % 2 == 0 else -c.cross_half
+                self.path += [self._pt(ca + j * c.col_pitch, across + h), self._pt(ca + j * c.col_pitch, across - h)]
+
+    def _follow(self, dt):
+        step, off = self.cfg.spiral_speed * dt, self.offset.copy()
+        while self.path and step > 0:
+            v = self.path[0] - off
+            n = float(np.linalg.norm(v))
+            if n <= step:
+                off, step = self.path.pop(0), step - n
+            else:
+                off, step = off + v / n * step, 0.0
+        return off
+
     def _spiral_offset(self, dt):
         c = self.cfg
+        if self.mode == "columns":
+            if self.path:
+                return 0.0, self._follow(dt)
+            self.n_cycles += 1
+            self._event(self.t_prev, f"edge cycle {self.n_cycles} found nothing, resume the raster")
+            self.mode, self.catches = "raster", []
         if self.d is not None:
             # 0 -> +L, then rows of 2L alternating direction, each shifted across the line
             L = c.sweep_half
@@ -205,6 +274,7 @@ class SpiralInsertController:
             if t - self.t_phase >= c.probe_s:
                 self._event(t, f"probe blocked: adv {1000 * adv:.2f}mm F={f_axial:.1f}N "
                                f"lat={np.linalg.norm(st.lateral_force(self.a)):.1f}N")
+                self._catch(t, adv)
                 self._enter(SEARCH, t, f"theta={self.theta:.1f}")
                 return self._push(st, c.f_search)
             return self._push(st, c.f_insert)
@@ -241,19 +311,40 @@ class SpiralInsertController:
             slow = c.slow_speed if depth < c.in_slot_depth or depth >= c.seat_depth else c.in_slot_stall_speed
             if t - self.t_phase > c.slow_window + 0.05 and v is not None and v < slow:
                 if depth >= c.seat_depth:
-                    self._finish(t, "seated", f"advance {1000 * depth:.1f}mm then slow {1000 * v:.1f}mm/s "
-                                              f"F={f_axial:.1f}N")
-                    return self._hold_at(s)
+                    self.seat_msg = f"advance {1000 * depth:.1f}mm then slow {1000 * v:.1f}mm/s F={f_axial:.1f}N"
+                    if c.verify_shift <= 0:
+                        self._finish(t, "seated", self.seat_msg)
+                        return self._hold_at(s)
+                    self.verify_p0, self.verify_off0 = np.asarray(st.ee_pos, float), self.offset.copy()
+                    self.offset = self.offset + c.verify_shift * self.u
+                    self._enter(VERIFY, t, f"{self.seat_msg}; sideways check {1000 * c.verify_shift:.1f}mm")
+                    return self._push(st, c.f_search)
                 self.n_inserts += 1
+                lat = st.lateral_force(self.a)
                 self._event(t, f"stopped early at {1000 * depth:.1f}mm ({1000 * v:.1f}mm/s, jam/edge) "
-                               f"F={f_axial:.1f}N (insert #{self.n_inserts})")
+                               f"F={f_axial:.1f}N lat={np.round(lat, 1).tolist()} "
+                               f"off={np.round(1000 * self.offset, 2).tolist()}mm (insert #{self.n_inserts})")
                 if self.n_inserts >= c.max_inserts:
                     self._finish(t, "jammed", f"{self.n_inserts} stalled inserts")
                     return self._hold_at(s - c.backoff)
+                self._catch(t, depth)
                 self._enter(BACKOFF, t)
                 self.s_backoff = s - c.backoff
                 return self._hold_at(self.s_backoff)
             return self._push(st, c.f_insert)
+
+        if self.phase == VERIFY:
+            if t - self.t_phase < c.verify_s:
+                return self._push(st, c.f_search)
+            dp = np.asarray(st.ee_pos, float) - self.verify_p0
+            lat = float(np.linalg.norm(dp - self.a * float(dp @ self.a)))
+            self.offset = self.verify_off0
+            if lat <= c.verify_tol:
+                self._finish(t, "seated", f"{self.seat_msg}; sideways check moved {1000 * lat:.2f}mm")
+                return self._hold_at(s)
+            self._finish(t, "slipped", f"sideways check moved {1000 * lat:.2f}mm: the part is not in the "
+                                       f"opening (it slid / pivoted in the grasp)")
+            return self._hold_at(s - c.backoff)
 
         if self.phase == BACKOFF:
             if t - self.t_phase >= c.backoff_s:

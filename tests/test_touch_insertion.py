@@ -136,3 +136,57 @@ def test_line_sweep_rows_cover_height_error(rows, expected):
     res = run_reactive(SpiralInsertController([1.0, 0.0, 0.0], cfg), port.read, port.send, port.advance,
                        max_s=120.0, period_s=0.02)
     assert res["outcome"] == expected, res["events"]
+
+
+class EdgePort(MockPort):
+    """Like MockPort, but a tip centred within 0.6 mm of an opening edge (while the tip still overlaps
+    the opening) tilts and dips 1 mm in without entering: the partial catch seen on the Genesis bench."""
+
+    HALF = (0.00625, 0.00255)   # opening half-size (y, z)
+
+    def dip(self):
+        d = np.abs(self.p[1:] - self.hole)
+        on_y_edge = abs(d[0] - self.HALF[0]) < 0.0006 and d[1] < 0.0045
+        on_z_edge = abs(d[1] - self.HALF[1]) < 0.0006 and d[0] < 0.012
+        return 0.001 if on_y_edge or on_z_edge else 0.0
+
+    def advance(self, dt):
+        if self.aligned() or self.p[0] > self.FACE + 0.0015:
+            return MockPort.advance(self, dt)
+        self.t += dt
+        self.p[1:] = self.target[1:]
+        self.p[0] = min(self.target[0], self.FACE + self.dip())
+
+
+@pytest.mark.parametrize("max_edge_cycles,expected", [(2, "seated"), (0, "search_exhausted")])
+def test_edge_catches_locate_an_off_row_opening(max_edge_cycles, expected):
+    # opening 2 mm off the sweep line (outside the +-0.8 mm rows): only its edge catches find it
+    cfg = InsertConfig(sweep_dir=(0.0, 1.0, 0.0), sweep_half=0.012, max_edge_cycles=max_edge_cycles)
+    port = EdgePort(hole=(0.0021, 0.002))
+    res = run_reactive(SpiralInsertController([1.0, 0.0, 0.0], cfg), port.read, port.send, port.advance,
+                       max_s=150.0, period_s=0.02)
+    assert res["outcome"] == expected, res["events"]
+    if expected == "seated":
+        assert any("edges along the line" in e[2] for e in res["events"]), res["events"]
+
+
+class SlipPort(MockPort):
+    """The plug never finds the opening: above SLIP N it slides back in the grasp, so the hand advances
+    ~12 mm until the fingers hit the face, like a seated plug. Pressed on the face, it still slides sideways."""
+
+    SLIP = 15.0
+
+    def advance(self, dt):
+        self.t += dt
+        self.p[1:] = self.target[1:]
+        x = self.FACE if self.p[0] <= self.FACE else self.p[0]
+        if self.k * (self.target[0] - x) > self.SLIP:
+            x = self.target[0] - self.SLIP / self.k
+        self.p[0] = min(x, self.BOTTOM)
+
+
+def test_grasp_slip_that_looks_seated_is_caught_by_the_sideways_check():
+    res, _ = _run(SlipPort(hole=(0.0, 0.05)))
+    assert res["outcome"] == "slipped", res["events"]
+    res, _ = _run(SlipPort(hole=(0.0, 0.05)), verify_shift=0.0)
+    assert res["outcome"] == "seated"   # without the check the slip passes as seated

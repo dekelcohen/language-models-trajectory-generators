@@ -176,6 +176,28 @@ Disocclusion evidence ("the surface behind got N cm farther = the object in fron
 
 Block / time limits raise `BudgetExceeded` (a BaseException, so LLM `except Exception` cannot swallow it; it stays tripped for the rest of the block). Smoke: `door_ALLterra_budget_smoke_6` SUCCESS, attempt 158 s.
 
+## 2026-11-04: why door:hidden needs many retries after the pole is removed (analysis, no code change)
+Truth (eval only): hinge (-0.399, -0.361); lever bar from hub (-0.212, 0.085) (t=0) to free end (-0.343, -0.066) (t=1). t = grasp position along the bar.
+
+| | plain `door` | `door:hidden`, open-door subtask |
+|---|---|---|
+| start pose | reset (arm high, out of view) | wherever pole removal ended: parked in front of / right of the lever, at handle height |
+| affordance point #1 | (-0.291, 0.013), t=0.53 mid-lever, identical every run (same first image → LLM cache) | often the hub, e.g. (-0.157, 0.095), t=0.00, 6–7 cm off the bar (= plain point #4, ranked first) |
+| `detect_object("door handle")` box | 0.24 × 0.12 m, t=0.36, long axis 0.85 rad (correct) | 0.12 × 0.13 m (near-square), t=0.03, axis -0.60 rad (83° wrong): the arm hides the free half → hub only. doorhid_7: the arm itself detected as the handle |
+| hinge prior in planner prompt | "edge farther from the handle" (correct) | "door's LEFT edge (low confidence)" (wrong side) → pull arc / `tip_dir` reversed |
+| extra subtasks | none | "move arm clear" prep subtasks, which stall or are rejected |
+| grasps | all t 0.18–0.64; failures came from execution or review | every grasp at t ≤ 0.05 (hub) slipped; successes at t 0.10–0.81 |
+
+The reviewer was not the problem: failed attempts opened 0.4–1.6°, successes 18.6–73°.
+
+**Caption leak (all tasks).** `robot.desc` (the trajectory caption) is burned into saved camera images (`robot.py` `draw_text_overlay_image`). One-point moves and touch primitives leave it set, so perception and review images carry text such as "retreat up and away from the door". **Fixed 2026-11-04:** captions are drawn only on trajectory (video) frames.
+
+**Recommended fixes (not implemented):**
+- Park the arm high/back out of view after removing an occluder, then re-perceive.
+- Hinge prior: the lever's free end points toward the hinge (not an image-side guess).
+- Grasp at the middle of the affordance-point spread; reject points at the hub.
+- A near-square handle box means the lever is occluded → re-view.
+
 ## How to debug
 - `main.py` logs are UTF-16. Grep with `Select-String -Encoding unicode`. Markers:
   - `[pull_proprio] outcome=`

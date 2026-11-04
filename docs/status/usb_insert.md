@@ -43,6 +43,23 @@ LLM runs (claude / terra / terra, Genesis; folders under `outputs/2026-11-03/`):
 | harness hz2 | FAIL | same error, coarse rows (1.5 mm pitch × 7 = ±4.5 mm z): one partial entry 2.7 mm then jammed (edge), 706 s | z bands don't help → fix z localisation: skill rejects candidates within 3 mm of the wrist-located top edge, and re-views head-on if < 4 remain | `outputs\touch\e2e_z25b` |
 | usb_g10 | FAIL | edge-reject rule worked: z from 10 candidates = 0.0676 (truth 0.069, 1.4 mm low vs g9's 4.6 mm high); y 0.497 (truth 0.4959). Pick + offsets OK. Two line searches exhausted (rows cover ±0.8 mm), then the agent moved to other faces | new `insert_with_touch(search_cross=)` widens the height band (0.002 = 11 rows) | `usb_ALLterra_FAIL_port_z_1p4mm_low` |
 | harness hz3 | FAIL | z −1.4 mm, 11 rows: the sweep found the opening twice (entries 2.4 / 3.5 mm) but both jammed off-height, 797 s | open: sub-mm z, or z compliance during the insert push (let the tip settle into the slot) | `outputs\touch\e2e_zm14` |
+| harness jam1 | FAIL | aim err y −2, z −1.4 mm (tip actually −2.1 / −2.2 mm after touch calib), 11 rows: `search_exhausted`. The "false drops" (0.5–1.8 mm) were partial catches: the tip centre on a side edge of the opening, corner dipping in. Catches at −4.6 and +8.1 mm along the line, midpoint +1.8 vs true +2.1 mm | edge finder (below) | `outputs\touch\e2e_jam1` |
+| harness edge2 | **INSERTED** 21 s, depth 11 mm | same as jam1. Two side-edge catches → centre → column raster seated it | `InsertConfig.edge_*`, `col_*` | `outputs\touch\e2e_edge2` |
+| harness edge3 | **INSERTED** 29 s | y −15, z +2.5 mm (hz1's failing error), 5 rows, `--calib touch`: seated straight from the raster | – | `outputs\touch\e2e_edge3` |
+| harness edge4 | FAIL, **false "seated"** | y +12, z −2.5 mm, 5 rows: the tip caught the lower edge, the plug pivoted / slid back in the grasp, and the hand advanced 15 mm like a real insertion (eval depth −1.3 mm) | seat check: push the hand 2 mm sideways; a seated plug moves ≤ clearance | `outputs\touch\e2e_edge4` |
+| harness ver2 | **INSERTED** 15 s | jam1 error again, with the seat check: moved 0.27 mm → seated | – | `outputs\touch\e2e_ver2` |
+| harness ver4 | FAIL, correctly reported `slipped` | edge4 error: the seat check moved 2.4 mm → `slipped` (the plug had been lost from the grasp) instead of a false seat | open: push gentler on partial catches near a z-edge so the plug doesn't pivot out | `outputs\touch\e2e_ver4` |
+
+**Edge finder** (`touch/insertion.py`, line sweep only):
+- A blocked push that still sank ≥ 0.4 mm is a partial catch.
+- Two catches 9–16 mm apart along the line (≈ one USB-A opening width) put the centre at their midpoint.
+- A column raster there (±0.9 mm along, 0.3 mm pitch, ±4.5 mm across) finds the height.
+- Up to 2 cycles, then the raster resumes.
+- This finds the port height by touch: a flat face touch can't, because the plug is as big as the opening.
+- Unit test: `test_edge_catches_locate_an_off_row_opening`.
+- **Seat check** (`InsertConfig.verify_*`): before reporting `seated`, the hand is pushed 2 mm sideways at 3 N axial. Moving more than 0.8 mm → `slipped` (not in the opening). Real-robot feasible (proprioception only). Unit test: `test_grasp_slip_that_looks_seated_is_caught_by_the_sideways_check`.
+
+**Videos of killed runs:** clips are written only when an attempt ends, so killed runs had no insertion video. `helpers/rollout_report.py` now encodes `videos/*_unfinished.mp4` from the trajectory frames (backfilled for every `outputs/2026-11-03/usb_*` folder).
 
 Line search (`touch/insertion.py`, `InsertConfig.sweep_*`): raster passes ±`sweep_half` along `sweep_dir` at 5 mm/s, rows 0.4 mm apart across it (5 rows), same drop detection / probe / insert as the spiral. `api.insert_with_touch` extends `max_s` to fit.
 Geometry (sim truth, for eval only): port (0.092, 0.4959, 0.069), axis +x, `TIP_X` = 0.0245.

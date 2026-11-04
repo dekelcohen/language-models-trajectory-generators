@@ -657,7 +657,9 @@ class API:
         it when the opening's height is known but its position along the face is uncertain (> 3 mm).
         ``search_cross`` (m, default 0.0008): half-width of the band ACROSS the line covered by those
         passes; widen it (e.g. 0.002) when the height is uncertain by more than ~1 mm (slower: time
-        grows with the number of passes). ``max_s`` is extended to fit the sweep. Returns a dict with
+        grows with the number of passes). ``max_s`` is extended to fit the sweep. Before reporting
+        'seated', the hand is pushed 2 mm sideways: a seated part can't move, while a part that slid in the
+        grasp can, which gives 'slipped'. Returns a dict with
         ``outcome`` ('seated' | 'jammed' | 'search_exhausted' | 'no_contact' | 'slipped' | 'over_force' |
         'timeout' | 'unsupported' | 'disabled'), ``advance_mm``, ``tip_pos`` and ``events`` (proprioception only).
         """
@@ -679,7 +681,9 @@ class API:
                 rows = 1 + 2 * int(np.ceil(float(search_cross) / c.sweep_pitch - 1e-9))
                 config["sweep_rows"] = rows
             travel = float(search_half) * (1 + 2 * rows)
-            max_s = max(float(max_s), travel / c.spiral_speed + 10.0)
+            # + edge-finder cycles (column raster across the line each)
+            local = c.max_edge_cycles * (2 * round(c.col_half / c.col_pitch) + 1) * (2 * c.cross_half + c.col_pitch)
+            max_s = max(float(max_s), (travel + local) / c.spiral_speed + 10.0)
         spec = {"axis": a.tolist(), "tool_offset": off.tolist(),
                 "max_s": float(max_s), "grip_force": float(grip_force)}
         if config:

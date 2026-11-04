@@ -147,6 +147,29 @@ COLORS = {"SUCCESS": (20, 140, 40), "FAIL": (190, 30, 30), "ACCEPTED_UNREVIEWED"
           None: (90, 90, 90), "INCOMPLETE": (90, 90, 90)}
 
 
+def _encode_unfinished_tail(traj, vid_dir):
+    """Clips are written only when an attempt ends, so a killed/timed-out run has no video of its last
+    attempt. Encode the trajectory frames after the last clip into `<cam>_image_attempt_<s>_<e>_unfinished.mp4`."""
+    if not os.path.isdir(traj):
+        return
+    for cam in ("rgb", "wrist"):
+        idx = [int(m.group(1)) for f in os.listdir(traj) if (m := re.match(cam + r"_image_(\d+)\.png$", f))]
+        if not idx:
+            continue
+        ends = [int(m.group(1)) for f in os.listdir(vid_dir)
+                if (m := re.match(cam + r"_image_attempt_\d+_(\d+)\.mp4$", f))]
+        start = max(ends) + 1 if ends else 0
+        if max(idx) - start < 5:
+            continue
+        try:
+            from debug.dbg_utils import create_video_from_images
+            create_video_from_images(folder_path=traj, output_video_folder_path=vid_dir, base_name=f"{cam}_image",
+                                     start_idx=start, end_idx=float("inf"), fps=15,
+                                     output_filename=f"{cam}_image_attempt_{start}_{{end}}_unfinished.mp4")
+        except Exception as e:  # report packaging must not fail on video encoding
+            print(f"[rollout_report] could not encode unfinished {cam} clip: {e}")
+
+
 def package(run_dir, name, out_root, notes=""):
     log = os.path.join(run_dir, "vlm_traj.log")
     run = parse_log(log)
@@ -158,6 +181,7 @@ def package(run_dir, name, out_root, notes=""):
             if f.endswith(".mp4"):
                 shutil.copy2(os.path.join(vids, f), os.path.join(dst, "videos", f))
     traj = os.path.join(run_dir, "trajectory")
+    _encode_unfinished_tail(traj, os.path.join(dst, "videos"))
 
     def frame(kind, i):
         p = os.path.join(traj, f"{kind}_image_{i}.png")

@@ -122,8 +122,10 @@ metadata:
    `search_line` = the face direction across the axis along which the aim is uncertain (horizontal
    along a laptop side); the height must be right within ~1 mm (the line passes are 0.4 mm apart).
    A line search that exhausted at a height you doubt by 1-2 mm: retry once with `search_cross=0.002`
-   (passes cover +-2 mm in height, ~2x slower). Tested: it finds the opening but entries off-height
-   can jam after 2-4 mm, so a correct z (step 2) matters more.
+   (passes cover +-2 mm in height, ~2x slower). The search also finds height by feel: a push that
+   sinks 0.4-2 mm but is then blocked is a "partial catch" on an edge of the opening; two catches
+   ~one opening width apart give its centre, then a short column raster finds the height (logged as
+   "edges along the line ... column raster"). Tested: seated with a 2 mm aim error in both axes.
    Do not hand-write your own scan: this keeps the force control and drop detection.
 5. `res["outcome"]`: `seated` = in: open the gripper, back off along -axis. Anything else = NOT in:
    NEVER open the gripper. `search_exhausted` / `jammed` / `timeout` after a spiral: back off 1 cm
@@ -134,6 +136,7 @@ metadata:
    retry the same face: move to the next candidate FACE (opposite side, front, back), wrist-locate the
    port there, re-touch a) on that face, and line-search it. Only re-check the height (step 3) if the
    touch contacts were far from the opening z.
-   `no_contact` / `slipped` (advanced past the part length =
-   nothing was hit): the opening is not where you aimed - back off, re-locate with the wrist camera,
-   check `gripper_holding()`. `unsupported`/`disabled`: report failure.
+   `no_contact` / `slipped` (advanced past the part length, or the sideways seat check moved = the
+   part slid / pivoted in the grasp instead of entering): the part is not in. Back off, check
+   `gripper_holding()`, re-measure the in-hand offset (step 3) before retrying, and re-locate with
+   the wrist camera. `unsupported`/`disabled`: report failure.
