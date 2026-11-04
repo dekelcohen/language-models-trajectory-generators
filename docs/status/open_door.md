@@ -198,6 +198,20 @@ The reviewer was not the problem: failed attempts opened 0.4–1.6°, successes 
 - Grasp at the middle of the affordance-point spread; reject points at the hub.
 - A near-square handle box means the lever is occluded → re-view.
 
+## 2026-11-04: hinge hint, occluder perception, arm retreat (implemented)
+- **Hinge hint origin:** the perception VLM guessed "hinge near left edge (low confidence)" from frame appearance; the planner copied it. Fix: perception item 4 + planner rule 7 say only "hinge on the edge FARTHEST from the handle"; never copy a left/right guess.
+- **Occluder rule** (perception item 2): a shape covering the target, crossing its frame, reaching the floor in front, or shaded like a curved surface is a SEPARATE occluder, not part of the target. Before it, terra merged the pole into the door ("tall gray door").
+- **Arm retreat:** clearing already existed (planner rule 8). The new "retreat up and toward the base" wording was harmful: z=1.1 m is out of reach, and moving near the base axis folded the arm low (h3: every later lift stalled). Now: a clearing subtask ends by moving the hand back to the pose the subtask started from (known reachable, clear of the target).
+- **Affordance images:** `affordance_points_<obj>_<step>.png` saved per step; the rollout package copies them and the head scene images into `perception/`.
+
+| run | result | package (`outputs/2026-11-04/`) |
+|---|---|---|
+| door_p1 (plain door) | SUCCESS, attempt 1 | `door_terra_hingefix_regress_1` |
+| doorhid_h1 | stopped: pole merged into door, removal skipped | `door_hidden_terra_hingefix_1` |
+| doorhid_h2 | success, but the door swing knocked the pole over | `door_hidden_terra_hingefix_2` |
+| doorhid_h3 | success after 3 planner iterations (folded arm from "toward base" retreat) | `door_hidden_terra_occluderfix_3` |
+| doorhid_h4 | **clean SUCCESS**: pole removed attempt 1, hand back near home, door opened attempt 1, ~10 min | `door_hidden_terra_retreatfix_4` |
+
 ## How to debug
 - `main.py` logs are UTF-16. Grep with `Select-String -Encoding unicode`. Markers:
   - `[pull_proprio] outcome=`

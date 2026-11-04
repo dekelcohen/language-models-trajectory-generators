@@ -76,8 +76,8 @@ DECOMPOSITION RULES:
 5. If the command is a single self-contained action, dispatch exactly ONE subtask.
 6. Keep the number of subtasks minimal - only decompose when there is a real dependency or a physically distinct phase that warrants its own attempt/verification loop.
 7. Remember not to decompose too detailed - the subtask agent is responsible for the granular motion-trajectories generation. You, the planner, just need to define the subtask high-level prompt: what to do high level (move the <object> ...), what are the constraints, but NOT HOW to do it (e.g grasp 40 cm from above), pass on *ALL* available information from the user command and scene analysis + attached image.
-   Success criteria must not depend on your guesses: if a door / drawer / lid could hinge OR slide and you are not sure which, state success as "visibly open (gap / interior exposed, clearly moved from its start)" - not a hinge angle - so a correct opening by the other motion is not rejected.
-8. After every subtask, perception re-runs and you are re-invoked with an UPDATED SCENE ANALYSIS. Before dispatching the next subtask, check whether the previous one changed the scene in a way that blocks the next action - in particular whether the ROBOT ARM itself now occludes or blocks the next target's affordance. If so, insert a prep subtask first (e.g. "move the arm clear of the target so it is visible and reachable") before the manipulation subtask.
+   Success criteria must not depend on your guesses: if a door / drawer / lid could hinge OR slide and you are not sure which, state success as "visibly open (gap / interior exposed, clearly moved from its start)" - not a hinge angle - so a correct opening by the other motion is not rejected. For a hinged door / lid, describe the hinge only as "on the edge farthest from the handle" - never copy a left/right hinge-side guess from the scene analysis into the subtask (a wrong side reverses the pull arc).
+8. After every subtask, perception re-runs and you are re-invoked with an UPDATED SCENE ANALYSIS. Before dispatching the next subtask, check whether the previous one changed the scene in a way that blocks the next action - in particular whether the ROBOT ARM itself now occludes or blocks the next target's affordance. If so, insert a prep subtask first (e.g. "move the arm clear of the target so it is visible and reachable") before the manipulation subtask. To avoid that extra subtask, end every clearing / occluder-removal subtask with "then move the hand back to the pose it started this subtask from (a known reachable pose, clear of the target)" (part of its success criteria). Do not ask for "up / toward the base / as high as possible": near the base axis or above reach the arm folds and stays stuck low.
 
 [INSERT RECOVERY_FROM_FAILURE]
 
@@ -87,7 +87,7 @@ Reasoning: The cylinder occludes the door handle, so it must be moved aside befo
 First turn - dispatch the NEXT subtask (clear the occluder):
 ```python
 result = execute_subtasks([
-    {"prompt": "Pick up the gray cylinder in front of the door and place it about 30 cm to the side, clear of the door and its swing path. Success = the gray cylinder is no longer in front of or touching the door and the door handle is now unobstructed.", "max_attempts": 2},
+    {"prompt": "Pick up the gray cylinder in front of the door and place it about 30 cm to the side, clear of the door and its swing path, then move the hand back to the pose it started this subtask from. Success = the gray cylinder is no longer in front of or touching the door, and neither it nor the arm hides the door handle.", "max_attempts": 2},
 ])
 print(result["executed"], result["success"], len(result["remaining"]))
 ```

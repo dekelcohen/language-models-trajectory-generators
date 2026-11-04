@@ -185,7 +185,10 @@ class API:
                 cv2.circle(img, (int(x), int(y)), 2, color, -1)
                 cv2.circle(img, (int(x), int(y)), 2, (0, 0, 0), 1)
             safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(object_name))[:60] or "object"
-            out_path = os.path.join(config.images_folder, f"affordance_points_{safe}.png")
+            # One file per perception call (same step as scene_analysis_head_<step>.png), so every
+            # affordance pointing of a rollout is kept, not only the last one.
+            step = getattr(self, "trajectory_step", 0)
+            out_path = os.path.join(config.images_folder, f"affordance_points_{safe}_{step}.png")
             cv2.imwrite(out_path, img)
             self.logger.info(OK + f"Saved affordance-points overlay to {out_path}" + ENDC)
             return out_path
@@ -745,8 +748,10 @@ class API:
 
     def get_robot_state(self):
         """Measured proprioception: {'eef_pos': [x, y, z], 'gripper_open', 'gripper_width' (m),
-        'gripper_holding' (closed but stalled on an object)}. Values are None when not reported."""
-        state = {"eef_pos": None, "gripper_open": None, "gripper_width": None, "gripper_holding": None}
+        'gripper_holding' (closed but stalled on an object), 'rotation' (measured top-down hand yaw, same
+        convention as a pose's 4th value; None if the hand is tilted)}. Values are None when not reported."""
+        state = {"eef_pos": None, "gripper_open": None, "gripper_width": None, "gripper_holding": None,
+                 "rotation": None}
         try:
             self.main_connection.send([config.GET_ROBOT_STATE, {}])
             resp = self.main_connection.recv() or {}

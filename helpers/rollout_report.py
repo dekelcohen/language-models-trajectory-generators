@@ -182,6 +182,12 @@ def package(run_dir, name, out_root, notes=""):
                 shutil.copy2(os.path.join(vids, f), os.path.join(dst, "videos", f))
     traj = os.path.join(run_dir, "trajectory")
     _encode_unfinished_tail(traj, os.path.join(dst, "videos"))
+    # Perception inputs per planner turn: the analysed head image + its affordance-point overlay.
+    perc = [f for f in os.listdir(run_dir) if re.match(r"(scene_analysis_head|affordance_points_.*)_\d+\.png$", f)]
+    if perc:
+        os.makedirs(os.path.join(dst, "perception"), exist_ok=True)
+        for f in perc:
+            shutil.copy2(os.path.join(run_dir, f), os.path.join(dst, "perception", f))
 
     def frame(kind, i):
         p = os.path.join(traj, f"{kind}_image_{i}.png")
@@ -235,7 +241,8 @@ def package(run_dir, name, out_root, notes=""):
             if att["world"]:
                 md += [f"  - Sim world-state (EVALUATION ONLY, not seen by the agent): `{att['world'][:400]}`"]
         md += [""]
-    md += ["## Files", "", *[f"- `{i}`" for i in images], "- `videos/` (per-attempt head/wrist clips + full run)", ""]
+    md += ["## Files", "", *[f"- `{i}`" for i in images], "- `videos/` (per-attempt head/wrist clips + full run)",
+           "- `perception/` (per planner turn: `scene_analysis_head_<step>.png` + `affordance_points_*_<step>.png`)", ""]
     with open(os.path.join(dst, "summary.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(md))
     return dst, result

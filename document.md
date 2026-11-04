@@ -1738,6 +1738,16 @@ has no `shapely` and nothing on the tracking path needs it.
 
 ## Changelog
 
+- **Measured hand rotation in robot state and prompt** (`env.py`, `api.get_robot_state()["rotation"]`,
+  `agent_runner.ee_rotation_text`): the main prompt used to hard-code "rotation 0", so a part
+  picked at rotation ±1.571 was turned 90° before insertion (root cause of every failed LLM USB
+  run). The prompt now states the measured top-down yaw and, when holding, "keep this rotation".
+- **Door:hidden perception/planner fixes** (`docs/status/open_door.md`): hinge = the edge farthest
+  from the handle (no left/right guesses); occluders are separate objects, never merged into the
+  target; clearing subtasks end by returning the hand to their start pose (not "up / toward the
+  base", which folded the arm).
+- **Rollout packages** now include `perception/` (head scene images + per-step affordance-point overlays).
+
 - **USB insertion by touch: edge finder** (`touch/insertion.py`, `docs/status/usb_insert.md`):
   the wrist camera locates the port only to a few mm, but a USB-A tip needs ±0.25 mm. During the
   line sweep, a push that is blocked yet still sinks ≥ 0.4 mm is a *partial catch*: the tip

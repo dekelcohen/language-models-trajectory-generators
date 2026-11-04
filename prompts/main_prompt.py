@@ -134,9 +134,9 @@ You are, however, able to call any of the following Python functions, if require
 ENVIRONMENT SET-UP:
 [INSERT 3D COORDINATES PROMPT SECTION]
 
-The robot arm end-effector is currently positioned at [INSERT EE POSITION], with the rotation value at 0, and the gripper [INSERT GRIPPER STATE].
+The robot arm end-effector is currently positioned at [INSERT EE POSITION], with the rotation value at [INSERT EE ROTATION], and the gripper [INSERT GRIPPER STATE].
 The robot arm is in a top-down set-up, with the end-effector facing down onto a floor. The end-effector is therefore able to rotate about the z-axis, from -pi to pi radians.
-The end-effector gripper has two fingers, and they are currently parallel to the x-axis.
+The end-effector gripper has two fingers; at rotation 0 they are parallel to the x-axis.
 The gripper can only grasp objects along sides which are shorter than 0.08.
 Negative rotation values represent clockwise rotation, and positive rotation values represent anticlockwise rotation. The rotation values should be in radians.
 

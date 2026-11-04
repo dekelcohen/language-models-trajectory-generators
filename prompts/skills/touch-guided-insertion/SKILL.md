@@ -24,6 +24,10 @@ metadata:
    its top ~1 cm is the body, the rest is the stand - centre z = top z - 0.005, so e.g. top 0.058
    -> command z = 0.058 - 0.005 + 0.06 = 0.113. Print top z and the commanded z.
    Close across the narrow width (rotation 0 closes along world x).
+   **The held part turns with the hand.** Keep the pick rotation (`get_robot_state()["rotation"]`)
+   in every later pose, start poses included; turn the hand only by the angle that brings the
+   part's tip axis onto the insertion axis. A pick at 1.571 then poses at 0 turned the plug 90 deg,
+   so its side, not its tip, met the face (every early LLM run).
    Small parts: take x,y from the affordance point, not the detection box centre (the box may merge the stand).
    **Measure the top by touch first** (depth on a small part is a few mm off; a grasp below the body's
    mid-height lets it pivot or slide in the fingers later): `close_gripper()`, move the fingertips
@@ -48,6 +52,8 @@ metadata:
 2. Locate the opening with the WRIST camera (the head camera cannot resolve a port; detect_object on
    it returns the whole face/edge, cm off). Which face holds the port is a guess too: list the device's
    side faces the part could enter, the one nearest the arm's base first (best reach and view), and try them in that order (step 5).
+   Finish a face (touch insert at its candidates) before viewing the next one. Skip faces > 0.8 m
+   from the arm base (reach limit: pushes there stall or knock the part out of the grasp).
    Holding the part, park the fingertips ~0.12-0.15 m in
    front of the face (opposite the axis), ~0.10 m above the opening's guessed height, offset ~0.1 m
    sideways from the guessed opening so the gripper does not hide it, then:
@@ -56,7 +62,10 @@ metadata:
    ```
    Each entry: `{"label", "position": [x, y, z], "pixel"}` (~1 mm accurate). A device can show
    several similar openings (only one may fit): keep all candidates. None found or the gripper
-   hides the face: shift the hand 0.1 m sideways / higher and call again.
+   hides the face: shift the hand 0.1 m sideways / higher and call again. The wrist camera turns
+   with the hand: if the palm / held part fills the view at the carry rotation, take the views at
+   carry rotation +-1.571 (the part turns too - harmless in free space), then turn back to the carry
+   rotation before step 3 (check `get_robot_state()["rotation"]`).
    **Confirm before aiming**: move the hand ~5 cm sideways (still not hiding the face) and call
    again. Accept a position only if both views agree within ~3 mm (use their mean). If they
    disagree (common: device textures show several slot-like marks and a small opening is a few

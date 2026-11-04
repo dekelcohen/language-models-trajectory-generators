@@ -320,6 +320,41 @@ class TestGripperStatePrompt(unittest.TestCase):
             self.assertIn("with the rotation value at 0, and the gripper open.\n", prompt)
             self.assertNotIn("[INSERT GRIPPER STATE]", prompt)
 
+    def test_prompt_states_measured_rotation_while_holding(self):
+        """The prompt hard-coded rotation 0: a subtask after a pick at 1.571 commanded 0 and turned
+        the held USB plug sideways."""
+        import agent_runner
+
+        prompt = agent_runner._build_main_prompt(
+            "detect", "detect-initial", [0, 0, 0], "task", "coords", "", gripper_open=False,
+            gripper_holding=True, gripper_width=0.016, ee_rotation=1.571)
+        self.assertIn("with the rotation value at 1.571 (measured) - the held object turns with the hand", prompt)
+        self.assertNotIn("[INSERT EE ROTATION]", prompt)
+
+    def test_measured_topdown_rotation(self):
+        import env as env_module
+        from sim_adapter import transforms
+
+        class _Sim:
+            def __init__(self, euler):
+                self.quat = transforms.quat_from_euler(euler)
+
+            def get_link_pose(self, body, link):
+                return [0, 0, 0], self.quat
+
+            matrix_from_quat = staticmethod(transforms.matrix_from_quat)
+            quat_from_euler = staticmethod(transforms.quat_from_euler)
+
+        class _Robot:
+            id, ee_index, ee_start_orientation_e = 0, 0, config.ee_start_orientation_e
+
+        home = list(config.ee_start_orientation_e)
+        for rot in (0.0, 1.571, -2.5, 3.0):
+            sim = _Sim([home[0], home[1], home[2] + rot])
+            got = env_module._measured_topdown_rotation(sim, _Robot())
+            self.assertAlmostEqual(np.angle(np.exp(1j * (got - rot))), 0.0, places=2)
+        self.assertIsNone(env_module._measured_topdown_rotation(_Sim([0.0, np.pi / 2, 0.0]), _Robot()))
+
     def test_review_gets_measured_gripper_state(self):
         """The reviewer is told what the width sensor measured (it hallucinated an empty
         gripper lifting away while the wrist cam showed the kettle in hand)."""

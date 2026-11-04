@@ -108,7 +108,7 @@ def query_robot_state(main_connection, logger):
     `gripper_open` is None when the backend does not report it.
     """
     state = {"eef_pos": None, "gripper_open": None, "gripper_width": None, "gripper_holding": None,
-             "base_pos": None}
+             "base_pos": None, "rotation": None}
     if main_connection is None:
         return state
     try:
@@ -123,9 +123,23 @@ def query_robot_state(main_connection, logger):
             state["gripper_holding"] = bool(resp["gripper_holding"])
         if resp.get("base_pos") is not None:
             state["base_pos"] = [round(float(v), 3) for v in resp["base_pos"]]
+        if resp.get("rotation") is not None:
+            state["rotation"] = float(resp["rotation"])
     except Exception as e:
         logger.info(PROGRESS + f"Warning: GET_ROBOT_STATE for LLM context failed: {e}" + ENDC)
     return state
+
+
+def ee_rotation_text(rotation, holding=None):
+    """Measured hand yaw for the subtask prompt. Was hard-coded "0": after a pick at rotation
+    1.571 the next subtask then commanded 0 and turned the held USB plug 90 deg (tip sideways)."""
+    if rotation is None or abs(rotation) < 0.05:
+        return "0"
+    text = f"{rotation:.3f} (measured)"
+    if holding:
+        text += (" - the held object turns with the hand: keep this rotation in every pose (start poses "
+                 "included) unless you mean to turn the object")
+    return text
 
 
 def robot_state_sentence(state):
@@ -175,6 +189,7 @@ def log_world_state(main_connection, logger, tag):
     eef = [round(v, 3) for v in robot_state["eef_pos"]] if robot_state["eef_pos"] else None
     logger.info(PROGRESS + f"[world-state] {tag}: eef_pos={eef} gripper_open={robot_state['gripper_open']} "
                 f"gripper_width={robot_state['gripper_width']} holding={robot_state['gripper_holding']} "
+                f"rotation={robot_state.get('rotation')} "
                 f"objects={poses}" + ENDC)
     return robot_state
 
@@ -607,8 +622,11 @@ def teardown_agent(ctx):
 def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section, in_context_example,
                        scene_analysis="", skills_index="", loaded_skills="", detect_object_available=True,
                        tracking=False, vis_grasp=False, gripper_open=None, gripper_holding=None,
-                       gripper_width=None, base_pos=None):
+                       gripper_width=None, base_pos=None, ee_rotation=None):
     """Fill all placeholders of the subtask MAIN_PROMPT.
+
+    `ee_rotation` is the MEASURED top-down hand yaw (pose rotation convention); see
+    ee_rotation_text - near 0 / unknown keeps the historical "0" wording.
 
     `gripper_open` is the live gripper state (GET_ROBOT_STATE). Only an explicit False
     renders the CLOSED text; None (unknown) or True keeps the historical "open" wording,
@@ -641,6 +659,7 @@ def _build_main_prompt(detect_tool, detect_initial, ee_pos, task, coords_section
         .replace("[INSERT SCENE ANALYSIS]", scene_analysis)
         .replace("[INSERT EE POSITION]", str(ee_pos) + (
             f" (the robot arm's base is mounted at {base_pos})" if base_pos else ""))
+        .replace("[INSERT EE ROTATION]", ee_rotation_text(ee_rotation, gripper_holding))
         .replace("[INSERT GRIPPER STATE]", gripper_state_text(gripper_open, gripper_holding, gripper_width))
         .replace("[INSERT TASK]", task)
         .replace("[INSERT 3D COORDINATES PROMPT SECTION]", coords_section)
@@ -873,6 +892,7 @@ def handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, fe
         gripper_holding=robot_state["gripper_holding"],
         gripper_width=robot_state["gripper_width"],
         base_pos=robot_state["base_pos"],
+        ee_rotation=robot_state.get("rotation"),
     )
     try:
         logger.info(PROGRESS + f"Env state: {json.dumps(ctx.sim_state)}" + ENDC)
@@ -1065,6 +1085,7 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
         gripper_holding=robot_state["gripper_holding"],
         gripper_width=robot_state["gripper_width"],
         base_pos=robot_state["base_pos"],
+        ee_rotation=robot_state.get("rotation"),
     )
 
     try:

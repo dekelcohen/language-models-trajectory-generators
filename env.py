@@ -1,4 +1,4 @@
-﻿import os
+import os
 import numpy as np
 from debug.dbg_utils import init_loguru_logger
 from PIL import Image
@@ -443,6 +443,42 @@ def _gripper_proprio(sim, robot):
             "max_tilt_since_close": tilt}
 
 
+def _measured_topdown_rotation(sim, robot, max_tilt_deg=25.0):
+    """Hand yaw in the [x, y, z, rotation] pose convention, from forward kinematics (proprioception):
+    the world-z rotation taking the home (rotation 0) orientation to the current one. None when the
+    hand is not roughly top-down (the 4-number convention does not describe it) or unavailable."""
+    try:
+        _, quat = sim.get_link_pose(robot.id, robot.ee_index)
+        cur = np.asarray(sim.matrix_from_quat(quat), float).reshape(3, 3)
+        ref = np.asarray(sim.matrix_from_quat(sim.quat_from_euler(robot.ee_start_orientation_e)), float).reshape(3, 3)
+        if np.degrees(np.arccos(np.clip(cur[:, 2] @ ref[:, 2], -1.0, 1.0))) > max_tilt_deg:
+            return None
+        rel = cur @ ref.T
+        return round(float(np.arctan2(rel[1, 0], rel[0, 0])), 3)
+    except Exception:
+        return None
+
+
+def _log_insert_truth(sim, env, robot, spec, logger, when):
+    """EVALUATION ONLY (log file, never sent to the agent): true plug tip / axis vs the port, and the
+    true eef->tip offset vs the agent's ``tool_offset``, to compare LLM runs with the GT harness."""
+    try:
+        st = env.simenv.get_state()
+        if "plug_tip_pos" not in st or "port_pos" not in st:
+            return
+        tip, port = np.asarray(st["plug_tip_pos"], float), np.asarray(st["port_pos"], float)
+        eef = np.asarray(sim.get_link_pose(robot.id, robot.ee_index)[0], float)
+        axis = np.asarray(st.get("plug_axis", [np.nan] * 3), float)
+        tilt = np.degrees(np.arccos(np.clip(axis @ np.asarray(spec["axis"], float), -1, 1)))
+        logger.info(PROGRESS + f"[eval] insert {when}: tip-port {np.round(1000 * (tip - port), 1).tolist()}mm "
+                    f"plug_axis {np.round(axis, 3).tolist()} (tilt {tilt:.1f}deg vs axis) "
+                    f"true eef->tip {np.round(1000 * (tip - eef), 1).tolist()}mm vs tool_offset "
+                    f"{np.round(1000 * np.asarray(spec.get('tool_offset', (0, 0, 0)), float), 1).tolist()}mm "
+                    f"depth {1000 * st.get('insertion_depth', np.nan):.1f}mm" + ENDC)
+    except Exception as e:
+        logger.info(PROGRESS + f"[eval] insert truth log failed: {e}" + ENDC)
+
+
 def _touch_insert(sim, env, robot, spec, logger):
     """TOUCH_INSERT: touch-guided insertion of the held part (touch/sim_runner.py).
 
@@ -466,6 +502,7 @@ def _touch_insert(sim, env, robot, spec, logger):
         else:
             cfg = InsertConfig(**{k: (tuple(float(x) for x in v) if isinstance(v, (list, tuple)) else float(v))
                                   for k, v in (spec.get("config") or {}).items()})
+            _log_insert_truth(sim, env, robot, spec, logger, "start")
         res = run_touch_insert(
             sim, robot.id, robot.ee_index, robot.joint_indices[:arm_n], list(robot.gripper_joint_indices),
             step=lambda: robot.step_env_and_record(env), dt=config.control_dt,
@@ -477,6 +514,7 @@ def _touch_insert(sim, env, robot, spec, logger):
             ok = res.get("outcome") == "contact"
             return [(OK if ok else FAIL) + f"Guarded move finished: {res.get('outcome')}" + ENDC, res]
         ok = res.get("outcome") == "seated"
+        _log_insert_truth(sim, env, robot, spec, logger, "end")
         return [(OK if ok else FAIL) + f"Touch insertion finished: {res.get('outcome')}" + ENDC, res]
     except Exception as e:
         logger.info(FAIL + f"TOUCH_INSERT failed: {e}\n{traceback.format_exc()}" + ENDC)
@@ -976,6 +1014,7 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                         reply["base_pos"] = [round(float(v), 3) for v in robot.base_start_position]
                     except Exception:
                         reply["base_pos"] = None
+                    reply["rotation"] = _measured_topdown_rotation(sim, robot)
                     env_connection.send(reply)
                 except Exception:
                     env_connection.send({})

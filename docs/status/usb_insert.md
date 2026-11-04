@@ -63,3 +63,20 @@ LLM runs (claude / terra / terra, Genesis; folders under `outputs/2026-11-03/`):
 
 Line search (`touch/insertion.py`, `InsertConfig.sweep_*`): raster passes ±`sweep_half` along `sweep_dir` at 5 mm/s, rows 0.4 mm apart across it (5 rows), same drop detection / probe / insert as the spiral. `api.insert_with_touch` extends `max_s` to fit.
 Geometry (sim truth, for eval only): port (0.092, 0.4959, 0.069), axis +x, `TIP_X` = 0.0245.
+
+## 2026-11-04: why no LLM run ever pushed the tip into the slot
+Eval-only truth logging: `env.py` `_log_insert_truth` prints `[eval] insert start|end` (tip−port, true plug axis/tilt, true eef→tip vs `tool_offset`). Log only; never sent to the agent.
+
+- **Root cause (every LLM run, g9/g10/r2):** the insert subtask prompt hard-coded "rotation value at 0" (`prompts/main_prompt.py`). The pick closes across the plug at rotation ±1.571, so the insert poses yawed the hand 90° and the plug pointed along y (r2 eval: tilt 90°, tip−port [−36, 5, −12] mm). The tip could never enter.
+- **Fix:** the measured top-down yaw is now in `get_robot_state()["rotation"]`, the world-state log and the main prompt (`[INSERT EE ROTATION]`, plus a "held part turns with the hand, keep this rotation" hint). Skill step 1 has the same rule. Tests: `test_prompt_states_measured_rotation_while_holding`, `test_measured_topdown_rotation`.
+- **Wrist views at carry rotation:** the palm and plug hide the laptop face (r3: 0 port candidates in 11 views). The skill now says to take the views at carry rotation ±1.571, then turn back before touch.
+- **Face order:** finish a face before viewing the next; skip faces > 0.8 m from the base.
+
+| run | result | package (`outputs/2026-11-04/`) |
+|---|---|---|
+| usb_r1 | perception said "upright"; grasped 21 mm low on the pedestal → plug ejected | `usb_terra_repro_eval_1` |
+| usb_r2 | root cause found: plug yawed 90° at insert | `usb_terra_repro_eval_2` |
+| usb_r3 | rotation fix works (tilt 0°), but no wrist port candidates → insert at a guess 58 mm off → jammed | `usb_terra_rotation_fix_3` |
+| usb_r4 | rotation kept; −x face candidates found but abandoned; insert on the far face (no port, reach limit) → `search_exhausted`, plug lost; `holding` false positive (fingers stalled on the laptop) | `usb_terra_wristview_fix_4` |
+
+Open: wrist port detection is sparse (terra); `holding` uses finger width only, so fingers jammed on a surface look like a grasp.
