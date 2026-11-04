@@ -20,6 +20,7 @@ always terminates by calling plan_completed() or plan_failed().
 import math
 import numpy as np
 
+import config
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
 
 
@@ -78,6 +79,13 @@ class PlannerAPI:
         st = subtasks[idx]
         prompt = str(st.get("prompt", "")).strip()
         max_attempts = st.get("max_attempts")
+        cap = int(getattr(config, "max_subtask_attempts", 4))
+        try:
+            if max_attempts is not None and int(max_attempts) > cap:
+                print(f"execute_subtasks: max_attempts={max_attempts} capped at {cap}.")
+                max_attempts = cap
+        except (TypeError, ValueError):
+            max_attempts = None
         remaining = subtasks[idx + 1:]
 
         self.logger.info(PROGRESS + f"[planner] execute_subtasks[{idx}] (max_attempts={max_attempts}) prompt={prompt!r}" + ENDC)

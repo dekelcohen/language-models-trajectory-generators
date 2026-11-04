@@ -27,6 +27,7 @@ import models
 import segmentation_adapter
 from config import OK, PROGRESS, WARNING, FAIL, ENDC
 from helpers.main_utils import get_exec_locals, execute_blocks_from_log
+from helpers.run_budget import BudgetExceeded, from_config as budget_from_config
 from helpers.perception_scene_analysis import run_scene_perception
 from prompts.main_prompt import (
     MAIN_PROMPT,
@@ -561,6 +562,8 @@ def init_agent(args, logger):
     api.sim_state = sim_state
     api.ee_pos_for_prompt = ee_pos_for_prompt
     api.coords_section = coords_section
+    if not getattr(args, "replay_log", None):
+        api.budget = budget_from_config(config, f"{getattr(args, 'sim', '')}:{getattr(args, 'task', '')}")
 
     exec_locals = get_exec_locals(api, logger)
 
@@ -778,10 +781,13 @@ def execute_python_blocks(ctx, task, assistant_content):
         if error or task.completed_task or task.failed_task:
             continue
         try:
+            _blk_budget = getattr(getattr(ctx, "api", None), "budget", None)
+            if _blk_budget is not None:
+                _blk_budget.start_block()
             f = StringIO()
             with redirect_stdout(f):
                 exec(code, exec_env)
-        except Exception:
+        except (Exception, BudgetExceeded):
             error_message = traceback.format_exc()
             feedback += ERROR_CORRECTION_PROMPT.replace("[INSERT BLOCK NUMBER]", str(block_number)).replace("[INSERT ERROR MESSAGE]", error_message)
             feedback += "\n"
@@ -942,31 +948,49 @@ def run_task_agent_loop(ctx, task, prompt, scene_analysis, attempt_summaries):
     idle_turns, attempt_turns, last_step = 0, 0, ctx.api.trajectory_step
     max_idle = getattr(config, "max_idle_agent_turns", 10)
     max_turns = getattr(config, "max_agent_turns_per_attempt", 25)
+    budget = getattr(getattr(ctx, "api", None), "budget", None)
+    forced = False
     while not task.completed_task:
         feedback = execute_python_blocks(ctx, task, messages[-1]["content"])
-        if task.completed_task:
-            break
-        if not task.failed_task:
+        if not (task.completed_task or task.failed_task):
             # An LLM that refuses to end the attempt (keeps answering without moving the robot, or
             # keeps retrying the same motion forever) would never be reviewed: end the attempt.
+            # Same when the attempt / command time budget (helpers.run_budget) is spent.
             step = ctx.api.trajectory_step
             idle_turns = idle_turns + 1 if step == last_step else 0
             attempt_turns += 1
             last_step = step
             reason = (f"{idle_turns} agent turns without robot motion" if idle_turns >= max_idle else
-                      f"{attempt_turns} agent turns in this attempt" if attempt_turns >= max_turns else None)
+                      f"{attempt_turns} agent turns in this attempt" if attempt_turns >= max_turns else
+                      (budget.expired() if budget is not None else None))
             if reason:
                 ctx.logger.info(WARNING + f"{reason} and no task_completed(): ending the attempt for review." + ENDC)
                 idle_turns = attempt_turns = 0
+                forced = True
                 ctx.api.task_completed()
-                if task.completed_task:
-                    break
+        if (task.completed_task or task.failed_task) and budget is not None:
+            dur = budget.end_attempt(ended_normally=not forced)
+            if dur is not None:
+                ctx.logger.info(PROGRESS + f"[budget] attempt took {dur:.0f} s"
+                                + (" (forced end: not added to the time history)" if forced else "") + ENDC)
+            forced = False
+        if task.completed_task:
+            break
         if task.failed_task:
             messages = handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, feedback)
             idle_turns, attempt_turns, last_step = 0, 0, ctx.api.trajectory_step
+            if budget is not None:
+                _start_attempt_budget(ctx, budget)
         else:
             messages = continue_task_turn(ctx, task, feedback)
     return task.conversation_messages
+
+
+def _start_attempt_budget(ctx, budget):
+    s = budget.start_attempt()
+    ctx.logger.info(PROGRESS + f"[budget] attempt time budget {s / 60:.1f} min "
+                    f"(task key {budget.task_key!r}); <= {budget.max_motion_calls_per_block} robot actions "
+                    "per code block" + ENDC)
 
 
 def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_analysis=""):
@@ -1013,6 +1037,8 @@ def execute_task(ctx, prompt, max_attempts=None, in_context_example=True, scene_
     attempt_summaries = []
 
     logger.info(PROGRESS + f"STARTING TASK... (max_attempts={max_attempts}) prompt={prompt!r}" + ENDC)
+    if getattr(api, "budget", None) is not None:
+        _start_attempt_budget(ctx, api.budget)
 
     # First-attempt prompt: detect_object tool + optional in-context example
     image_paths = [config.rgb_image_head_path]
@@ -1114,6 +1140,9 @@ def run_plan(ctx, command, max_iterations=None):
     if max_iterations is None:
         max_iterations = args.max_planner_iter
     ctx.overall_command = command    # shown to subtask reviewers (goal context)
+    budget = getattr(getattr(ctx, "api", None), "budget", None)
+    if budget is not None:
+        budget.start_command()
 
     if args.no_plan:
         logger.info(PROGRESS + "Planner disabled (--no-plan): running command as a single task." + ENDC)
@@ -1150,6 +1179,10 @@ def run_plan(ctx, command, max_iterations=None):
 
         if planner.plan_completed_flag or planner.plan_failed_flag:
             break
+        if budget is not None and budget.command_expired():
+            logger.info(WARNING + f"Planner: command time budget ({budget.command_s / 60:.0f} min) spent - "
+                        "no more subtasks." + ENDC)
+            break
 
         # Re-run perception after every subtask: the executed subtask may have
         # changed the scene (cleared occluders, opened a door, or left the arm
@@ -1182,6 +1215,8 @@ def run_plan(ctx, command, max_iterations=None):
         logger.info(OK + "Planner: overall command completed." + ENDC)
     elif planner.plan_failed_flag:
         logger.info(FAIL + "Planner: overall command marked unreachable." + ENDC)
+    elif budget is not None and budget.command_expired():
+        logger.info(WARNING + "Planner: stopped - command time budget spent." + ENDC)
     else:
         logger.info(WARNING + f"Planner: stopped after {max_iterations} iterations without a terminal decision." + ENDC)
     return planner

@@ -75,6 +75,8 @@ class API:
         # Per-trajectory proprioception (env._trajectory_proprio): commanded vs reached hand
         # motion + finger state; feeds the reviewer's pull evidence (helpers.pull_proprio).
         self.motion_log = []
+        # Execution budgets (helpers.run_budget.RunBudget); set by agent_runner.init_agent.
+        self.budget = None
         # Per-(sub)task mutable state. Replaced with a fresh TaskState per subtask.
         self.task = TaskState(start_trajectory_step=self.trajectory_step)
 
@@ -691,6 +693,7 @@ class API:
         summary = {k: v for k, v in res.items() if k != "events"}
         print(f"insert_with_touch: {summary}")
         self._record_touch("insert", res)
+        self._budget_tick("insert_with_touch")
         return res
 
     def move_until_contact(self, direction, max_travel=0.03, force=4.0, speed=0.01, grip_force=20.0, max_s=10.0):
@@ -733,6 +736,7 @@ class API:
             out["reason"] = res.get("reason", "no torque control on this simulator")
         print(f"move_until_contact: {out}")
         self._record_touch("contact", {**res, **out})
+        self._budget_tick("move_until_contact", out.get("eef_pos"))
         return out
 
     def get_robot_state(self):
@@ -796,6 +800,7 @@ class API:
             self.logger.info(PROGRESS + f"[touch]   {ev}" + ENDC)
         print(f"pull_with_touch: {({k: v for k, v in res.items() if k != 'events'})}")
         self._record_touch("pull", res)
+        self._budget_tick("pull_with_touch")
         return res
 
     def execute_trajectory(self, trajectory, max_speed=None, max_rot_speed=None):
@@ -869,7 +874,18 @@ class API:
         if tracking_abort is not None:
             self._handle_tracking_abort(tracking_abort)
         self._check_repeated_no_progress(trajectory, motion)
+        try:
+            target = list(trajectory.points[-1])
+        except Exception:
+            target = None
+        self._budget_tick("execute_trajectory", (motion or {}).get("eef_pos"), target)
         return motion
+
+    def _budget_tick(self, name, eef_pos=None, target=None):
+        """Execution budgets (helpers.run_budget): per-block action cap, churn, time budgets."""
+        budget = getattr(self, "budget", None)
+        if budget is not None:
+            budget.on_robot_action(name, eef_pos, target)
 
     #: Consecutive calls with the SAME commanded end pose and no measured hand motion before the
     #: code is stopped (a ``while`` loop whose exit condition the arm cannot meet).
@@ -1179,6 +1195,7 @@ class API:
         self.main_connection.send([CLOSE_GRIPPER])
         self._gripper_closed = True
         self._record_grasp()
+        self._budget_tick("close_gripper")
 
     def _record_grasp(self):
         """Remember where the hand closed (+ a closed-hand top touch of the part just before) so a

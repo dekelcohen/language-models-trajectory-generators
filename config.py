@@ -648,3 +648,18 @@ max_idle_agent_turns = 10
 # End an attempt for review after this many agent turns even if the robot keeps moving
 # (an LLM retrying the same failing motion forever, e.g. 20+ insertions in one attempt).
 max_agent_turns_per_attempt = 25
+# Planner-requested max_attempts per subtask is capped here (the planner LLM chooses the number).
+max_subtask_attempts = 4
+# Execution budgets for LLM code (helpers/run_budget.py). Inside one code block there is no LLM
+# cost, so the action cap is high; the churn guard stops loops that stay in a small box.
+max_motion_calls_per_block = 300
+churn_window_calls = 40            # consecutive actions of one block ...
+churn_box_m = 0.01                 # ... whose hand positions all fit in this cube (and no rotation)
+# Attempt wall-clock budget = clamp(factor * p90 of past normally-ended attempts of the same
+# sim:task, min, max); the default until 5 attempts are recorded. Forced ends are not recorded.
+attempt_budget_default_s = 1200.0
+attempt_budget_min_s = 240.0
+attempt_budget_max_s = 2700.0
+attempt_budget_factor = 2.0
+command_budget_s = 5400.0          # whole planner run for one command
+run_budget_history_path = "outputs/run_budget_history.json"

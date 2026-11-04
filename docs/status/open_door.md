@@ -165,6 +165,17 @@ Reviewer FP / FN (terra), and evidence changes:
 Correct rejects (true negatives) seen: door_a2 attempt 1; door_a4 attempts 1-2; doorhid_3 door attempt 1 (4.6°); slide attempt 1.
 Disocclusion evidence ("the surface behind got N cm farther = the object in front left") worked on the pole.
 
+## 2026-11-04: execution limits (`helpers/run_budget.py`, values in `config.py`)
+| Level | Limit |
+|---|---|
+| planner | 4 LLM iterations (`--max-planner-iter`); subtask `max_attempts` from the planner capped at 4 (`max_subtask_attempts`) |
+| attempt (LLM turns) | 25 turns, 10 without motion → ended for review |
+| code block (no LLM) | 15 identical no-progress moves; 300 robot actions; churn: 40 actions inside a 1 cm box with no rotation |
+| attempt (time) | 2 × p90 of past normally-ended attempts of the same `sim:task` (clamped 4–45 min; 20 min until 5 recorded) → ended for review. History: `outputs/run_budget_history.json` |
+| command (time) | 90 min → planner stops dispatching |
+
+Block / time limits raise `BudgetExceeded` (a BaseException, so LLM `except Exception` cannot swallow it; it stays tripped for the rest of the block). Smoke: `door_ALLterra_budget_smoke_6` SUCCESS, attempt 158 s.
+
 ## How to debug
 - `main.py` logs are UTF-16. Grep with `Select-String -Encoding unicode`. Markers:
   - `[pull_proprio] outcome=`
