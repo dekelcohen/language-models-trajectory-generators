@@ -42,6 +42,12 @@ def format_touch_evidence(records):
         out = res.get("outcome")
         if out in (None, "disabled", "unsupported", "error"):
             continue
+        if r.get("kind") == "contact":
+            # calibration / contact checks: not evidence of task success by themselves
+            if out == "contact":
+                lines.append(f"  - move_until_contact: touched a surface after {res.get('travel_mm')} mm "
+                             f"({res.get('contact_N')} N) - a probe, not a task step.")
+            continue
         if r.get("kind") == "insert":
             evs = [_event_text(e) for e in res.get("events") or []]
             detail = next((e for e in reversed(evs) if "advance" in e or "contact" in e), None)

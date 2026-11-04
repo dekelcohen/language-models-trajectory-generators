@@ -414,6 +414,10 @@ class Environment:
         time.sleep(config.control_dt)
     
 
+#: Franka Hand finger stroke (fully open width).
+FRANKA_MAX_WIDTH_M = 0.08
+
+
 def _gripper_proprio(sim, robot):
     """Measured finger opening, as a real gripper's width sensor reports it.
 
@@ -429,6 +433,11 @@ def _gripper_proprio(sim, robot):
         return {"gripper_width": None, "gripper_holding": None, "eef_pos_at_close": at_close,
                 "max_tilt_since_close": tilt}
     width = float(sum(sim.get_joint_state(robot.id, j).position for j in robot.gripper_joint_indices))
+    if width > FRANKA_MAX_WIDTH_M + 0.005:
+        # Physics artifact: a huge arm force dragged the fingers past their joint limits. A real
+        # width sensor cannot read beyond its stroke - report the physical maximum, log for eval.
+        print(f"[Env] Warning: finger joints past their limits (width {width:.3f} m) - sim artifact")
+        width = FRANKA_MAX_WIDTH_M
     holding = (not robot.gripper_open) and width > config.gripper_holding_min_width_franka
     return {"gripper_width": round(width, 4), "gripper_holding": bool(holding), "eef_pos_at_close": at_close,
             "max_tilt_since_close": tilt}
@@ -447,14 +456,26 @@ def _touch_insert(sim, env, robot, spec, logger):
         from touch.sim_runner import run_touch_insert
 
         arm_n = robot.profile.arm_joint_count
-        cfg = InsertConfig(**{k: float(v) for k, v in (spec.get("config") or {}).items()})
+        controller = None
+        if spec.get("mode") == "contact":
+            from touch.guarded import GuardedMoveController
+            g = spec.get("guarded") or {}
+            controller = GuardedMoveController(spec["axis"], log=lambda m: logger.info(PROGRESS + m + ENDC),
+                                               **{k: float(v) for k, v in g.items()})
+            cfg = None
+        else:
+            cfg = InsertConfig(**{k: (tuple(float(x) for x in v) if isinstance(v, (list, tuple)) else float(v))
+                                  for k, v in (spec.get("config") or {}).items()})
         res = run_touch_insert(
             sim, robot.id, robot.ee_index, robot.joint_indices[:arm_n], list(robot.gripper_joint_indices),
             step=lambda: robot.step_env_and_record(env), dt=config.control_dt,
             axis=spec["axis"], tool_offset=spec.get("tool_offset", (0.0, 0.0, 0.0)),
             grip_force=float(spec.get("grip_force", 20.0)), max_s=float(spec.get("max_s", 20.0)),
-            cfg=cfg, log=lambda m: logger.info(PROGRESS + m + ENDC))
+            cfg=cfg, log=lambda m: logger.info(PROGRESS + m + ENDC), controller=controller)
         robot.step_env_and_record(env, force_record=True)
+        if controller is not None:
+            ok = res.get("outcome") == "contact"
+            return [(OK if ok else FAIL) + f"Guarded move finished: {res.get('outcome')}" + ENDC, res]
         ok = res.get("outcome") == "seated"
         return [(OK if ok else FAIL) + f"Touch insertion finished: {res.get('outcome')}" + ENDC, res]
     except Exception as e:
@@ -542,12 +563,14 @@ def _trajectory_proprio(sim, robot, desc, step_start, start, held_samples, n_poi
     if holding_end:
         last_held = ee_end
     target = getattr(robot, "last_ee_target", None)
+    cmd_pose = getattr(robot, "last_cmd_pose", None)
     return {
         "desc": desc, "step_start": int(step_start), "step_end": int(robot.trajectory_step),
         "n_points": int(n_points), "aborted": bool(aborted),
         "gripper_closed": not bool(robot.gripper_open),
         "ee_start": ee_start, "ee_end": ee_end,
         "cmd_end": None if target is None else [round(float(v), 4) for v in target],
+        "cmd_pose_end": None if cmd_pose is None else [round(float(v), 4) for v in cmd_pose[:3]],
         "width_start": width_start, "width_end": width_end,
         "holding_start": holding_start, "holding_end": holding_end,
         "ee_last_holding": last_held,
@@ -800,11 +823,13 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                                     f"{session.abort_reason}" + ENDC)
                         break
 
+                pre_settle, _w, _h = _motion_sample(sim, robot)
                 step_env_and_record_loop(env, robot)
                 _record_tilt_while_holding(sim, robot)
                 try:
                     proprio = _trajectory_proprio(sim, robot, desc, step_start, proprio_start,
                                                   held_samples, len(trajectory), aborted_by_tracking)
+                    proprio["ee_pre_settle"] = pre_settle
                 except Exception as e:
                     logger.info(FAIL + f"Trajectory proprioception record failed: {e}" + ENDC)
                     proprio = None

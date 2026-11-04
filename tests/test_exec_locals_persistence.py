@@ -154,5 +154,39 @@ class PlannerExecEnvTest(unittest.TestCase):
         self.assertIn("NameError", self._turn("print(plan_step)", None))
 
 
+class PlannerIterationCapTest(unittest.TestCase):
+    """The reply produced at the iteration cap is still executed for its terminal decision only."""
+
+    def _run(self, final_code):
+        from types import SimpleNamespace
+        from unittest import mock
+        replies = iter([block("execute_subtasks([{'prompt': 'clear pole', 'max_attempts': 1}])"),
+                        block(final_code)])
+        ran = []
+        ctx = SimpleNamespace(args=SimpleNamespace(max_planner_iter=1, no_plan=False, lm_images=False,
+                                                   language_model="m", max_tokens=1, reasoning_effort="low"),
+                              logger=mock.MagicMock(), main_connection=None, client=None, llm_cache=None)
+        fake_skills = SimpleNamespace(exec_locals=lambda: {}, index_text=lambda: "", drain_pending=lambda: "")
+        with mock.patch.object(agent_runner, "execute_task",
+                               side_effect=lambda c, p, **k: ran.append(p) or {"success": True}), \
+                mock.patch.object(agent_runner, "run_scene_perception", return_value=""), \
+                mock.patch.object(agent_runner, "_build_planner_prompt", return_value=""), \
+                mock.patch.object(agent_runner, "make_skill_session", return_value=fake_skills), \
+                mock.patch.object(agent_runner.models, "call_llm_cached",
+                                  side_effect=lambda *a, **k: [{"role": "assistant", "content": next(replies)}]):
+            planner = agent_runner.run_plan(ctx, "open the door")
+        return planner, ran
+
+    def test_final_plan_completed_is_honoured(self):
+        planner, ran = self._run("plan_completed()")
+        self.assertTrue(planner.plan_completed_flag)
+        self.assertEqual(ran, ["clear pole"])
+
+    def test_no_subtask_dispatched_after_cap(self):
+        planner, ran = self._run("execute_subtasks([{'prompt': 'open door', 'max_attempts': 1}])")
+        self.assertFalse(planner.plan_completed_flag)
+        self.assertEqual(ran, ["clear pole"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

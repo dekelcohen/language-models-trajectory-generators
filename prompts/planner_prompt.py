@@ -76,6 +76,7 @@ DECOMPOSITION RULES:
 5. If the command is a single self-contained action, dispatch exactly ONE subtask.
 6. Keep the number of subtasks minimal - only decompose when there is a real dependency or a physically distinct phase that warrants its own attempt/verification loop.
 7. Remember not to decompose too detailed - the subtask agent is responsible for the granular motion-trajectories generation. You, the planner, just need to define the subtask high-level prompt: what to do high level (move the <object> ...), what are the constraints, but NOT HOW to do it (e.g grasp 40 cm from above), pass on *ALL* available information from the user command and scene analysis + attached image.
+   Success criteria must not depend on your guesses: if a door / drawer / lid could hinge OR slide and you are not sure which, state success as "visibly open (gap / interior exposed, clearly moved from its start)" - not a hinge angle - so a correct opening by the other motion is not rejected.
 8. After every subtask, perception re-runs and you are re-invoked with an UPDATED SCENE ANALYSIS. Before dispatching the next subtask, check whether the previous one changed the scene in a way that blocks the next action - in particular whether the ROBOT ARM itself now occludes or blocks the next target's affordance. If so, insert a prep subtask first (e.g. "move the arm clear of the target so it is visible and reachable") before the manipulation subtask.
 
 [INSERT RECOVERY_FROM_FAILURE]

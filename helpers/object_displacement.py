@@ -18,6 +18,8 @@ import numpy as np
 
 #: Depth change (m) that counts as "this pixel now sees something else".
 DEPTH_DELTA_M = 0.03
+#: uncovered pixels within this of the region's unchanged depth = the surface behind was revealed
+REVEAL_TOL_M = 0.04
 #: Smallest usable mask (pixels).
 MIN_MASK_PX = 25
 #: Camera may not move between snapshot and comparison (m).
@@ -41,12 +43,18 @@ def metric_depth(depth_raw, cam_info, camera="head"):
                       dtype=np.float32)
 
 
-def snapshot(label, rgb, depth_m, mask, camera_position=None, step=None):
-    """Keep what is needed to compare later; None if the mask is unusable."""
+def snapshot(label, rgb, depth_m, mask, camera_position=None, step=None, robot_mask=None):
+    """Keep what is needed to compare later; None if the mask is unusable.
+
+    ``robot_mask``: pixels showing the robot itself (FK self-render); dropped from the object's mask
+    so an arm hovering in front of the object is not part of its "original place".
+    """
     m = np.asarray(mask)
     if m.ndim == 3:
         m = m[0]
     m = m.astype(bool)
+    if robot_mask is not None and np.shape(robot_mask) == m.shape:
+        m = m & ~np.asarray(robot_mask, dtype=bool)
     rgb = np.asarray(rgb)[..., :3].astype(np.uint8)
     depth_m = np.asarray(depth_m, dtype=np.float32)
     if m.shape != depth_m.shape or m.shape != rgb.shape[:2] or int(m.sum()) < MIN_MASK_PX:
@@ -81,8 +89,12 @@ def _local_ncc(snap, gray_now):
     return float(np.nanmax(res))
 
 
-def compare(snap, rgb_now, depth_now_m, camera_position=None):
-    """Original place of ``snap`` now -> facts dict (``verdict`` + measurements) or None."""
+def compare(snap, rgb_now, depth_now_m, camera_position=None, robot_mask=None):
+    """Original place of ``snap`` now -> facts dict (``verdict`` + measurements) or None.
+
+    ``robot_mask``: robot pixels NOW; they are left out (the arm in front says nothing about the
+    object). If the arm covers most of the place the verdict is ``hidden``.
+    """
     if snap is None:
         return None
     if (camera_position is not None and snap.get("camera_position") is not None
@@ -93,6 +105,15 @@ def compare(snap, rgb_now, depth_now_m, camera_position=None):
     m = snap["mask"]
     if rgb_now.shape[:2] != m.shape or depth_now_m.shape != m.shape:
         return None
+    arm_frac = 0.0
+    if robot_mask is not None and np.shape(robot_mask) == m.shape:
+        rm = np.asarray(robot_mask, dtype=bool)
+        arm_frac = float(np.mean(rm[m]))
+        m = m & ~rm
+        if arm_frac >= 0.5 or int(m.sum()) < MIN_MASK_PX:
+            return {"label": snap["label"], "verdict": "hidden", "farther": 0.0, "nearer": round(arm_frac, 2),
+                    "changed": 0.0, "ncc": None, "n_px": int(m.sum()), "median_depth_shift_m": 0.0,
+                    "arm_covered": round(arm_frac, 2)}
     d0, d1 = snap["depth"][m], depth_now_m[m]
     ok = np.isfinite(d0) & np.isfinite(d1) & (d0 > 0) & (d1 > 0)
     n = int(ok.sum())
@@ -113,10 +134,19 @@ def compare(snap, rgb_now, depth_now_m, camera_position=None):
         verdict = "in_place"
     else:
         verdict = "partly_moved"
+    # Disocclusion: the pixels that got farther now show the same depth as the region's unchanged
+    # pixels -> something IN FRONT left and uncovered the surface behind, which itself stayed.
+    revealed = None
+    far_px, same_px = diff > DEPTH_DELTA_M, np.abs(diff) <= DEPTH_DELTA_M
+    if farther >= 0.3 and same_px.sum() >= max(MIN_MASK_PX, 0.08 * n):
+        d_rev, d_bg = float(np.median(d1[ok][far_px])), float(np.median(d0[ok][same_px]))
+        if abs(d_rev - d_bg) <= REVEAL_TOL_M:
+            revealed = round(float(np.median(diff[far_px])), 3)
     return {"label": snap["label"], "verdict": verdict, "farther": round(farther, 2),
             "nearer": round(nearer, 2), "changed": round(changed, 2),
             "ncc": None if ncc is None else round(ncc, 2), "n_px": n,
-            "median_depth_shift_m": round(float(np.median(diff)), 3)}
+            "median_depth_shift_m": round(float(np.median(diff)), 3), "arm_covered": round(arm_frac, 2),
+            "revealed_behind_m": revealed}
 
 
 _VERDICT_TEXT = {
@@ -151,6 +181,29 @@ def mark_shared_regions(snaps, facts_list, min_overlap=0.8):
     return facts_list
 
 
+def _merge_shared_regions(facts_list):
+    """One entry per shared detection region (labels joined with ' / ') instead of N near-identical
+    lines; keeps the first member's numbers and any member's 'revealed' depth finding."""
+    out, seen = [], set()
+    for f in facts_list:
+        if not f or f["label"] in seen:
+            continue
+        group = [f["label"]] + [o for o in f.get("same_region_as") or () if o not in seen]
+        members = [g for g in facts_list if g and g["label"] in group]
+        seen.update(group)
+        if len(members) < 2 or len({m["verdict"] for m in members}) > 1:
+            out.append(f)
+            continue
+        merged = dict(f, label=" / ".join(m["label"] for m in members), same_region_as=None,
+                      shared_region=True)
+        for m in members:
+            if m.get("revealed_behind_m") is not None:
+                merged["revealed_behind_m"] = m["revealed_behind_m"]
+                break
+        out.append(merged)
+    return out
+
+
 def format_facts(facts_list, already=None):
     """Prompt section for the reviewer. ``already``: labels that had left their place before
     this attempt started (measured at the end of an earlier attempt)."""
@@ -161,12 +214,20 @@ def format_facts(facts_list, already=None):
     lines = ["OBJECT DISPLACEMENT (MEASURED by the fixed head camera: each object's ORIGINAL pixels, where it "
              "was first detected in this subtask, compared with a fresh RGB-D capture now; template match + "
              "depth, no guessing):"]
-    for f in facts_list:
+    for f in _merge_shared_regions(facts_list):
         detail = (f"{int(f['farther'] * 100)}% of those pixels now see something farther away, "
                   f"{int(f['nearer'] * 100)}% something nearer; appearance match "
                   f"{'n/a' if f['ncc'] is None else f['ncc']} (1.0 = unchanged)")
         line = f"  - '{f['label']}': {_VERDICT_TEXT[f['verdict']]} ({detail})."
-        if f["label"] in already:
+        if f.get("revealed_behind_m") is not None:
+            line += (f" The changed pixels now show the SAME depth as the unchanged rest of this region (they "
+                     f"got {f['revealed_behind_m'] * 100:.0f} cm farther): whatever stood IN FRONT there left "
+                     "and uncovered the surface behind it - that surface (e.g. a wall/door behind a cleared "
+                     "object) did NOT move, and the space in front of it is now empty.")
+        if f.get("shared_region"):
+            line += (" CAUTION: the detector returned ONE image region for all these names - the verdict says "
+                     "SOMETHING there moved, not which of them; use the clips to tell which.")
+        if any(lbl in already for lbl in f["label"].split(" / ")):
             line += (" It had ALREADY left its place before this attempt started - a goal state reached "
                      "in an earlier attempt still counts: judge the END STATE, not which attempt caused it.")
         if f.get("same_region_as"):

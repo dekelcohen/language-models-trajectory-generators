@@ -42,6 +42,9 @@ def get_exec_locals(api, logger):
         "pour_pose": common_utils.pour_pose,
         # Force-feedback insertion of a held part; documented only by the touch skill.
         "insert_with_touch": api.insert_with_touch,
+        # Force-guarded move (stop on contact); documented by the touch skills.
+        "move_until_contact": api.move_until_contact,
+        "get_grasp_info": api.get_grasp_info,
         # Wrist-camera pointing -> 3D candidates; documented only by the touch skill.
         "locate_with_wrist_camera": api.locate_with_wrist_camera,
         # Force-feedback pull / open of a grasped handle; documented only by the touch-pull skill.

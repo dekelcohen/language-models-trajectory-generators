@@ -41,13 +41,17 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
                      cfg: Optional[InsertConfig] = None, force_noise: float = 0.5,
                      k_rot: float = 40.0, gravity_every: int = 8, seed: int = 0,
                      log: Optional[Callable[[str], None]] = None,
-                     on_tick: Optional[Callable[[TouchState, object], None]] = None) -> dict:
+                     on_tick: Optional[Callable[[TouchState, object], None]] = None,
+                     controller=None) -> dict:
     """Touch-guided insertion of the held part along world ``axis`` from the current pose.
 
     ``tool_offset``: world vector from the EE link origin to the part's leading tip at the start
     (fixed in the hand frame afterwards). ``step()`` advances the simulator by ``dt``. Fingers are
-    squeezed with ``grip_force`` N each (Franka ``grasp(force)``) for the duration. On exit the arm
-    and fingers are latched to position control at their current joint values.
+    squeezed with ``grip_force`` N each (Franka ``grasp(force)``) for the duration; ``grip_force <= 0``
+    leaves the fingers under position control (e.g. an open hand pushing a door). On exit the arm
+    and fingers are latched to position control at their current joint values. ``controller``: any
+    controller with the same ``step(TouchState) -> InsertCommand`` interface (default: spiral insert),
+    e.g. :class:`touch.guarded.GuardedMoveController`.
     """
     if not sim.supports_torque_control():
         return {"outcome": "unsupported", "reason": f"{type(sim).__name__} has no torque control",
@@ -55,6 +59,7 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
     a = np.asarray(axis, float)
     a = a / np.linalg.norm(a)
     arm, fingers = list(arm_joints), list(finger_joints)
+    squeeze = fingers if grip_force > 0 else []
     rng = np.random.default_rng(seed)
 
     p_link, q_link = sim.get_link_pose(body, ee_link)
@@ -62,8 +67,9 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
     tcp_local = R0.T @ np.asarray(tool_offset, float)
     q_rest = np.array([sim.get_joint_state(body, j).position for j in arm])
 
-    ctrl = SpiralInsertController(a, cfg, log=log)
-    st = {"p_des": None, "K": ctrl.cfg.k_axial, "K_lat": ctrl.cfg.k_lat_search, "t": 0.0}
+    ctrl = controller or SpiralInsertController(a, cfg, log=log)
+    k_lat0 = ctrl.cfg.k_lat_search if hasattr(ctrl, "cfg") else 5000.0
+    st = {"p_des": None, "K": getattr(getattr(ctrl, "cfg", None), "k_axial", 1500.0), "K_lat": k_lat0, "t": 0.0}
     g_cache = {"tau": None, "n": 0}
 
     def kin():
@@ -87,8 +93,8 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
         N = np.eye(len(arm)) - Jt @ np.linalg.pinv(Jt)
         tau = Jt @ wrench + N @ (10.0 * (q_rest - q) - 2.0 * dq) + g_cache["tau"]
         sim.set_joint_torques(body, arm, tau)
-        if fingers:
-            sim.set_joint_torques(body, fingers, [-grip_force] * len(fingers))
+        if squeeze:
+            sim.set_joint_torques(body, squeeze, [-grip_force] * len(squeeze))
         step()
         st["t"] += dt
 
@@ -101,7 +107,7 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
 
     def send(cmd):
         st["p_des"], st["K"] = np.asarray(cmd.ee_target, float), cmd.k_axial
-        st["K_lat"] = cmd.k_lateral or ctrl.cfg.k_lat_search
+        st["K_lat"] = cmd.k_lateral or k_lat0
 
     n_per = max(1, int(round(period_s / dt)))
 
@@ -121,14 +127,19 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
         # back to position control where we are, so the next trajectory starts from rest
         q_now = [sim.get_joint_state(body, j).position for j in arm]
         sim.set_joint_positions(body, arm, q_now)
-        if fingers:
-            f_now = [sim.get_joint_state(body, j).position for j in fingers]
-            sim.set_joint_positions(body, fingers, f_now)
+        if squeeze:
+            f_now = [sim.get_joint_state(body, j).position for j in squeeze]
+            sim.set_joint_positions(body, squeeze, f_now)
     end = read_state()
     res.update(advance_mm=round(1000 * float(np.dot(end.ee_pos - p_start, a)), 2),
                tip_pos=np.round(end.ee_pos, 4).tolist(),
                gripper_width_mm=None if end.gripper_width is None else round(1000 * end.gripper_width, 1),
                felt_axial_N=round(end.axial_resistance(a), 1))
+    if getattr(ctrl, "contact_pos", None) is not None:
+        # guarded move: where the TCP rested at contact, and the EE link position there
+        p_link_now = np.asarray(sim.get_link_pose(body, ee_link)[0], float)
+        res.update(contact_pos=np.round(ctrl.contact_pos, 4).tolist(),
+                   eef_pos=np.round(p_link_now, 4).tolist(), contact_N=round(ctrl.contact_force, 1))
     if log:
         log(f"[touch.sim] done outcome={res['outcome']} in {res['duration_s']}s advance={res['advance_mm']}mm "
             f"grip_w={res['gripper_width_mm']}mm")

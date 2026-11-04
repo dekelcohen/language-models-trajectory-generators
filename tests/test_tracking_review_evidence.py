@@ -279,6 +279,13 @@ class TestPullProprio(unittest.TestCase):
             recs.append(self.rec("pull", h, end, True, True, True))
         return recs + list(after)
 
+    def test_task_gate_keeps_long_door_open_prompts(self):
+        from helpers.pull_proprio import is_articulated_task
+        # door:hidden subtask 2 wording: 3 adjectives + "place" elsewhere in the text
+        self.assertTrue(is_articulated_task("Open the tall upright wooden door. Grasp the lever, swing it "
+                                            "open; the cylinder remained in place."))
+        self.assertFalse(is_articulated_task("Move the gray cylinder away from the door, place it to the side."))
+
     def test_slipped_straight_pull_is_vetoed_and_retry_goes_sideways(self):
         from helpers.pull_proprio import (summarize_pull_proprio, measured_no_motion_veto,
                                           retry_direction_hint, alternative_directions)

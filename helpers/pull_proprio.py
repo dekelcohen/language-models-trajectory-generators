@@ -53,7 +53,7 @@ RELOCATE_TASK_RE = re.compile(
     r"pick (?:\w+ )?up|place|put)\b", re.IGNORECASE)
 #: An explicit open/close action ON an articulated part ("open the wooden door").
 OPEN_INTENT_RE = re.compile(
-    r"\b(open|close|shut|pull|slide)\s+(?:(?:the|a|an|this|that|its)\s+)?(?:[\w-]+\s+){0,2}"
+    r"\b(open|close|shut|pull|slide)\s+(?:(?:the|a|an|this|that|its)\s+)?(?:[\w-]+,?\s+){0,4}"
     r"(door|drawer|cabinet|cupboard|lid|hatch|panel|fridge|oven|microwave|dishwasher|handle|lever)s?\b",
     re.IGNORECASE)
 
@@ -335,7 +335,9 @@ def format_pull_proprio(facts, camera_moved=()):
                                 "open, even if the task text expected a hinged swing).",
         "part_did_not_move": f"the held part did NOT travel with the hand (max "
                              f"{facts['max_carried_m'] * 100:.0f} cm): it slipped out of the fingers "
-                             "or blocked the arm. The door/drawer/panel did not start to open.",
+                             "or blocked the arm. It did not open DURING these held pulls (this "
+                             "measures only the pulls - other hand motions could still have moved it; "
+                             "the final images decide).",
     }
     lines = ["PULL PROPRIOCEPTION (measured by the arm's joint encoders and the gripper width sensor "
              "for every pull while the fingers were closed; a direct physical measurement):"]
@@ -362,6 +364,6 @@ def format_pull_proprio(facts, camera_moved=()):
         lines.append(f"  - NOTE: the head camera measured {', '.join(repr(c) for c in camera_moved)} "
                      "LEFT its original place - the part DID move (pushed rather than carried).")
     if facts["outcome"] == "part_did_not_move" and not slipped:
-        lines.append("  - If the part did not move, the task is NOT achieved, whatever the arm's "
-                     "motion looks like in the clips.")
+        lines.append("  - If the final images also show it unmoved, the task is NOT achieved, whatever "
+                     "the arm's motion looks like in the clips.")
     return "\n".join(lines)

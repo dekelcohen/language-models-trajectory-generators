@@ -48,6 +48,10 @@ class InsertConfig:
     # before the motion first turns slow can: ~12 mm when seated, ~2 mm when wedged on an edge.
     slow_speed: float = 0.006     # m/s
     slow_window: float = 0.2      # s
+    # Past `in_slot_depth` the tip is already inside the opening (an edge wedge stops at ~2 mm), so slow
+    # sliding against the slot walls is progress: call it a jam only below `in_slot_stall_speed`.
+    in_slot_depth: float = 0.004  # m
+    in_slot_stall_speed: float = 0.002  # m/s
     seat_depth: float = 0.007     # m of advance past the contact point = seated (judged at stall)
     seat_depth_max: Optional[float] = 0.018   # m; far more advance than the 12 mm tip = it slides in the grasp
     k_lat_search: float = 5000.0  # N/m lateral stiffness while spiralling (track the spiral despite face friction)
@@ -55,6 +59,14 @@ class InsertConfig:
     backoff: float = 0.001        # m retreat after a failed insert
     backoff_s: float = 0.3
     max_inserts: int = 4
+    # Line search instead of the spiral, for an opening known only along a line (e.g. its height
+    # on a face, but not where along the face): raster passes +-sweep_half along sweep_dir (world,
+    # made perpendicular to the axis) at spiral_speed; rows step sweep_pitch across it
+    # (0, +p, -p, +2p, ...; sweep_rows rows).
+    sweep_dir: Optional[tuple] = None
+    sweep_half: float = 0.02      # m
+    sweep_pitch: float = 0.0004   # m
+    sweep_rows: float = 5
 
 
 @dataclass
@@ -89,8 +101,15 @@ class SpiralInsertController:
         self.events: List[tuple] = []
         self.n_inserts = 0
         self.theta = 0.0
+        self.sweep_s = 0.0
         self.offset = np.zeros(3)
         self._hist: List[tuple] = []
+        self.d = self.p = None
+        if self.cfg.sweep_dir is not None:
+            d = np.asarray(self.cfg.sweep_dir, float)
+            d = d - self.a * float(d @ self.a)
+            self.d = d / np.linalg.norm(d)
+            self.p = np.cross(self.a, self.d)
 
     # ------------------------------------------------------------------ helpers
     def _event(self, t, msg):
@@ -131,6 +150,19 @@ class SpiralInsertController:
 
     def _spiral_offset(self, dt):
         c = self.cfg
+        if self.d is not None:
+            # 0 -> +L, then rows of 2L alternating direction, each shifted across the line
+            L = c.sweep_half
+            self.sweep_s += c.spiral_speed * dt
+            if self.sweep_s < L:
+                return 0.0, self.sweep_s * self.d
+            row, q = divmod(self.sweep_s - L, 2 * L)
+            row = int(row)
+            if row >= int(c.sweep_rows):
+                return c.spiral_r_max + 1.0, self.offset
+            x = L - q if row % 2 == 0 else -L + q
+            k = 0 if row == 0 else ((row + 1) // 2) * (1 if row % 2 else -1)
+            return 0.0, x * self.d + k * c.sweep_pitch * self.p
         r = c.spiral_pitch * self.theta / (2 * np.pi)
         self.theta += c.spiral_speed * dt / max(r, c.spiral_pitch)
         r = c.spiral_pitch * self.theta / (2 * np.pi)
@@ -195,7 +227,8 @@ class SpiralInsertController:
                 self.s_ref = s if s < self.s_ref else self.s_ref + min(dt / c.creep_tau, 1.0) * (s - self.s_ref)
             r, self.offset = self._spiral_offset(dt)
             if r > c.spiral_r_max:
-                self._finish(t, "search_exhausted", f"r={1000 * r:.1f}mm")
+                done = (f"sweep +-{1000 * c.sweep_half:.0f}mm done" if self.d is not None else f"r={1000 * r:.1f}mm")
+                self._finish(t, "search_exhausted", done)
                 return self._hold_at(s - c.backoff)
             return self._push(st, c.f_search)
 
@@ -205,7 +238,8 @@ class SpiralInsertController:
                 self._finish(t, "slipped", f"advance {1000 * depth:.1f}mm exceeds the plug length: in-grasp slip")
                 return self._hold_at(s - c.backoff)
             v = self._speed_between(t - c.slow_window, t)
-            if t - self.t_phase > c.slow_window + 0.05 and v is not None and v < c.slow_speed:
+            slow = c.slow_speed if depth < c.in_slot_depth or depth >= c.seat_depth else c.in_slot_stall_speed
+            if t - self.t_phase > c.slow_window + 0.05 and v is not None and v < slow:
                 if depth >= c.seat_depth:
                     self._finish(t, "seated", f"advance {1000 * depth:.1f}mm then slow {1000 * v:.1f}mm/s "
                                               f"F={f_axial:.1f}N")

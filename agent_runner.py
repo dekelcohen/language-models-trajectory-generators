@@ -1172,6 +1172,12 @@ def run_plan(ctx, command, max_iterations=None):
                      "conversation_key": "planner"},
         )
 
+    if not (planner.plan_completed_flag or planner.plan_failed_flag) and iteration >= max_iterations:
+        # The last LLM reply above was never executed; honour a terminal decision in it
+        # (plan_completed / plan_failed) without dispatching further subtasks.
+        planner.dispatch_closed = True
+        _run_planner_code_blocks(messages, planner_locals, planner_skills, planner_carried)
+
     if planner.plan_completed_flag:
         logger.info(OK + "Planner: overall command completed." + ENDC)
     elif planner.plan_failed_flag:

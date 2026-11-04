@@ -372,6 +372,14 @@ class API:
 
         self.task.segmentation_count += 1
 
+    def _load_head_robot_mask(self):
+        """Robot self-mask of the last head capture (bool HxW) or None (sim without segmentation)."""
+        path = os.path.splitext(config.depth_image_head_path)[0] + "_robot_mask.npy"
+        try:
+            return np.load(path) if os.path.exists(path) else None
+        except Exception:
+            return None
+
     def _snapshot_detections(self, rgb_image_head, depth_array, masks, segmentation_texts):
         """First detection of each label in this subtask -> displacement snapshot (pixels + depth).
 
@@ -400,7 +408,8 @@ class API:
                 if depth_m is None:
                     depth_m = od.metric_depth(depth_array, self.cam_info)
                 snap = od.snapshot(text, np.array(rgb_image_head), depth_m, np.asarray(mask),
-                                   camera_position=self.head_camera_position, step=self.trajectory_step)
+                                   camera_position=self.head_camera_position, step=self.trajectory_step,
+                                   robot_mask=self._load_head_robot_mask())
                 if snap is not None:
                     self.task.displacement_snaps[key] = snap
                     if run_ok and key not in self.run_displacement_snaps:
@@ -426,9 +435,12 @@ class API:
         try:
             rgb, depth_raw = self._capture_head_image_and_depth()
             depth_m = od.metric_depth(depth_raw, self.cam_info)
-            facts = [od.compare(s, np.array(rgb), depth_m, camera_position=self.head_camera_position)
+            robot_mask = self._load_head_robot_mask()
+            facts = [od.compare(s, np.array(rgb), depth_m, camera_position=self.head_camera_position,
+                                robot_mask=robot_mask)
                      for s in snaps.values()]
-            run_facts = [od.compare(s, np.array(rgb), depth_m, camera_position=self.head_camera_position)
+            run_facts = [od.compare(s, np.array(rgb), depth_m, camera_position=self.head_camera_position,
+                                    robot_mask=robot_mask)
                          for s in run_snaps.values()]
         except Exception as e:
             self.logger.info(WARNING + f"Review: displacement evidence failed: {type(e).__name__}: {e}" + ENDC)
@@ -629,13 +641,21 @@ class API:
             print(f"  {i + 1}. {r['label']}: {r['position']}")
         return results
 
-    def insert_with_touch(self, axis, tool_length=0.025, max_s=20.0, grip_force=20.0, tool_offset=None):
+    def insert_with_touch(self, axis, tool_length=0.025, max_s=20.0, grip_force=20.0, tool_offset=None,
+                          search_radius=None, search_line=None, search_half=0.02, search_cross=None):
         """Push the held part along world ``axis`` into a hole/port, guided by force feedback.
 
         Start with the part's tip a few mm in front of the opening, aligned by vision. The robot
         then probes, spirals on the face to find the opening (vision is ~1-2 mm off) and pushes it
         in. ``tool_length``: fingertip centre -> part tip along ``axis`` (m). ``tool_offset``: optional
-        measured world vector eef_pos -> part tip (overrides ``tool_length``). Returns a dict with
+        measured world vector eef_pos -> part tip (overrides ``tool_length``). ``search_radius`` (m,
+        default 0.003): spiral search radius; larger is slow (~100 s at 0.008). ``search_line``: a world
+        direction across the axis (e.g. [0, 1, 0]) to search by feel along a LINE instead of the spiral,
+        +-``search_half`` m (default 0.02) around the start, in a few passes ~0.4 mm apart across it: use
+        it when the opening's height is known but its position along the face is uncertain (> 3 mm).
+        ``search_cross`` (m, default 0.0008): half-width of the band ACROSS the line covered by those
+        passes; widen it (e.g. 0.002) when the height is uncertain by more than ~1 mm (slower: time
+        grows with the number of passes). ``max_s`` is extended to fit the sweep. Returns a dict with
         ``outcome`` ('seated' | 'jammed' | 'search_exhausted' | 'no_contact' | 'slipped' | 'over_force' |
         'timeout' | 'unsupported' | 'disabled'), ``advance_mm``, ``tip_pos`` and ``events`` (proprioception only).
         """
@@ -645,8 +665,23 @@ class API:
         a = np.asarray(axis, dtype=float)
         a = a / np.linalg.norm(a)
         off = (np.asarray(tool_offset, dtype=float) if tool_offset is not None else a * float(tool_length))
+        config = {}
+        if search_radius:
+            config["spiral_r_max"] = float(search_radius)
+        if search_line is not None:
+            from touch.insertion import InsertConfig
+            c = InsertConfig()
+            config.update(sweep_dir=[float(x) for x in search_line], sweep_half=float(search_half))
+            rows = c.sweep_rows
+            if search_cross:
+                rows = 1 + 2 * int(np.ceil(float(search_cross) / c.sweep_pitch - 1e-9))
+                config["sweep_rows"] = rows
+            travel = float(search_half) * (1 + 2 * rows)
+            max_s = max(float(max_s), travel / c.spiral_speed + 10.0)
         spec = {"axis": a.tolist(), "tool_offset": off.tolist(),
                 "max_s": float(max_s), "grip_force": float(grip_force)}
+        if config:
+            spec["config"] = config
         self.logger.info(PROGRESS + f"[touch] insert_with_touch {spec}" + ENDC)
         self.main_connection.send([TOUCH_INSERT, spec])
         msg, res = self.main_connection.recv()
@@ -657,6 +692,48 @@ class API:
         print(f"insert_with_touch: {summary}")
         self._record_touch("insert", res)
         return res
+
+    def move_until_contact(self, direction, max_travel=0.03, force=4.0, speed=0.01, grip_force=20.0, max_s=10.0):
+        """Guarded move: move the hand along world ``direction`` until a contact force is felt.
+
+        Force-feedback primitive (impedance control + the measured external force). The hand advances
+        at ``speed`` m/s for at most ``max_travel`` m; contact = resistance above ``force`` N. It then
+        rests lightly on the surface and stops. ``grip_force`` > 0 keeps squeezing a held part; 0 leaves
+        the fingers as they are (open hand). Returns ``outcome`` ('contact' | 'no_contact' | 'over_force'
+        | 'unsupported' | 'disabled'), ``eef_pos`` (measured EE position at rest, same frame as
+        ``get_robot_state()["eef_pos"]``), ``finger_bottom_z`` (height of the closed finger bottoms - a
+        closed-hand downward touch measures an object's top height), ``travel_mm`` and ``contact_N``.
+        Uses: measure a part's top height before grasping (close the gripper, touch down on it), in-hand
+        offset calibration (touch a held part against a known face), touching a door / drawer front
+        before pushing, checking a part is there.
+        """
+        if not getattr(self.args, "touch", True):
+            print("move_until_contact: touch is disabled (--no-touch).")
+            return {"outcome": "disabled"}
+        d = np.asarray(direction, dtype=float)
+        d = d / np.linalg.norm(d)
+        spec = {"mode": "contact", "axis": d.tolist(), "tool_offset": [0.0, 0.0, 0.0], "max_s": float(max_s),
+                "grip_force": float(grip_force),
+                "guarded": {"max_travel": float(max_travel), "f_contact": float(force), "speed": float(speed)}}
+        self.logger.info(PROGRESS + f"[touch] move_until_contact {spec}" + ENDC)
+        self.main_connection.send([TOUCH_INSERT, spec])
+        msg, res = self.main_connection.recv()
+        self.logger.info(msg)
+        for ev in res.get("events", []):
+            self.logger.info(PROGRESS + f"[touch]   {ev}" + ENDC)
+        out = {"outcome": res.get("outcome"), "eef_pos": res.get("eef_pos"),
+               "travel_mm": res.get("advance_mm"), "contact_N": res.get("contact_N")}
+        if out["eef_pos"] is not None:
+            # Robot geometry: with CLOSED fingers moving down, the finger bottoms touched at this height.
+            out["finger_bottom_z"] = round(float(out["eef_pos"][2]) - config.FINGER_BOTTOM_BELOW_EEF, 4)
+            width = res.get("gripper_width_mm")
+            if (res.get("outcome") == "contact" and d[2] < -0.9 and width is not None and width < 3.0):
+                self._last_top_touch = {"z": out["finger_bottom_z"], "xy": list(out["eef_pos"][:2])}
+        if res.get("outcome") == "unsupported":
+            out["reason"] = res.get("reason", "no torque control on this simulator")
+        print(f"move_until_contact: {out}")
+        self._record_touch("contact", {**res, **out})
+        return out
 
     def get_robot_state(self):
         """Measured proprioception: {'eef_pos': [x, y, z], 'gripper_open', 'gripper_width' (m),
@@ -724,10 +801,16 @@ class API:
     def execute_trajectory(self, trajectory, max_speed=None, max_rot_speed=None):
         """Run a Trajectory. ``max_speed`` (m/s) / ``max_rot_speed`` (rad/s): optional hand speed
         limits - poses are interpolated so the arm moves smoothly instead of lunging between sparse
-        waypoints (e.g. 0.1 m/s and 0.5 rad/s when carrying or tilting a container of liquid)."""
+        waypoints (e.g. 0.1 m/s and 0.5 rad/s when carrying or tilting a container of liquid).
+        Returns the measured outcome ``{"reached", "stalled", "shortfall_m", "eef_pos", "holding"}``
+        (None if not reported); a stall (hand stopped > 2 cm short of the end) is also printed."""
         # Rebuild into a plain Trajectory before anything is sent: a custom class from the
         # model's own code block cannot be reconstructed in the simulator process.
         trajectory = common_utils.Trajectory.normalize(trajectory)
+        if max_speed is None and getattr(self, "_gripper_closed", False):
+            # Carrying / pulling: sparse waypoints otherwise command several m/s (beyond a real
+            # arm's limits) and fling a friction-held part out of the fingers.
+            max_speed = config.CLOSED_GRIPPER_MAX_SPEED
         if max_speed or max_rot_speed:
             n0 = len(trajectory.points)
             trajectory = common_utils.Trajectory(
@@ -756,6 +839,7 @@ class API:
         self.logger.info(PROGRESS + "Executing generated trajectory..." + ENDC)
         self.main_connection.send([EXECUTE_TRAJECTORY, trajectory])
         tracking_abort = None
+        motion = None
         try:
             resp = self.main_connection.recv()
             if isinstance(resp, list) and len(resp) >= 2:
@@ -778,11 +862,72 @@ class API:
                         except Exception:
                             pass
                         self.motion_log.append(rec)
+                        motion = self._motion_feedback(rec)
         except Exception:
             pass
         self.task.trajectory_length += len(trajectory.points)
         if tracking_abort is not None:
             self._handle_tracking_abort(tracking_abort)
+        self._check_repeated_no_progress(trajectory, motion)
+        return motion
+
+    #: Consecutive calls with the SAME commanded end pose and no measured hand motion before the
+    #: code is stopped (a ``while`` loop whose exit condition the arm cannot meet).
+    REPEAT_NO_PROGRESS_CALLS = 15
+
+    def _check_repeated_no_progress(self, trajectory, motion):
+        try:
+            target = np.asarray(list(trajectory.points[-1]), dtype=float)
+            end = None if not motion else np.asarray(motion["eef_pos"], dtype=float)
+        except Exception:
+            return
+        prev = getattr(self, "_repeat_state", None)
+        same = (prev is not None and end is not None and prev["end"] is not None
+                and target.shape == prev["target"].shape
+                and float(np.max(np.abs(target - prev["target"]))) < 1e-3
+                and float(np.linalg.norm(end - prev["end"])) < 0.002)
+        n = prev["n"] + 1 if same else 0
+        self._repeat_state = {"target": target, "end": end, "n": n}
+        if n + 1 >= self.REPEAT_NO_PROGRESS_CALLS:
+            self._repeat_state = None
+            raise RuntimeError(
+                f"execute_trajectory was called {n + 1} times in a row with the same target "
+                f"{[round(float(v), 4) for v in target[:3]]} and the hand did not move (it rests at pose "
+                f"{motion.get('pose')}, {motion.get('shortfall_m', 0) * 100:.1f} cm from that target). "
+                "A loop is waiting for a condition the arm cannot reach - stop retrying the same move. "
+                "Accept the measured pose (it may already be close enough), or change the plan.")
+
+    #: The hand ending farther than this from the trajectory's last target = it was blocked...
+    STALL_SHORTFALL_M = 0.02
+    #: ...if it also (nearly) stopped during the final settle; more motion = still catching up.
+    STALL_SETTLE_MOTION_M = 0.005
+
+    def _motion_feedback(self, rec):
+        """Encoder-measured outcome of one trajectory (what libfranka reports): did the hand reach
+        the last target, and if not, where it stopped. Printed so the model's code output shows
+        a stall, and returned so code can chain the next move from the measured pose."""
+        end, cmd = rec.get("ee_end"), rec.get("cmd_end")
+        if end is None or cmd is None:
+            return None
+        shortfall = float(np.linalg.norm(np.subtract(cmd[:3], end[:3])))
+        pre = rec.get("ee_pre_settle")
+        settling = pre is not None and float(np.linalg.norm(np.subtract(end[:3], pre[:3]))) > self.STALL_SETTLE_MOTION_M
+        # measured hand position in the frame trajectory poses are written in (eef_pos is the
+        # fingertip centre, ~0.06 m from the pose point along the approach axis)
+        cmd_pose = rec.get("cmd_pose_end")
+        pose = end[:3] if cmd_pose is None else np.add(end[:3], np.subtract(cmd_pose[:3], cmd[:3]))
+        out = {"reached": shortfall <= self.STALL_SHORTFALL_M, "shortfall_m": round(shortfall, 4),
+               "eef_pos": [round(float(v), 4) for v in end[:3]],
+               "pose": [round(float(v), 4) for v in pose],
+               "holding": rec.get("holding_end"),
+               "stalled": shortfall > self.STALL_SHORTFALL_M and not settling}
+        if out["stalled"]:
+            msg = (f"[motion] STALLED '{rec.get('desc') or ''}': hand stopped {shortfall * 100:.1f} cm short "
+                   f"of the trajectory end, at pose {out['pose']} (trajectory frame; holding={out['holding']}) - "
+                   "blocked or resisted. Start the next move from this measured pose, not from the planned end.")
+            print(msg)
+            self.logger.info(PROGRESS + msg + ENDC)
+        return out
 
     def _handle_tracking_abort(self, payload):
         """A tracking monitor stopped the rollout: fail the attempt and tell the model why.
@@ -1024,6 +1169,7 @@ class API:
 
         self.logger.info(PROGRESS + "Opening gripper..." + ENDC)
         self.main_connection.send([OPEN_GRIPPER])
+        self._gripper_closed = False
 
 
 
@@ -1031,6 +1177,37 @@ class API:
 
         self.logger.info(PROGRESS + "Closing gripper..." + ENDC)
         self.main_connection.send([CLOSE_GRIPPER])
+        self._gripper_closed = True
+        self._record_grasp()
+
+    def _record_grasp(self):
+        """Remember where the hand closed (+ a closed-hand top touch of the part just before) so a
+        LATER subtask can recover the in-hand height of the part (get_grasp_info)."""
+        try:
+            self.main_connection.send([config.GET_ROBOT_STATE, {}])
+            eef = (self.main_connection.recv() or {}).get("eef_pos")
+        except Exception:
+            return
+        if eef is None:
+            return
+        eef = [round(float(v), 4) for v in eef]
+        top = getattr(self, "_last_top_touch", None)
+        near = top is not None and np.linalg.norm(np.subtract(top["xy"], eef[:2])) < 0.03
+        self.grasp_info = {"grasp_eef_pos": eef, "touched_top_z": top["z"] if near else None}
+        if near:
+            self.grasp_info["grasp_depth_below_top"] = round(top["z"] - eef[2], 4)
+        self.logger.info(PROGRESS + f"[grasp] recorded {self.grasp_info}" + ENDC)
+
+    def get_grasp_info(self):
+        """Measured facts about the current grasp, kept across subtasks: ``grasp_eef_pos`` (fingertip
+        centre when the gripper closed), ``touched_top_z`` (part top measured by a closed-hand
+        ``move_until_contact([0, 0, -1])`` within 3 cm just before, else None) and, with a touch,
+        ``grasp_depth_below_top`` (= touched_top_z - grasp z; check it against part height / 2 right
+        after closing). None if nothing recorded.
+        In-hand height of the part centre = touched_top_z - part height / 2 - grasp_eef_pos[2]."""
+        info = getattr(self, "grasp_info", None)
+        print(f"get_grasp_info: {info}")
+        return info
 
 
     def _tracking_review_evidence(self, start_idx):

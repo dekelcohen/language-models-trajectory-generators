@@ -286,6 +286,8 @@ class Robot:
     def move(self, env, ee_target_position, ee_target_orientation_e, gripper_open, is_trajectory, desc=None):
         if desc is not None:
             self.desc = desc
+        # the commanded pose position, in the frame trajectories are written in (before the depth offset)
+        self.last_cmd_pose = list(ee_target_position)
 
         if self.robot == "sawyer":
             gripper1_index = self.gripper_motor
@@ -565,8 +567,28 @@ class Robot:
                     
                 depth_image.save(depth_image_path)
                 np.save(os.path.splitext(depth_image_path)[0] + ".npy", depth_array.astype(np.float32))
+                self._save_robot_mask(frame, os.path.splitext(depth_image_path)[0] + "_robot_mask.npy")
 
         return camera_position, camera_orientation_q, view_matrix, projection_matrix
+
+    def _save_robot_mask(self, frame, path):
+        """Pixels showing the robot itself (bool .npy), or remove a stale file when unknown.
+
+        Real-robot equivalent: render the arm's own model at its measured joint positions into
+        the calibrated camera (FK + URDF). Here the renderer's body ids give the same pixels.
+        PyBullet encodes object + (link + 1) << 24; Genesis frames carry no segmentation.
+        """
+        try:
+            seg = getattr(frame, "segmentation", None)
+            if seg is None or self.sim.name != "pybullet":
+                raise ValueError("no segmentation")
+            seg = np.asarray(seg, dtype=np.int64).reshape(np.asarray(frame.depth).shape[:2])
+            ids = [self.id] + ([self.gripper_id] if getattr(self, "gripper_id", None) is not None else [])
+            mask = (seg >= 0) & np.isin(seg & ((1 << 24) - 1), ids)
+            np.save(path, mask)
+        except Exception:
+            if os.path.exists(path):
+                os.remove(path)
 
     def capture_camera_view(self, camera, env):
         """Render ``camera`` and return a :class:`tracking.types.CameraView`.

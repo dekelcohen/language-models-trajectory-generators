@@ -110,3 +110,29 @@ def test_over_force_aborts():
     assert res["outcome"] == "over_force"
 
 
+
+
+@pytest.mark.parametrize("hole", [(0.015, 0.0), (-0.012, 0.0006)])
+def test_line_sweep_finds_far_opening_along_the_face(hole):
+    port = MockPort(hole=hole)
+    ctrl = SpiralInsertController([1.0, 0.0, 0.0], InsertConfig(sweep_dir=(0.0, 1.0, 0.0), sweep_half=0.02))
+    res = run_reactive(ctrl, port.read, port.send, port.advance, max_s=60.0, period_s=0.02)
+    assert res["outcome"] == "seated", res["events"]
+    assert port.p[0] > 0.009
+
+
+def test_line_sweep_exhausts_beyond_its_half_length():
+    port = MockPort(hole=(0.03, 0.0))
+    ctrl = SpiralInsertController([1.0, 0.0, 0.0], InsertConfig(sweep_dir=(0.0, 1.0, 0.0), sweep_half=0.01))
+    res = run_reactive(ctrl, port.read, port.send, port.advance, max_s=60.0, period_s=0.02)
+    assert res["outcome"] == "search_exhausted"
+
+
+@pytest.mark.parametrize("rows,expected", [(5, "search_exhausted"), (11, "seated")])
+def test_line_sweep_rows_cover_height_error(rows, expected):
+    # opening 1.6 mm off across the line: outside the default +-0.8 mm band, inside +-2 mm
+    port = MockPort(hole=(0.004, 0.0016))
+    cfg = InsertConfig(sweep_dir=(0.0, 1.0, 0.0), sweep_half=0.01, sweep_rows=rows)
+    res = run_reactive(SpiralInsertController([1.0, 0.0, 0.0], cfg), port.read, port.send, port.advance,
+                       max_s=120.0, period_s=0.02)
+    assert res["outcome"] == expected, res["events"]

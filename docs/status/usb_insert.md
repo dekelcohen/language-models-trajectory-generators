@@ -1,9 +1,9 @@
 # USB insert (Genesis): status
 
 Task: `--task usb --sim genesis -c "Pick up the USB plug and insert it into the laptop's USB port"`.
-Skill: `prompts/skills/touch-guided-insertion/SKILL.md`, primitive `insert_with_touch(axis, tool_length, max_s, grip_force, tool_offset=None)`.
+Skill: `prompts/skills/touch-guided-insertion/SKILL.md`, primitive `insert_with_touch(axis, tool_length, max_s, grip_force, tool_offset=None, search_radius=None, search_line=None, search_half=0.02)`; touch calibration via `move_until_contact()` / `get_grasp_info()`.
 
-**Status: OPEN.** The pick-up works every time. Insertion has not succeeded in an LLM run, but the scripted harness `research/touch/usb_pipeline_e2e.py` succeeds when given the true in-hand offset.
+**Status: OPEN.** Pick-up and touch calibration work in LLM runs; the remaining blocker is finding the port (which face, where along it). The scripted harness seats the plug end to end with touch calibration and the line search.
 
 ## Runs (2026-11-02, rollouts under `outputs/2026-11-02/`)
 
@@ -21,16 +21,28 @@ Skill: `prompts/skills/touch-guided-insertion/SKILL.md`, primitive `insert_with_
 - `get_robot_state()` / `gripper_holding()` are exposed in the exec scope.
 - Agent loop: an idle guard (`max_idle_agent_turns=10`) and a per-attempt cap (`max_agent_turns_per_attempt=25`), so endless retries get reviewed.
 
-## Root cause still open
-The plug's pose in the hand (true ≈ eef + (−9, 0, +7) mm) is **unobservable by vision while held**:
-- the fingers and the hand occlude the tip in the wrist camera;
-- the head camera is too coarse (~1 cm).
+## 2026-11-03: touch calibration, carry speed cap, line search
 
-The `insert_with_touch` spiral covers only r ≤ 3 mm (`InsertConfig.spiral_r_max`), so offset errors above ~3 mm never seat.
+Scripted harness (`research/touch/usb_pipeline_e2e.py --grasp-touch --regrasp --calib touch`) seats the plug end to end:
+- in-hand offset from touch (top touch before the grasp + face touch beside the port), not vision;
+- `--sweep 0.025` (new): seated with an 18 mm and a −20 mm y aim error (+1 mm z), found at 14.6 / 22 mm along the face.
 
-Next steps (Sim2Real-legal):
-1. **Touch-based offset calibration.** Add a guarded move: lower the held plug onto a flat surface (laptop deck or floor, height from depth) until the force rises. Contact z minus EE z gives the vertical offset. A side touch would give x.
-2. Expose a search radius (`spec["config"]={"spiral_r_max": r}`) for a coarse 6-8 mm search. It is slow (~100 s at 8 mm), so use it only as a fallback.
-3. Grasp the plug at a known point (centred, fixed depth), so the offset is predictable from the grasp pose.
+LLM runs (claude / terra / terra, Genesis; folders under `outputs/2026-11-03/`):
 
+| run | result | root cause | fix | folder |
+|---|---|---|---|---|
+| usb_g2 | FAIL | grasp settled 4.4 mm low; LLM then invented an edge scan with the held tip | skill: re-command the grasp until eef within 1 mm; no pressing / edge scans with the held tip | `usb_ALLterra_FAIL_grasp_settled_low` |
+| usb_g3 | FAIL, plug dropped | body height taken from the detection box (incl. the stand) → grasped 22 mm low; unbounded settle-correction loop | body height = housing only (USB 8 mm); `get_grasp_info()["grasp_depth_below_top"]` check; settle correction ≤3×, <1 cm | `usb_ALLterra_FAIL_grasp_on_stand_drop` |
+| usb_g4 | FAIL, plug flew out | unthrottled transits between wrist-view poses (~4 m/s commanded) | API caps hand speed at 0.3 m/s while the gripper is closed (`config.CLOSED_GRIPPER_MAX_SPEED`); check `gripper_holding()` before calibrating | `usb_ALLterra_FAIL_fast_transit_drop` |
+| usb_g5 | FAIL (timeouts) | plug held, offset correct (off_x 25.5 mm vs ~26.6), but terra's wrist pointing scatters ±2 cm along the face (several painted slot marks, real port ~3 px); spiral covers 3 mm | touch **line search**: `insert_with_touch(..., search_line=[0,1,0], search_half=0.025)` | `usb_ALLterra_FAIL_port_y_scatter` |
+| usb_g6 | FAIL | the laptop texture has port marks on BOTH side faces; terra + LLM chose the +x face (no opening). Sweep correctly returned `search_exhausted` 3×, but the skill said "height wrong, retry" → same face again | skill: an exhausted full sweep at a verified height = no opening on that face → next candidate face (nearest the arm base first) | `usb_ALLterra_FAIL_wrong_face_sweep` |
+| usb_g7 | FAIL | correct −x face; but the LLM aimed at the single outlier wrist candidate z 0.051 (3 others ~0.069-0.071, truth 0.069) and guessed deck z 0.058 for the face touch → 17 mm low, sweep exhausted | skill: opening z = median of all candidates (drop > 5 mm outliers); face touch 7 mm below the opening z (no separate deck estimate) | `usb_ALLterra_FAIL_outlier_port_z` |
+| usb_g8 | FAIL | aim now right (median z 0.0686 vs 0.069). The pick held the plug 8.5 mm below its top (8 mm housing): the LLM's settle correction added the error to the MEASURED `pose` (= the old target) → same sag; the depth-check regrasp repeated the same command. The plug pivoted on the 4 N face touches (off_x 9 mm) and fell | prompt + skill: correct settle errors on the previous COMMAND; shift the regrasp by the depth error | `usb_ALLterra_FAIL_low_grasp_settle_bug` |
+| usb_g9 | FAIL | pick OK (grasp depth 5.7 mm), offsets good (off_x 28.3, off_z 1.7 mm). Only 3 wrist candidates, all near the deck edge (z 0.073–0.077) → aim 4.6 mm high, y 2.1 cm off. Sweep rows (0.4 mm × 5) cover only ±0.8 mm in z → `search_exhausted` | harness test: does a z-band sweep recover a few-mm z error? (below) | `usb_ALLterra_FAIL_port_z_4mm_high` |
+| harness hz1 | FAIL | Genesis harness, z err +2.5 mm, y −15 mm, default rows: 4 false drops (0.4–0.8 mm), never seated, 537 s | z error > ~1 mm defeats the line sweep → need a z band or better z localisation | `outputs\touch\e2e_z25` |
+| harness hz2 | FAIL | same error, coarse rows (1.5 mm pitch × 7 = ±4.5 mm z): one partial entry 2.7 mm then jammed (edge), 706 s | z bands don't help → fix z localisation: skill rejects candidates within 3 mm of the wrist-located top edge, and re-views head-on if < 4 remain | `outputs\touch\e2e_z25b` |
+| usb_g10 | FAIL | edge-reject rule worked: z from 10 candidates = 0.0676 (truth 0.069, 1.4 mm low vs g9's 4.6 mm high); y 0.497 (truth 0.4959). Pick + offsets OK. Two line searches exhausted (rows cover ±0.8 mm), then the agent moved to other faces | new `insert_with_touch(search_cross=)` widens the height band (0.002 = 11 rows) | `usb_ALLterra_FAIL_port_z_1p4mm_low` |
+| harness hz3 | FAIL | z −1.4 mm, 11 rows: the sweep found the opening twice (entries 2.4 / 3.5 mm) but both jammed off-height, 797 s | open: sub-mm z, or z compliance during the insert push (let the tip settle into the slot) | `outputs\touch\e2e_zm14` |
+
+Line search (`touch/insertion.py`, `InsertConfig.sweep_*`): raster passes ±`sweep_half` along `sweep_dir` at 5 mm/s, rows 0.4 mm apart across it (5 rows), same drop detection / probe / insert as the spiral. `api.insert_with_touch` extends `max_s` to fit.
 Geometry (sim truth, for eval only): port (0.092, 0.4959, 0.069), axis +x, `TIP_X` = 0.0245.

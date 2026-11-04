@@ -37,8 +37,44 @@ class ObjectDisplacementTest(unittest.TestCase):
     def test_arm_in_front_is_not_reported_as_gone(self):
         self.assertEqual(od.compare(self.snap, *_scene(arm=True))["verdict"], "hidden")
 
+    def test_arm_in_snapshot_is_masked_out(self):
+        # snapshot taken while the arm hovered over part of the pole; later the arm left: still in place
+        rgb, depth = _scene()
+        rgb[10:30, 20:44], depth[10:30, 20:44] = (240, 240, 240), 0.6
+        arm = np.zeros((64, 64), bool)
+        arm[10:30, 20:44] = True
+        mask = np.zeros((64, 64), bool)
+        mask[10:50, 28:36] = True
+        unmasked = od.snapshot("pole", rgb, depth, mask)
+        masked = od.snapshot("pole", rgb, depth, mask, robot_mask=arm)
+        self.assertNotEqual(od.compare(unmasked, *_scene())["verdict"], "in_place")
+        self.assertEqual(od.compare(masked, *_scene())["verdict"], "in_place")
+
+    def test_robot_mask_now_covering_place_is_hidden(self):
+        arm = np.zeros((64, 64), bool)
+        arm[5:55, 20:44] = True
+        f = od.compare(self.snap, *_scene(pole=False), robot_mask=arm)
+        self.assertEqual(f["verdict"], "hidden")
+
     def test_moved_camera_gives_no_evidence(self):
         self.assertIsNone(od.compare(self.snap, *_scene(pole=False), camera_position=[0.1, 0, 1]))
+
+    def test_door_blob_with_pole_removed_reports_revealed_surface(self):
+        # 'door' mask = door + the pole in front of it; the pole is removed, the door (2.0 m) stays
+        mask = np.zeros((64, 64), bool)
+        mask[5:55, 24:40] = True
+        door = od.snapshot("door", *_scene(), mask)
+        f = od.compare(door, *_scene(pole=False))
+        self.assertAlmostEqual(f["revealed_behind_m"], 0.8, places=2)
+        self.assertIn("uncovered the surface behind", od.format_facts([f]))
+
+    def test_part_that_moved_away_is_not_reported_as_revealed(self):
+        rgb, depth = _scene(pole=False)
+        depth[10:50, 28:36] = 2.5              # a panel swung away: farther, but not to the region's depth
+        mask = np.zeros((64, 64), bool)
+        mask[5:55, 24:40] = True
+        door = od.snapshot("door", *_scene(), mask)
+        self.assertIsNone(od.compare(door, rgb, depth)["revealed_behind_m"])
 
     def test_retry_hint_only_for_relocate_subtasks(self):
         f = od.compare(self.snap, *_scene(pole=False))
@@ -54,6 +90,16 @@ class ObjectDisplacementTest(unittest.TestCase):
         od.mark_shared_regions([self.snap, door], facts)
         self.assertEqual(facts[0]["same_region_as"], ["door"])
         self.assertIn("SAME image region", od.format_facts(facts))
+
+    def test_identical_blobs_merge_into_one_line(self):
+        rgb, depth = _scene()
+        snaps = [od.snapshot(lbl, rgb, depth, self.snap["mask"]) for lbl in ("pole", "door", "wooden door")]
+        facts = [od.compare(s, *_scene(pole=False)) for s in snaps]
+        od.mark_shared_regions(snaps, facts)
+        text = od.format_facts(facts)
+        self.assertIn("'pole / door / wooden door': LEFT ITS ORIGINAL PLACE", text)
+        self.assertEqual(text.count("': LEFT ITS ORIGINAL PLACE"), 1)
+        self.assertIn("ONE image region", text)
 
     def test_run_baseline_reports_object_moved_by_earlier_subtask(self):
         from types import SimpleNamespace

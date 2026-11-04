@@ -68,9 +68,14 @@ REVIEW_OVERALL_COMMAND_SECTION = (
     "the qualitative goal holds (held, clearly lifted, visibly open). Process steps written as success conditions (e.g. 'the lever has been actuated', "
     "'the latch released', 'grasped the handle first') are implied by the goal state when it is reached "
     "(an open door means its latch was released): do not fail an achieved goal for lack of proof of how "
-    "it got there. A side effect that ADVANCES the overall command (e.g. the door swung open while the "
+    "it got there. Do not add requirements the Task does not state (exact clearance margins, a "
+    "verified swing path, where a cleared object came to rest): if the stated condition is visibly met "
+    "(e.g. the object no longer stands in front of / touches the target), the uncertainty about such "
+    "extras is NOT a reason to fail. A side effect that ADVANCES the overall command (e.g. the door swung open while the "
     "pole was cleared) is not a failure either; only fail for side effects that make the overall command "
-    "harder or unsafe.\n\n"
+    "harder or unsafe. The ROBOT ARM itself overlapping the target in the last frame (it is parked "
+    "or retracting there) is NOT an obstruction: the arm moves away on the next step; judge whether the "
+    "OBJECTS are arranged as required, ignoring the arm.\n\n"
 )
 REMAINING_MEDIA_SENTENCE_VIDEO = (
     "The REMAINING attachments are the trajectory VIDEOS of this attempt, in the order listed below."

@@ -37,6 +37,9 @@ gripper_goal_position_open_franka = 0.04
 gripper_goal_position_closed_franka = 0.0005
 arm_movement_force_franka = 5 * 240
 gripper_movement_force_franka = 1000
+# Default hand speed cap (m/s) while the gripper is commanded closed and the code gives no
+# max_speed (~ISO/TS 15066 collaborative speed; a real FR3 tops out at 1.7 m/s Cartesian).
+CLOSED_GRIPPER_MAX_SPEED = 0.3
 # Commanded closed but both fingers together still this far apart (m) => an object is held.
 # Fully closed is 2 * gripper_goal_position_closed_franka = 1 mm.
 gripper_holding_min_width_franka = 0.005
@@ -110,6 +113,10 @@ point_cloud_support_slab_m = 0.008
 point_cloud_support_skirt_ratio = 2.0
 bounding_cube_depth_offset = 0.06
 gripper_depth_offset_franka = 0.06
+#: Franka hand, fingers closed, top-down: finger-pad bottoms are this far below eef_pos (the fingertip
+#: centre, panda_grasptarget). Robot geometry (measured by a guarded touch in Genesis); used to turn a
+#: closed-finger touch of an object's top into that top's height.
+FINGER_BOTTOM_BELOW_EEF = 0.0072
 gripper_depth_offset_sawyer = -0.12
 
 # Segmentation

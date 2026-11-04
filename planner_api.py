@@ -58,6 +58,11 @@ class PlannerAPI:
         if isinstance(subtasks, dict):
             subtasks = [subtasks]
         subtasks = list(subtasks or [])
+        if getattr(self, "dispatch_closed", False):
+            msg = "execute_subtasks: planner iteration cap reached - no more subtasks are run."
+            print(msg)
+            self.logger.info(msg)
+            return {"executed": None, "success": False, "result": None, "remaining": subtasks}
 
         # Skip any leading empty-prompt subtasks.
         idx = 0

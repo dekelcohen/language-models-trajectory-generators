@@ -1,7 +1,7 @@
 # Status: open door, no touch (`door`, `door:hidden`)
 
 Living status log so work can resume after an interruption. Branch `tactile`.
-Last update: 2026-10-29 (fixes 9-11).
+Last update: 2026-11-03 (stall feedback, pose frame, loop guard, reviewer evidence).
 
 ## Request
 "Open the door" (no touch) never succeeded, even without the grey-cylinder occlusion; both
@@ -113,6 +113,57 @@ Terra vs gemini:
 - Terra worked as perception and reviewer on door, door:hidden, grasp, slide_cabinet and kettle.
 - Terra is more literal: it rejected achieved goals over planner wording until the review-prompt rules above were added.
 - No terra-specific misperception was seen. The slide_cabinet hinge confusion also happens with gemini.
+
+## 2026-11-03: stall feedback, pose frame, loop guard, reviewer evidence
+
+All runs: `-lm copilot-claude-opus-5.5`, perception + reviewer `copilot-gpt-6.1-terra`, PyBullet.
+Folders under `outputs/2026-11-03/`.
+
+| run | result | folder |
+|---|---|---|
+| door_a1 | success, attempt 1 | `door_ALLterra_after_reviewer_fixes_1` |
+| door_a2 | success, attempt 2 (attempt 1 a correct reject) | `door_ALLterra_after_reviewer_fixes_2` |
+| door_a3 | success, attempt 1 | `door_ALLterra_stall_feedback_3` |
+| door_a4 | success, attempt 3 at 54.6° (attempts 1-2 were correct rejects at 14.8° / 6.5°) | `door_ALLterra_pose_frame_fix_4` |
+| doorhid mask / disocclusion / 3 | success; the pole was removed once (no re-removal loop) | `door_hidden_ALLterra_robotmask`, `..._disocclusion`, `..._stall_speedcap_3` |
+| doorhid_4 | FAIL: an endless push loop (door actually ~open) | `door_hidden_ALLterra_FAIL_endless_push_loop` |
+| doorhid_5 | door opened 18.6° (reviewer TP), but `plan_completed()` came in the reply after the iteration cap and was never run | `door_hidden_ALLterra_loop_guard_5` |
+| doorhid_6 | **success**: pole cleared once, door 73°, both subtasks on attempt 1, planner completed | `door_hidden_ALLterra_planner_cap_fix_6` |
+| grasp, slide_cabinet | regression OK | `grasp_ALLterra_*`, `slide_cabinet_ALLterra_regression_1103` |
+| slide_r3 (after loop guard / planner cap / review rule) | SUCCESS on attempt 3 (door slid 0.063 → -0.224 m); no regression. An earlier r2 used task id `slide_cabinet` (no `franka_kitchen:` prefix = a different scene) and was discarded | `slide_cabinet_ALLterra_regression_final` |
+| door_a5 | SUCCESS on attempt 1 (`part_moved_with_hand`) | `door_ALLterra_stability_5` |
+| doorhid_7 | SUCCESS: pole cleared once (attempt 1), door opened on attempt 1. An arm-clear prep subtask was rejected twice (stalled rises left the arm across the door frame); the planner went on correctly | `door_hidden_ALLterra_stability_7` |
+
+Root causes and fixes:
+- **Unreached press target chained as the next start.** The hand stalled on the lever, the code continued from the planned pose, and the grip was lost.
+  - `execute_trajectory` returns the measured outcome (`reached`, `stalled`, `pose`, `holding`) and prints `STALLED` (shortfall > 2 cm and < 5 mm settle motion).
+  - The skill re-plans from the measured pose.
+- **Frame bug (pose vs eef).** `eef_pos` is the fingertip centre; trajectory poses are 6 cm up the approach axis. The skill said to hold `eef_pos` z, so every swing pressed 6 cm into the lever.
+  - The motion feedback now has `pose` (measured, in the trajectory frame). The prompt and the door skill chain from it.
+- **Finger joint-limit violation / fling.** Clamped the finger width; closed-gripper moves are capped at `config.CLOSED_GRIPPER_MAX_SPEED` = 0.3 m/s.
+- **Endless loop (doorhid_4).** `while phi < 108` never ended: the hand rested 2.6 mm short (not a stall), so ~1900 identical moves ran in 40 min.
+  - `execute_trajectory` raises after 15 consecutive calls with the same target and no hand motion (`API.REPEAT_NO_PROGRESS_CALLS`).
+  - The prompt asks for tolerant loop exits.
+- **Planner decision lost at the iteration cap (doorhid_5).** The reply produced by the last allowed planner turn was never executed.
+  - `run_plan` now executes it for its terminal decision only; `execute_subtasks` is refused there (`PlannerAPI.dispatch_closed`).
+
+Reviewer FP / FN (terra), and evidence changes:
+
+| # | Case | Type | Fix |
+|---|---|---|---|
+| A | pull-proprio said "door did not start" when slipped fingers still pushed it | FN | neutral wording (`slip_may_push`) |
+| B | process conditions ("lever actuated") demanded as proof | FN | review rules: a reached goal implies them |
+| C | the arm hovering in the end snapshot read as an occluder by the displacement check | FN | robot mask (robot's own pixels excluded) |
+| D | planner amounts ("30°") read as exact | FN | within ~25 % counts |
+| E/F | invented extras (rest place of the pole); door + pole one detection blob | FN/FP | rules + `same_region_as` caution |
+| G | the pull-proprio gate skipped "Open the tall upright wooden door…" (regex allowed 2 adjectives) | missing evidence | `OPEN_INTENT_RE` allows 4 words |
+| H | 8 labels of one blob → 8 near-identical displacement lines (prompt bloat) | noise | merged into one line per region |
+| I | doorhid_4 pole: cleared, but the parked arm overlapping the handle → "no clear view" | FN | review rule: ignore the parked arm |
+| J | slide_r3 attempt 2: door slid 11 cm, rejected. The planner called the SLIDING door hinged ("~45°"), and the reviewer judged against that | borderline FN (planner text) | planner rule 7: when unsure whether it hinges or slides, state a motion-neutral success ("visibly open, interior exposed") when the hinge/slide type is unknown |
+| K | slide_r3 attempt 1: handle `left_place 0.99` while nothing moved (ncc 0.64; the arm hovered at the handle) | displacement FP (reviewer correctly ignored it) | open: the handle template is small and the arm covers it; trust the door-panel line |
+
+Correct rejects (true negatives) seen: door_a2 attempt 1; door_a4 attempts 1-2; doorhid_3 door attempt 1 (4.6°); slide attempt 1.
+Disocclusion evidence ("the surface behind got N cm farther = the object in front left") worked on the pole.
 
 ## How to debug
 - `main.py` logs are UTF-16. Grep with `Select-String -Encoding unicode`. Markers:
