@@ -25,6 +25,8 @@ services:
   shell:
     <<: *dev
     image: vlm-gpu-server
+    build: {context: ../.., dockerfile: gpu_server/docker/Dockerfile}
+    pull_policy: build
     profiles: [shell]
     entrypoint: ["bash", "/app/gpu_server/docker/dev-entrypoint.sh"]
     command: ["sleep", "infinity"]

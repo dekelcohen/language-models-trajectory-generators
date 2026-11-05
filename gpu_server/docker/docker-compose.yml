@@ -8,6 +8,9 @@
 #   -f gpu_server/docker/docker-compose.dev.yml   (see that file)
 x-server: &server
   image: vlm-gpu-server
+  # Both services build the same local image (2nd build is a cache hit); never pull it from a registry.
+  build: {context: ../.., dockerfile: gpu_server/docker/Dockerfile}
+  pull_policy: build
   restart: unless-stopped
   environment:
     GPU_SERVER_TOKEN: ${GPU_SERVER_TOKEN:?set GPU_SERVER_TOKEN in gpu_server/docker/.env}
@@ -17,7 +20,6 @@ x-server: &server
 services:
   cotracker:
     <<: *server
-    build: {context: ../.., dockerfile: gpu_server/docker/Dockerfile}
     command: ["--modules", "cotracker", "echo", "--preload", "cotracker",
               "--ws", "0.0.0.0:8765", "--tcp", "0.0.0.0:8766"]
     ports: ["8765:8765", "8766:8766"]
