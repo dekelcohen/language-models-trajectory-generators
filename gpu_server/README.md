@@ -197,6 +197,111 @@ Session owners are per connection (`ws:<peer>#<n>`). Behind a tunnel every conne
 reports the same peer (`<ip>:0`). Before this fix, the launcher's ping disconnect closed the
 tracker's CoTracker sessions (97% lost).
 
+## Linux GPU box on the LAN (Docker, `gpu_server/docker/`)
+
+Runs CoTracker3 and RoMa v2 on a Linux machine with an NVIDIA GPU (tested target: RTX 3070
+8 GB). The Windows client connects over the LAN. Both models fit in 8 GB together; RoMa v2 runs
+in bf16 on Ampere (`amp=auto`).
+
+**Files:**
+- `Dockerfile`: base `pytorch/pytorch:2.8.0-cuda12.6-cudnn9-runtime`; clones RoMaV2 into
+  `/opt/RoMaV2` (sources only, no `pip install -e`); copies `config.py`, `providers/`, `gpu_server/`.
+- `requirements.txt`: server deps only (fastapi, uvicorn, websockets, opencv-headless, einops, ...).
+- `docker-compose.yml`: two services from one image, on the client's default ports:
+  - `cotracker`: ws `:8765`, tcp `:8766`;
+  - `romav2`: ws `:8775`, tcp `:8776`.
+- `docker-compose.dev.yml` + `dev-entrypoint.sh`: optional dev overlay (live code, env + caches on
+  host dirs), see step 4.
+- Root `.dockerignore`: limits the build context to those files.
+
+Weights download on first load into the `model-cache` volume at `/cache`
+(`TORCH_HOME=/cache/torch`, `HF_HOME=/cache/huggingface`). Restarts reuse it.
+
+**1. Host prerequisites (once, needs sudo).** Ubuntu 22.04/24.04:
+```bash
+nvidia-smi                       # any driver >= 525 (e.g. 535 / "CUDA 12.2") is enough, see note below
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER    # log out/in afterwards
+# NVIDIA Container Toolkit
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -sL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+docker run --rm --gpus all ubuntu nvidia-smi   # GPU visible in containers
+```
+Driver note: `nvidia-smi`'s "CUDA Version" is the newest CUDA the driver supports natively. The
+image's torch (cu126) still runs on a 525+ driver through CUDA minor-version compatibility. torch
+ships its own CUDA runtime and sm_86 kernels, so no PTX JIT is needed. The image sets
+`NVIDIA_DISABLE_REQUIRE=1` so the container runtime does not reject a "12.2" driver. Upgrade the
+driver (`sudo ubuntu-drivers install`, 550+) only if `torch.cuda.is_available()` is False in the
+container.
+
+**2. Build and run** (from the repo root on the Linux box):
+```bash
+git clone https://github.com/dekelcohen/language-models-trajectory-generators.git && cd language-models-trajectory-generators
+git checkout tactile
+echo "GPU_SERVER_TOKEN=$(openssl rand -hex 16)" > gpu_server/docker/.env   # keep this secret
+docker compose -f gpu_server/docker/docker-compose.yml up -d --build
+docker compose -f gpu_server/docker/docker-compose.yml logs -f            # wait for "[host] module cotracker ready"
+```
+- Only CoTracker: `docker compose -f gpu_server/docker/docker-compose.yml up -d cotracker`.
+- Update: `git pull`, then rerun `up -d --build`.
+- Stop: `docker compose -f gpu_server/docker/docker-compose.yml down` (the weights volume stays).
+- Firewall: `sudo ufw allow from <client-ip> to any port 8765:8776 proto tcp`.
+  Keep these ports off the internet; the token is the only auth.
+
+**3. Client (Windows).** `tcp://` (stdlib) has the least overhead on a LAN. `ws://<ip>:8765/v1/ws`
+also works (`websockets` is in `requirements.txt`) and is the only option through tunnels/proxies.
+```powershell
+$env:GPU_SERVER_URL      = "tcp://<linux-ip>:8766"
+$env:GPU_SERVER_ROMA_URL = "tcp://<linux-ip>:8776"
+$env:GPU_SERVER_TOKEN    = "<token from gpu_server/docker/.env>"
+python -c "from gpu_server.client import GpuClient; print(GpuClient('tcp://<linux-ip>:8766').ping())"
+python main.py --tracking --tracker-provider remote --tracking-server no-launch ...
+```
+- On a LAN, `raw` frames are fine.
+- Over Wi-Fi or slow links, set `$env:GPU_SERVER_CODEC = "jpeg"`.
+- Never pass `--tracking-server shutdown` against this shared server.
+
+**4. Dev mode (optional): python env + model caches on host dirs.** Add the dev overlay:
+```bash
+C="-f gpu_server/docker/docker-compose.yml -f gpu_server/docker/docker-compose.dev.yml"
+docker compose $C up -d --build                       # servers run the LIVE repo code (/app bind)
+docker compose $C --profile shell up -d shell         # + an idle GPU dev container
+docker compose $C exec shell bash                     # pip install ..., python ..., nvidia-smi
+docker compose $C restart cotracker                   # pick up code changes
+```
+- `~/vlm-gpu-dev/env` -> `/workspace/env`: the python env.
+  - `DEV_ENV_KIND=venv` (default): a `--system-site-packages` venv over the image env. The image's
+    torch is reused; your `pip install`s (e.g. `transformers==4.57.1`) persist in this dir.
+  - `DEV_ENV_KIND=conda`: a full `conda create --clone base` (~6 GB), independent of the image.
+- `~/vlm-gpu-dev/cache` -> `/cache`: `TORCH_HOME` + `HF_HOME` (transformers / hub models).
+- Change the dirs with `DEV_WORKSPACE`, `DEV_CACHE`, `DEV_ENV_KIND` in `gpu_server/docker/.env`.
+- The env is seeded on the first start, under a lock (both services start together).
+  To reset it, delete the dir. Files are root-owned; `sudo chown -R $USER ~/vlm-gpu-dev` if needed.
+
+**VRAM on an 8 GB card (RTX 3070):**
+
+| Model | Weights | Peak at inference |
+|---|---|---|
+| CoTracker3 (online) | ~0.1 GB | ~1-2 GB (grid/queries) |
+| RoMa v2 (bf16) | ~0.5 GB | ~1.5-2.5 GB |
+| MolmoPoint-Vid-4B, bf16 | 4.86 B params = 9.7 GB | does not fit |
+| MolmoPoint-Vid-4B, 8-bit | ~5 GB | ~6.5-7.5 GB (+ video KV cache); alone only |
+| MolmoPoint-Vid-4B, 4-bit (nf4) | ~3 GB | ~4-5 GB; fits next to CoTracker |
+
+Video KV cache: Qwen3-4B-like LLM, ~0.15 MB/token in bf16; about 80 tokens/frame, so 32 frames
+is ~0.4 GB and 128 frames is ~1.5 GB. Quantized loading of the remote-code model is unverified
+(bitsandbytes).
+
+**Without Docker** (conda/venv on the box):
+`pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126 && pip install -r gpu_server/docker/requirements.txt`,
+clone RoMaV2, then run the same `python -m gpu_server.server ...` commands as in
+`docker-compose.yml` with `--token`. Optional on Linux: `pip install fused-local-corr`
+(faster RoMa local correlation).
+
 ## Security
 
 Bind to loopback by default. A non-loopback bind requires `--token`, and clients pass

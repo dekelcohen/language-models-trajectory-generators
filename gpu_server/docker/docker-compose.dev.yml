@@ -1,0 +1,34 @@
+# Dev overlay: live repo code, python env + model caches on HOST dirs (survive rebuilds/down).
+#   docker compose -f gpu_server/docker/docker-compose.yml -f gpu_server/docker/docker-compose.dev.yml up -d --build
+#   ... --profile shell up -d shell && docker compose ... exec shell bash   # GPU dev shell
+# Host dirs (override in gpu_server/docker/.env):
+#   DEV_WORKSPACE (default ~/vlm-gpu-dev)        -> /workspace  (python env at /workspace/env)
+#   DEV_CACHE     (default ~/vlm-gpu-dev/cache)  -> /cache      (TORCH_HOME, HF_HOME = transformers/hub)
+#   DEV_ENV_KIND  venv (default, small overlay on the image env) | conda (full clone, ~6 GB)
+x-dev-env: &dev-env
+  DEV_ENV: /workspace/env
+  DEV_ENV_KIND: ${DEV_ENV_KIND:-venv}
+  # so `docker compose exec <svc> bash` also sees the persistent env first
+  PATH: /workspace/env/bin:/opt/conda/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+x-dev: &dev
+  entrypoint: ["bash", "/app/gpu_server/docker/dev-entrypoint.sh", "python", "-m", "gpu_server.server"]
+  environment: *dev-env
+  volumes:
+    - ../..:/app
+    - ${DEV_WORKSPACE:-~/vlm-gpu-dev}:/workspace
+    - ${DEV_CACHE:-~/vlm-gpu-dev/cache}:/cache
+
+services:
+  cotracker: *dev
+  romav2: *dev
+  shell:
+    <<: *dev
+    image: vlm-gpu-server
+    profiles: [shell]
+    entrypoint: ["bash", "/app/gpu_server/docker/dev-entrypoint.sh"]
+    command: ["sleep", "infinity"]
+    environment:
+      <<: *dev-env
+      GPU_SERVER_TOKEN: ${GPU_SERVER_TOKEN:-}
+    gpus: all

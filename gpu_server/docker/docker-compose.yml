@@ -1,0 +1,33 @@
+# Two servers from one image, matching the client defaults:
+#   cotracker -> ws :8765 / tcp :8766   (config.tracker_remote_url, $GPU_SERVER_URL)
+#   romav2    -> ws :8775 / tcp :8776   (config.track_roma_url,     $GPU_SERVER_ROMA_URL)
+# Usage (from the repo root):
+#   echo "GPU_SERVER_TOKEN=$(openssl rand -hex 16)" > gpu_server/docker/.env
+#   docker compose -f gpu_server/docker/docker-compose.yml up -d --build
+# Dev mode (live code, persistent python env + model caches on the host): add
+#   -f gpu_server/docker/docker-compose.dev.yml   (see that file)
+x-server: &server
+  image: vlm-gpu-server
+  restart: unless-stopped
+  environment:
+    GPU_SERVER_TOKEN: ${GPU_SERVER_TOKEN:?set GPU_SERVER_TOKEN in gpu_server/docker/.env}
+  volumes: [model-cache:/cache]
+  gpus: all
+
+services:
+  cotracker:
+    <<: *server
+    build: {context: ../.., dockerfile: gpu_server/docker/Dockerfile}
+    command: ["--modules", "cotracker", "echo", "--preload", "cotracker",
+              "--ws", "0.0.0.0:8765", "--tcp", "0.0.0.0:8766"]
+    ports: ["8765:8765", "8766:8766"]
+
+  romav2:
+    <<: *server
+    depends_on: [cotracker]
+    command: ["--modules", "romav2", "echo", "--set", "romav2.setting=turbo", "--preload", "romav2",
+              "--ws", "0.0.0.0:8775", "--tcp", "0.0.0.0:8776"]
+    ports: ["8775:8775", "8776:8776"]
+
+volumes:
+  model-cache:
