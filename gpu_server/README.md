@@ -208,8 +208,9 @@ in bf16 on Ampere (`amp=auto`).
   `/opt/RoMaV2` (sources only, no `pip install -e`); copies `config.py`, `providers/`, `gpu_server/`.
 - `requirements.txt`: server deps only (fastapi, uvicorn, websockets, opencv-headless, einops, ...).
 - `docker-compose.yml`: two services from one image, on the client's default ports:
-  - `cotracker`: ws `:8765`, tcp `:8766`;
-  - `romav2`: ws `:8775`, tcp `:8776`.
+  - `cotracker`: ws `:8765`, tcp `:8766` (default);
+  - `romav2`: ws `:8775`, tcp `:8776`. It is opt-in through the `roma` profile, because client RoMa
+    re-detection is off by default (`config.track_roma_enable = False`).
 - `docker-compose.dev.yml` + `dev-entrypoint.sh`: optional dev overlay (live code, env + caches on
   host dirs), see step 4.
 - Root `.dockerignore`: limits the build context to those files.
@@ -243,10 +244,12 @@ container.
 git clone https://github.com/dekelcohen/language-models-trajectory-generators.git && cd language-models-trajectory-generators
 git checkout tactile
 echo "GPU_SERVER_TOKEN=$(openssl rand -hex 16)" > gpu_server/docker/.env   # keep this secret
-docker compose -f gpu_server/docker/docker-compose.yml up -d --build
+docker compose -f gpu_server/docker/docker-compose.yml up -d --build    # CoTracker only (default)
 docker compose -f gpu_server/docker/docker-compose.yml logs -f            # wait for "[host] module cotracker ready"
 ```
-- Only CoTracker: `docker compose -f gpu_server/docker/docker-compose.yml up -d cotracker`.
+- Add RoMa v2 (for `--track-roma`): `docker compose -f gpu_server/docker/docker-compose.yml --profile roma up -d`.
+  Pass `--profile roma` to every later `ps` / `logs` / `down` as well, or set `COMPOSE_PROFILES=roma` in
+  `gpu_server/docker/.env`.
 - Update: `git pull`, then rerun `up -d --build`.
 - Stop: `docker compose -f gpu_server/docker/docker-compose.yml down` (the weights volume stays).
 - Firewall: `sudo ufw allow from <client-ip> to any port 8765:8776 proto tcp`.
@@ -256,7 +259,7 @@ docker compose -f gpu_server/docker/docker-compose.yml logs -f            # wait
 also works (`websockets` is in `requirements.txt`) and is the only option through tunnels/proxies.
 ```powershell
 $env:GPU_SERVER_URL      = "tcp://<linux-ip>:8766"
-$env:GPU_SERVER_ROMA_URL = "tcp://<linux-ip>:8776"
+$env:GPU_SERVER_ROMA_URL = "tcp://<linux-ip>:8776"                   # only with the roma profile
 $env:GPU_SERVER_TOKEN    = "<token from gpu_server/docker/.env>"
 python -c "from gpu_server.client import GpuClient; print(GpuClient('tcp://<linux-ip>:8766').ping())"
 python main.py --tracking --tracker-provider remote --tracking-server no-launch ...

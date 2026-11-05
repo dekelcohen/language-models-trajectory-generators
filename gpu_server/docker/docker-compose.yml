@@ -1,9 +1,10 @@
 # Two servers from one image, matching the client defaults:
 #   cotracker -> ws :8765 / tcp :8766   (config.tracker_remote_url, $GPU_SERVER_URL)
-#   romav2    -> ws :8775 / tcp :8776   (config.track_roma_url,     $GPU_SERVER_ROMA_URL)
+#   romav2    -> ws :8775 / tcp :8776   (config.track_roma_url,     $GPU_SERVER_ROMA_URL)  [profile: roma]
 # Usage (from the repo root):
 #   echo "GPU_SERVER_TOKEN=$(openssl rand -hex 16)" > gpu_server/docker/.env
-#   docker compose -f gpu_server/docker/docker-compose.yml up -d --build
+#   docker compose -f gpu_server/docker/docker-compose.yml up -d --build                  # CoTracker only
+#   docker compose -f gpu_server/docker/docker-compose.yml --profile roma up -d --build   # + RoMa v2
 # Dev mode (live code, persistent python env + model caches on the host): add
 #   -f gpu_server/docker/docker-compose.dev.yml   (see that file)
 x-server: &server
@@ -26,6 +27,7 @@ services:
 
   romav2:
     <<: *server
+    profiles: [roma]   # opt-in: client RoMa re-detection is off by default (config.track_roma_enable)
     depends_on: [cotracker]
     command: ["--modules", "romav2", "echo", "--set", "romav2.setting=turbo", "--preload", "romav2",
               "--ws", "0.0.0.0:8775", "--tcp", "0.0.0.0:8776"]
