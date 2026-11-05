@@ -853,6 +853,7 @@ class API:
         self.logger.info(PROGRESS + "Executing generated trajectory..." + ENDC)
         self.main_connection.send([EXECUTE_TRAJECTORY, trajectory])
         tracking_abort = None
+        grasp_slip = None
         motion = None
         try:
             resp = self.main_connection.recv()
@@ -869,6 +870,8 @@ class API:
                 if len(resp) >= 3 and isinstance(resp[2], dict):
                     if resp[2].get("tracking_abort"):
                         tracking_abort = resp[2]
+                    if isinstance(resp[2].get("grasp_slip"), dict):
+                        grasp_slip = resp[2]["grasp_slip"]
                     if isinstance(resp[2].get("proprio"), dict):
                         rec = dict(resp[2]["proprio"])
                         try:    # commanded first waypoint, in the LLM's trajectory coordinates
@@ -882,6 +885,8 @@ class API:
         self.task.trajectory_length += len(trajectory.points)
         if tracking_abort is not None:
             self._handle_tracking_abort(tracking_abort)
+        if grasp_slip is not None:
+            self._handle_grasp_slip(grasp_slip)
         self._check_repeated_no_progress(trajectory, motion)
         try:
             target = list(trajectory.points[-1])
@@ -953,6 +958,50 @@ class API:
             print(msg)
             self.logger.info(PROGRESS + msg + ENDC)
         return out
+
+    @staticmethod
+    def grasp_slip_feedback(v):
+        """Retry feedback for a grasp-slip verdict (touch/slip_guard.py), proprioception/vision only."""
+        msg = (f"GRASP {'JAM' if v.get('check') == 'jam' else 'SLIP'} ({v.get('check')} check): {v.get('reason')}. The hand had moved "
+               f"{100 * (v.get('travel_m') or 0):.1f} cm from the grasp {v.get('grasp_pos')} along "
+               f"{v.get('direction')}; stopped at {v.get('slip_pos')}. Finger width {v.get('width_at_grasp_mm')} -> "
+               f"{v.get('width_mm')} mm; peak felt load {v.get('peak_load_N')} N")
+        if v.get("peak_load_pos"):
+            msg += f" at {v['peak_load_pos']}"
+        if v.get("track_dist_m") is not None:
+            msg += f"; tracked '{v.get('track_name')}' {100 * v['track_dist_m']:.1f} cm further from the fingers than at the grasp"
+        msg += (". The part is still held but the arm cannot move it this way." if v.get("check") == "jam"
+                else ". The part is NOT held any more.")
+        if (v.get("peak_load_N") or 0) >= 8.0:
+            hint = ("It resisted this motion" + ("" if v.get("check") == "jam" else " before slipping") +
+                    ": the commanded path was not the part's free path "
+                    "(e.g. the wrong hinge side, or a straight pull where the part swings on an arc). Re-grasp, "
+                    "then move a few cm the other way / along the arc and check the hand still holds it; or "
+                    "use pull_with_touch, which lets the mechanism steer the hand.")
+        else:
+            hint = ("It slid out with little resistance: the grasp was shallow or on the wrong part (e.g. the "
+                    "lever's hub instead of the bar). Re-detect it and grasp deeper, at the middle of the bar.")
+        return msg + " " + hint
+
+    def _handle_grasp_slip(self, verdict):
+        """The grasp-slip guard stopped the trajectory: fail the attempt with detailed feedback,
+        the same path as a tracking abort (remaining code skipped, retry prompt + reviewer told)."""
+        text = self.grasp_slip_feedback(verdict)
+        self.logger.info(FAIL + text + ENDC)
+        if verdict.get("check") == "jam" and (verdict.get("travel_m") or 0) >= 0.15:
+            # Moved far, then stuck: likely the part's end stop (door fully open). Stop the code
+            # but let the reviewer judge the result instead of failing the attempt.
+            raise RuntimeError("Trajectory stopped by the grasp-slip guard: the held part stopped moving after "
+                               f"{100 * verdict['travel_m']:.0f} cm - probably its end stop (e.g. fully open). "
+                               "Check whether the goal is already met before retrying. " + text)
+        try:
+            self.task.failed_task = True
+            self.task.review_reason = text
+            steps = self.task.review_improvement_steps or []
+            self.task.review_improvement_steps = list(steps) + [text]
+        except Exception:
+            pass
+        raise RuntimeError("Trajectory stopped by the grasp-slip guard. " + text)
 
     def _handle_tracking_abort(self, payload):
         """A tracking monitor stopped the rollout: fail the attempt and tell the model why.

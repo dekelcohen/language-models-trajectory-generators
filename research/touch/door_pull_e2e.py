@@ -48,6 +48,7 @@ ap.add_argument("--sim", default="genesis", choices=("genesis", "pybullet"),
 ap.add_argument("--press", type=float, default=0.0, help="open-loop: press the lever down this much (m) first")
 ap.add_argument("--arc", type=float, default=0.0, help="open-loop: pull along the (eval) hinge arc this many deg")
 ap.add_argument("--arc-yaw", action="store_true", help="--arc: turn the wrist with the door (yaw += swept)")
+ap.add_argument("--arc-wrong", action="store_true", help="--arc: swing the WRONG way (wrong hinge side) -> grasp-slip guard test")
 ap.add_argument("--hinge-err", type=float, default=0.0, help="--arc: hinge estimate pushed this far (m) further from the handle")
 ap.add_argument("--debug", action="store_true", help="trace each regrasp phase (eval door angle + image)")
 args = ap.parse_args()
@@ -178,14 +179,25 @@ if d0 is None:                                       # skew: 30 deg away from th
         d0 = np.array([c * normal[0] + s * normal[1], -s * normal[0] + c * normal[1], 0.0])
 
 
+SLIPS = []
+
+
+def _slip(r, desc):
+    if len(r) > 2 and isinstance(r[2], dict) and r[2].get("grasp_slip"):
+        print(f"[door] GRASP SLIP at {desc}: {json.dumps(r[2]['grasp_slip'])}", flush=True)
+        SLIPS.append(desc)
+    return bool(SLIPS)
+
+
 def exe(points, desc, settle=6, tip=None):
     tip = np.asarray(points[-1][:3]) - [0, 0, DZ] if tip is None else np.asarray(tip)
     r = call([config.EXECUTE_TRAJECTORY, [list(map(float, p)) for p in points]])
-    for _ in range(settle):                          # hold the last set-point until the arm settles
+    for _ in range(0 if _slip(r, desc) else settle):  # hold the last set-point until the arm settles
         st = call([config.GET_ROBOT_STATE])
         if np.linalg.norm(tip - st["eef_pos"]) < 0.004:
             break
-        call([config.EXECUTE_TRAJECTORY, [list(map(float, points[-1]))]])
+        if _slip(call([config.EXECUTE_TRAJECTORY, [list(map(float, points[-1]))]]), desc + " (settle)"):
+            break
     st = call([config.GET_ROBOT_STATE])
     print(f"[door] {desc}: {r[0].strip()[:50]} eef={np.round(st['eef_pos'], 3).tolist()} "
           f"w={st.get('gripper_width')} hold={st.get('gripper_holding')} angle={door_angle():.3f}", flush=True)
@@ -268,6 +280,7 @@ else:
         r0 = np.linalg.norm(np.asarray(start[:2]) - c0)
         a0 = math.atan2(start[1] - c0[1], start[0] - c0[0])
         sgn = 1.0 if np.dot(np.cross([0, 0, 1.0], [math.cos(a0), math.sin(a0), 0]), tangent) > 0 else -1.0
+        sgn = -sgn if args.arc_wrong else sgn
         pts = []
         for t in np.linspace(0, args.arc, int(args.arc / 3) + 1)[1:]:
             th = sgn * math.radians(t) if args.arc_yaw else 0.0
@@ -289,6 +302,8 @@ else:
         pts = lin(start, list(endp) + list(start[3:]), step=0.02)
     for k, pt in enumerate(pts):
         exe([pt], f"pull {k}", settle=3, tip=np.asarray(st["eef_pos"]) + d0 * args.pull * (k + 1) / len(pts))
+        if SLIPS:
+            break
 lv, RLv = frame(latch_link)
 lever_now = lv + RLv @ np.array([args.grip_x, -0.15, 0.0])
 st_end = call([config.GET_ROBOT_STATE])

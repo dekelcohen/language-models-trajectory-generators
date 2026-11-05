@@ -212,6 +212,18 @@ The reviewer was not the problem: failed attempts opened 0.4–1.6°, successes 
 | doorhid_h3 | success after 3 planner iterations (folded arm from "toward base" retreat) | `door_hidden_terra_occluderfix_3` |
 | doorhid_h4 | **clean SUCCESS**: pole removed attempt 1, hand back near home, door opened attempt 1, ~10 min | `door_hidden_terra_retreatfix_4` |
 
+## 2026-11-05: grasp-slip guard (wrong-hinge arc caught in-flight)
+- **Why earlier slips weren't caught:** tracking is opt-in (`--tracking`) and was off in h1–h4. The LLM never called `track_objects` or `pull_with_touch`. `pull_proprio` runs only after the attempt, and the arc was split into many 1-point trajectories.
+- **Fix:** `touch/slip_guard.py`, always on, sampled per waypoint in `env.py`. It uses width, force (Genesis) and tracking; details are in document.md §7. A trip stops the trajectory and fails the attempt with feedback ("it resisted this way: wrong hinge side / use the other arc / pull_with_touch").
+- **Harness** (`--arc-wrong` flips the arc):
+
+| sim | correct arc | wrong arc |
+|---|---|---|
+| PyBullet | door 45.7°, no trip | width trip after 0.6 cm |
+| Genesis | door 50°, end-stop jam at 44 cm (not a failure) | jam trip (396 N) after 1.1 cm |
+
+- **Remote CoTracker** (`gpu_server`, `--tracker-provider remote`): ping OK. Synthetic shift test: ≤0.3 px error, ~20–30 ms RTT per frame, 135–225 ms per 8-frame flush. That is fast enough for the tracking check at waypoint rate.
+
 ## How to debug
 - `main.py` logs are UTF-16. Grep with `Select-String -Encoding unicode`. Markers:
   - `[pull_proprio] outcome=`

@@ -418,6 +418,70 @@ class Environment:
 FRANKA_MAX_WIDTH_M = 0.08
 
 
+def _ext_force(sim, robot):
+    """External force on the hand from the joint torques (libfranka ``O_F_ext_hat_K`` analogue):
+    applied minus gravity torques through J^T. None where the simulator has no robot model."""
+    try:
+        if not sim.supports_torque_control():   # e.g. PyBullet: motor torques do not match a gravity model
+            return None
+        from touch.state import wrench_from_joint_torques
+        arm = robot.joint_indices[:robot.profile.arm_joint_count]
+        tau = [sim.get_joint_state(robot.id, j).applied_torque for j in arm]
+        J = sim.get_link_jacobian(robot.id, robot.ee_index, arm)
+        g = sim.get_gravity_torques(robot.id, arm)
+        return wrench_from_joint_torques(J, tau, g)[:3]
+    except Exception:
+        return None
+
+
+def _held_track(robot, pick=False):
+    """(name, distance m) of the tracked part nearest the fingers, measured (not predicted /
+    tentative) only. ``pick`` chooses the part (within 8 cm); later calls follow that name."""
+    session = getattr(robot, "tracking_session", None)
+    rep = getattr(session, "last_report", None) if session is not None else None
+    if rep is None:
+        return None, None
+    names = list(rep.objects) if pick else [getattr(robot, "slip_track_name", None)]
+    best = (None, None)
+    for name in names:
+        obj = rep.get(name) if name else None
+        pose = getattr(obj, "pose", None)
+        if obj is None or obj.lost or obj.predicted or getattr(pose, "tentative", False):
+            continue
+        d = rep.distance(name)
+        if d is not None and (best[1] is None or d < best[1]) and (not pick or d < 0.08):
+            best = (name, d)
+    return best
+
+
+def _slip_guard_sample(sim, robot, i):
+    """Feed one waypoint to the grasp-slip guard (touch/slip_guard.py); arms it on the first
+    sample after a close that holds something. Returns the verdict or None."""
+    if not getattr(config, "slip_guard_enabled", True) or robot.gripper_open:
+        return None
+    guard = getattr(robot, "slip_guard", None)
+    pos, width, holding = _motion_sample(sim, robot)
+    if getattr(robot, "slip_guard_pending", False):
+        robot.slip_guard_pending = False
+        if not holding or width is None:
+            return None
+        from touch.slip_guard import GraspSlipGuard
+        guard = robot.slip_guard = GraspSlipGuard()
+        guard.arm(width, pos)
+        robot.slip_track_name, robot.slip_track_d0 = _held_track(robot, pick=True)
+        return None
+    if guard is None or not guard.armed:
+        return None
+    force = _ext_force(sim, robot) if i % max(1, int(getattr(config, "slip_guard_force_every", 2))) == 0 else None
+    name = getattr(robot, "slip_track_name", None)
+    d = _held_track(robot)[1] if name else None
+    rise = None if d is None else max(0.0, d - (robot.slip_track_d0 or 0.0))
+    if os.environ.get("SLIP_GUARD_TRACE"):
+        print(f"[slip_guard] i={i} pos={np.round(pos, 3).tolist()} w={width} "
+              f"|F|={None if force is None else round(float(np.linalg.norm(force)), 1)} rise={rise}", flush=True)
+    return guard.update(pos, width=width, force=force, track_dist=rise, track_name=name)
+
+
 def _gripper_proprio(sim, robot):
     """Measured finger opening, as a real gripper's width sensor reports it.
 
@@ -839,6 +903,7 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                     desc = None
 
                 aborted_by_tracking = False
+                slip = None
                 step_start = robot.trajectory_step
                 proprio_start = _motion_sample(sim, robot)
                 held_samples = []
@@ -851,6 +916,11 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                     if not robot.gripper_open:
                         pos, _w, holding = _motion_sample(sim, robot)
                         held_samples.append((pos, holding))
+                    slip = _slip_guard_sample(sim, robot, i)
+                    if slip is not None:
+                        logger.info(FAIL + f"Grasp-slip guard stopped the trajectory at point {i} "
+                                    f"({slip['check']}): {slip['reason']}" + ENDC)
+                        break
                     # A tracking monitor that returned "abort" (e.g. the object left the
                     # gripper) stops the rollout here rather than after the last waypoint,
                     # so the agent can retry from a state close to the failure.
@@ -866,7 +936,7 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 _record_tilt_while_holding(sim, robot)
                 try:
                     proprio = _trajectory_proprio(sim, robot, desc, step_start, proprio_start,
-                                                  held_samples, len(trajectory), aborted_by_tracking)
+                                                  held_samples, len(trajectory), aborted_by_tracking or slip is not None)
                     proprio["ee_pre_settle"] = pre_settle
                 except Exception as e:
                     logger.info(FAIL + f"Trajectory proprioception record failed: {e}" + ENDC)
@@ -881,6 +951,9 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                                           "reason": session.abort_reason,
                                           "summary": session.summary(),
                                           "proprio": proprio}])
+                elif slip is not None:
+                    env_connection.send([FAIL + "Trajectory stopped by the grasp-slip guard: " + slip["reason"] + ENDC,
+                                         robot.trajectory_step, {"grasp_slip": slip, "proprio": proprio}])
                 else:
                     env_connection.send([OK + "Finished executing generated trajectory!" + ENDC, robot.trajectory_step,
                                          {"proprio": proprio}])
@@ -963,6 +1036,9 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 robot.gripper_open = True
                 robot.eef_pos_at_close = None
                 robot.max_tilt_since_close = None
+                robot.slip_guard_pending = False
+                if getattr(robot, "slip_guard", None) is not None:
+                    robot.slip_guard.disarm()
 
                 logger.info(OK + "Finished opening gripper!" + ENDC)
 
@@ -976,6 +1052,7 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 robot.gripper_open = False
                 robot.eef_pos_at_close = [round(float(v), 4) for v in ee_current_position]
                 robot.max_tilt_since_close = None
+                robot.slip_guard_pending = True
 
                 logger.info(OK + "Finished closing gripper!" + ENDC)
 
@@ -992,6 +1069,9 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 robot.gripper_open = True
                 robot.eef_pos_at_close = None
                 robot.max_tilt_since_close = None
+                robot.slip_guard_pending = False
+                if getattr(robot, "slip_guard", None) is not None:
+                    robot.slip_guard.disarm()
 
                 step_env_and_record_loop(env, robot)
 

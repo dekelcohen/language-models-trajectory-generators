@@ -130,3 +130,69 @@ def test_open_with_touch_disabled_without_touch_flag():
 
     api = SimpleNamespace(args=SimpleNamespace(touch=False), logger=None)
     assert recovery.open_with_touch(api, direction=[-1, 0, 0])["outcome"] == "disabled"
+
+
+# ---- grasp-slip guard (touch/slip_guard.py) during position-controlled trajectories
+from touch.slip_guard import GraspSlipGuard  # noqa: E402
+
+
+def _guard_run(samples):
+    """samples: (x, width, force_N, track_rise) per waypoint, hand moving along +x."""
+    g = GraspSlipGuard()
+    g.arm(0.018, [0.0, 0.0, 0.7])
+    for x, w, f, tr in samples:
+        v = g.update([x, 0.0, 0.7], width=w, force=None if f is None else [f, 0, 0],
+                     track_dist=tr, track_name=None if tr is None else "handle")
+        if v is not None:
+            return g, v
+    return g, None
+
+
+def test_slip_guard_trips_when_fingers_close_on_air():
+    pts = [(0.01 * i, 0.018, 12.0, None) for i in range(5)] + [(0.05 + 0.01 * i, 0.001, 0.5, None) for i in range(4)]
+    _, v = _guard_run(pts)
+    assert v["check"] == "width" and abs(v["slip_pos"][0] - 0.06) < 1e-6   # 2nd closed sample
+
+
+def test_slip_guard_door_unlatch_load_drop_alone_does_not_trip():
+    pts = [(0.01 * i, 0.018, 15.0, None) for i in range(5)] + [(0.05 + 0.01 * i, 0.0178, 2.0, None) for i in range(10)]
+    g, v = _guard_run(pts)
+    assert v is None and g.armed and g.notes
+
+
+def test_slip_guard_load_drop_with_partial_closing_trips_and_feedback_says_it_resisted():
+    from api import API
+    pts = [(0.01 * i, 0.018, 15.0, None) for i in range(5)] + [(0.05 + 0.01 * i, 0.016, 1.5, None) for i in range(5)]
+    _, v = _guard_run(pts)
+    assert v["check"] == "touch" and v["peak_load_N"] == 15.0
+    assert "resisted" in API.grasp_slip_feedback(v)
+
+
+def test_slip_guard_tracked_part_left_the_fingers():
+    pts = [(0.01 * i, 0.018, None, 0.005 * i) for i in range(20)]
+    _, v = _guard_run(pts)
+    assert v["check"] == "tracking" and v["track_dist_m"] > 0.06
+
+
+def test_slip_guard_jam_on_sustained_load_but_not_on_setpoint_spikes():
+    from api import API
+    spikes = [(0.01 * i, 0.018, 900.0 if i % 4 == 0 else 85.0, None) for i in range(20)]
+    assert _guard_run(spikes)[1] is None
+    jam = [(0.001 * i, 0.018, 85.0 if i < 3 else 500.0, None) for i in range(10)]
+    _, v = _guard_run(jam)
+    assert v["check"] == "jam" and "still held" in API.grasp_slip_feedback(v)
+
+
+def test_grasp_slip_handler_fails_attempt_but_not_on_end_stop_jam():
+    import logging
+    import pytest
+    from api import API
+    stub = SimpleNamespace(grasp_slip_feedback=API.grasp_slip_feedback, logger=logging.getLogger("t"), task=SimpleNamespace(
+        failed_task=False, review_reason=None, review_improvement_steps=None))
+    with pytest.raises(RuntimeError, match="grasp-slip guard"):
+        API._handle_grasp_slip(stub, {"check": "width", "reason": "air", "travel_m": 0.02})
+    assert stub.task.failed_task and "GRASP SLIP" in stub.task.review_reason
+    stub.task.failed_task = False
+    with pytest.raises(RuntimeError, match="end stop"):
+        API._handle_grasp_slip(stub, {"check": "jam", "reason": "stuck", "travel_m": 0.4, "peak_load_N": 900})
+    assert not stub.task.failed_task

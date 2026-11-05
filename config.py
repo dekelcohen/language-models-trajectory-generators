@@ -43,6 +43,11 @@ CLOSED_GRIPPER_MAX_SPEED = 0.3
 # Commanded closed but both fingers together still this far apart (m) => an object is held.
 # Fully closed is 2 * gripper_goal_position_closed_franka = 1 mm.
 gripper_holding_min_width_franka = 0.005
+# Grasp-slip guard (touch/slip_guard.py): stops a trajectory the moment a held part leaves the
+# fingers (finger width / external force from joint torques / tracked distance) and fails the
+# attempt with feedback. External force is sampled every N waypoints (Jacobian + gravity model).
+slip_guard_enabled = True
+slip_guard_force_every = 2
 ee_index_franka = 11
 
 robotiq_motor_joint = 1

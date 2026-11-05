@@ -865,6 +865,29 @@ no-op (no IPC traffic). Tests: `tests/test_vis_grasp.py`.
     pose length and raises on anything other than 4 or 6.
 - `open_gripper()` / `close_gripper()` → `OPEN_GRIPPER` / `CLOSE_GRIPPER`.
 
+#### Grasp-slip guard (`touch/slip_guard.py`, `config.slip_guard_*`)
+- Armed by the first trajectory sample after `close_gripper()` holds something; lasts across
+  trajectories until the gripper opens. Checks every waypoint inside the env loop and **stops the
+  trajectory mid-motion**. Measured signals only: finger width, the external force from joint
+  torques (`O_F_ext_hat_K` analogue), and the camera track of the held part (when `track_objects` runs).
+- Checks (any one trips; `confirm` = 2 samples):
+  - **width**: fingers on air (< 5 mm), closed ≥ 8 mm further than at the grasp, or forced
+    ≥ 20 mm open (the part pries them = jammed);
+  - **tracking**: the tracked part moved ≥ 6 cm further from the fingers than at the grasp;
+  - **touch**: the load collapsed (< 30 % of its peak) while the hand kept moving, *and* the
+    fingers closed in or the track drifted. A load drop alone (a latch releasing) is only noted;
+  - **jam**: median-of-3 load > 250 N for 3 samples (the part does not move this way).
+- `api._handle_grasp_slip` turns the verdict into retry feedback (check, travel + direction, grasp
+  vs slip point, widths, peak load and where, track distance, hint: wrong path vs shallow grasp),
+  sets `failed_task` and skips the remaining code. A jam after ≥ 15 cm travel is treated as the
+  end stop: code stops, the reviewer judges.
+- Force is used only where the sim supports torque control (Genesis); PyBullet motor torques
+  don't match a gravity model, so PyBullet uses width (+ tracking). `SLIP_GUARD_TRACE=1` prints
+  per-sample width / |F|.
+- Validation (`research/touch/door_pull_e2e.py --no-touch --press 0.03 --arc 50 --arc-yaw [--arc-wrong]`):
+  correct arc → door opens, no trip (PyBullet), end-stop jam only (Genesis); wrong arc → trip after
+  0.6 cm (PyBullet, width) / 1.1 cm (Genesis, jam).
+
 ### Reviewer & correction (`task_completed` → `run_vlm_review`)
 - `task_completed()`:
   - build this attempt's trajectory videos (`create_trajectory_videos(logger, start_attempt_trajectory_step)`
@@ -1737,6 +1760,11 @@ has no `shapely` and nothing on the tracking path needs it.
 ---
 
 ## Changelog
+
+- **Grasp-slip guard** (§7, `touch/slip_guard.py`): trajectories stop the moment a held part
+  slips out (width), is lost by the tracker, loses its load with the fingers closing in, or jams
+  against the motion (sustained force). The attempt fails with detailed feedback (where, which way,
+  how hard it resisted) instead of the arm arcing on through the air. Door harness: `--arc-wrong`.
 
 - **Measured hand rotation in robot state and prompt** (`env.py`, `api.get_robot_state()["rotation"]`,
   `agent_runner.ee_rotation_text`): the main prompt used to hard-code "rotation 0", so a part
