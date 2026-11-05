@@ -110,6 +110,11 @@ def test_closed_gripper_caps_unthrottled_moves():
     pts = sent[-1][1].points
     step = max(abs(b[0] - a[0]) for a, b in zip(pts, pts[1:]))
     assert len(pts) > 2 and step <= config.CLOSED_GRIPPER_MAX_SPEED * 0.01
+    # wrist turn in place while holding: capped too, and the short way round (-90 deg, not +270)
+    api.execute_trajectory([[0, 0, 0.1, -3.1416], [0, 0, 0.1, 1.5708]])
+    rots = [p[3] for p in sent[-1][1].points]
+    assert len(rots) > 2 and max(abs(b - a) for a, b in zip(rots[:-2], rots[1:-1])) <= config.CLOSED_GRIPPER_MAX_ROT_SPEED * 0.01 + 1e-9
+    assert min(rots[:-1]) < -3.2 and max(rots) <= 1.5708 + 1e-9
 
 
 def test_repeated_unreachable_target_stops_loop():

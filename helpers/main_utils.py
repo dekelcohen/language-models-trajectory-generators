@@ -49,6 +49,9 @@ def get_exec_locals(api, logger):
         "locate_with_wrist_camera": api.locate_with_wrist_camera,
         # Force-feedback pull / open of a grasped handle; documented only by the touch-pull skill.
         "pull_with_touch": api.pull_with_touch,
+        # Opt-in contact guard + guarded pull with real-time correction; documented in main_prompt.
+        "guard_motion": api.guard_motion,
+        "guarded_pull": api.guarded_pull,
         # Proprioception (EE pose, finger width / holding); named by the touch skills.
         "get_robot_state": api.get_robot_state,
         "gripper_holding": api.gripper_holding,

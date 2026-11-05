@@ -181,6 +181,21 @@ def test_slip_guard_jam_on_sustained_load_but_not_on_setpoint_spikes():
     jam = [(0.001 * i, 0.018, 85.0 if i < 3 else 500.0, None) for i in range(10)]
     _, v = _guard_run(jam)
     assert v["check"] == "jam" and "still held" in API.grasp_slip_feedback(v)
+    # coarse 3 cm steps, one sample each: a decaying high load while the hand keeps moving is no jam
+    moving = [(0.03 * i, 0.018, (85.0, 1075.0, 282.0, 260.0, 58.0)[min(i, 4)], None) for i in range(8)]
+    assert _guard_run(moving)[1] is None
+
+
+def test_slip_guard_jam_needs_commanded_travel_not_a_wrist_turn_in_place():
+    def run(cmds):
+        g = GraspSlipGuard()
+        g.arm(0.016, [0.0, 0.0, 0.1])
+        for k, c in enumerate(cmds):
+            v = g.update([0.0005 * k, 0.0, 0.1], width=0.016, force=[405.0, 0, 0], cmd=c)
+            if v:
+                return v
+    assert run([[0.0, 0.0, 0.16]] * 8) is None                                   # rotation only
+    assert run([[0.005 * k, 0.0, 0.16] for k in range(8)])["check"] == "jam"     # pushed, stalled
 
 
 def test_grasp_slip_handler_fails_attempt_but_not_on_end_stop_jam():
@@ -196,3 +211,70 @@ def test_grasp_slip_handler_fails_attempt_but_not_on_end_stop_jam():
     with pytest.raises(RuntimeError, match="end stop"):
         API._handle_grasp_slip(stub, {"check": "jam", "reason": "stuck", "travel_m": 0.4, "peak_load_N": 900})
     assert not stub.task.failed_task
+
+
+def test_push_guard_trips_on_contact_lost_and_reports_last_contact():
+    from api import API
+    from touch.slip_guard import SlipGuardConfig
+    g = GraspSlipGuard(SlipGuardConfig(mode="push"))
+    g.arm(None, [0.0, 0.0, 0.7])
+    v = None
+    for i in range(12):
+        f = 12.0 if i < 6 else 0.5
+        v = g.update([0.01 * i, 0.0, 0.7], width=0.0, force=[f, 0, 0])
+        if v:
+            break
+    assert v["check"] == "touch" and v["mode"] == "push" and v["width_at_grasp_mm"] is None
+    assert v["last_held_pos"][0] < v["slip_pos"][0]
+    assert "CONTACT LOST" in API.grasp_slip_feedback(v)
+
+
+class _FakeDoor:
+    """Top-down hand holding a hinged handle: a target off the hinge circle by > 1 cm jams."""
+
+    def __init__(self, hinge, start, slip_at=None):
+        self.h, self.p = np.asarray(hinge, float), np.asarray(start, float)
+        self.r = float(np.linalg.norm(self.p - self.h))
+        self.holding, self.travel, self.slip_at, self.guards = True, 0.0, slip_at, []
+
+    def get_robot_state(self):
+        return {"eef_pos": [*self.p, 0.7], "rotation": 0.0, "gripper_holding": self.holding}
+
+    def guard_motion(self, mode="hold", **kw):
+        self.guards.append(kw.get("on_trip", "stop"))
+
+    def execute_trajectory(self, traj):
+        t = np.asarray(traj.points[-1][:2], float)
+        q = self.h + self.r * (t - self.h) / np.linalg.norm(t - self.h)
+        if np.linalg.norm(t - q) > 0.01:
+            return {"eef_pos": [*self.p, 0.7], "guard": {"check": "jam", "reason": "jam", "travel_m": 0.01}}
+        self.travel += float(np.linalg.norm(q - self.p))
+        held, self.p = self.p.copy(), q
+        if self.slip_at and self.travel > self.slip_at:
+            self.slip_at, self.holding = None, False
+            return {"eef_pos": [*self.p, 0.7], "guard": {"check": "width", "reason": "air",
+                                                          "last_held_pos": [*held, 0.7], "slip_pos": [*q, 0.7]}}
+        return {"eef_pos": [*self.p, 0.7]}
+
+
+def test_guarded_pull_mirrors_wrong_hinge_after_early_jam_and_opens():
+    from helpers.guarded_pull import guarded_pull
+    door = _FakeDoor(hinge=[0.5, 0.0], start=[0.0, 0.0])        # pull toward -y
+    r = guarded_pull(door, direction=[0, -1, 0], hinge=[-0.5, 0.0])
+    assert r["outcome"] == "opened" and r["flips"] == 1
+    assert np.allclose(r["hinge"], [0.5, 0.0], atol=1e-3)
+    assert door.guards[0] == "return" and door.guards[-1] == "stop"
+
+
+def test_guarded_pull_regrasps_at_last_held_point_after_late_slip(monkeypatch):
+    import helpers.guarded_pull as gp
+    door = _FakeDoor(hinge=[0.5, 0.0], start=[0.0, 0.0], slip_at=0.2)
+    grabs = []
+
+    def regrasp(api, tip, rotation):
+        grabs.append(tip)
+        api.p, api.holding = np.asarray(tip[:2], float), True
+    monkeypatch.setattr(gp, "_regrasp", regrasp)
+    r = gp.guarded_pull(door, direction=[0, -1, 0], hinge=[0.5, 0.0])
+    assert r["outcome"] == "opened" and r["regrasps"] == 1 and r["flips"] == 0
+    assert abs(np.linalg.norm(np.asarray(grabs[0][:2]) - [0.5, 0.0]) - 0.5) < 1e-6

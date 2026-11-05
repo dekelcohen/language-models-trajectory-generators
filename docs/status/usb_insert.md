@@ -80,3 +80,26 @@ Eval-only truth logging: `env.py` `_log_insert_truth` prints `[eval] insert star
 | usb_r4 | rotation kept; −x face candidates found but abandoned; insert on the far face (no port, reach limit) → `search_exhausted`, plug lost; `holding` false positive (fingers stalled on the laptop) | `usb_terra_wristview_fix_4` |
 
 Open: wrist port detection is sparse (terra); `holding` uses finger width only, so fingers jammed on a surface look like a grasp.
+
+## 2026-11-05: insert-subtask root causes (Genesis, `outputs/2026-11-05/usb_ALLterra_rootcause_1`)
+- **Port found:** pick OK (width 15.8 mm). At wrist rotation −π the wrist view found the TRUE port: (0.0907, 0.4967, 0.0708) vs truth (0.092, 0.4959, 0.069).
+- **Root cause 1: plug flung by a wrist spin.**
+  - "Turn back to carry rotation" went −3.14 → 1.571, a 270° spin in 6 poses with no rotation cap.
+  - It produced 405 N of real inertial load and a jam trip; the plug was lost.
+  - Fix: while holding, `execute_trajectory` caps rotation at `CLOSED_GRIPPER_MAX_ROT_SPEED` = 1 rad/s, shortest way round (−90° here). Test: `test_closed_gripper_caps_unthrottled_moves`.
+  - The jam rule now also needs a lag behind the command, so a pure wrist turn is no jam.
+- **Root cause 2: regrasps closed on air (5×).**
+  - The plug fell to the floor next to its slab.
+  - Wrist locate put it at z 0.036–0.042, but the top touch made contact at z 0.050 (the slab edge), 8–14 mm ABOVE the located point.
+  - The LLM grasped "5–9 mm below the top" = beside the slab → the width guard tripped "closed on air" on every lift.
+  - The guard was correct each time (no false positives).
+  - Fix: touch skill sanity rule: a contact > 5 mm above the located part means a support or neighbour was hit; re-locate from above.
+- **u2 after both fixes:** SUCCESS, the first true LLM insertion (`outputs/2026-11-05/usb_ALLterra_rotcap_SEATED_2`).
+  - Wrist views at both rotations; port candidate (0.0905, 0.489, 0.069).
+  - Face touch, then line-search insert → `seated`.
+  - Eval: tip 8.2 mm inside the port, tilt 0°.
+  - The reviewer accepted.
+  - Pick grasp depth −0.4 mm (shallow) still held.
+- Still open:
+  - `test_touch_sim_runner::test_finds_offset_hole_and_seats...` gives `over_force` (pre-existing);
+  - one success out of 2 runs, so not yet stable.

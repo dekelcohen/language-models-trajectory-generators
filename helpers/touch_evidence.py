@@ -57,11 +57,18 @@ def format_touch_evidence(records):
             bits = []
             if res.get("travel_cm") is not None:
                 bits.append(f"hand travelled {res['travel_cm']} cm while holding")
+            elif res.get("travel_m") is not None:
+                bits.append(f"hand travelled {round(100 * res['travel_m'], 1)} cm while holding")
             if res.get("swept_deg"):
                 bits.append(f"swept {res['swept_deg']} deg about a fitted hinge")
             if res.get("pull_force_N") is not None:
                 bits.append(f"pull force {res['pull_force_N']} N")
-            lines.append(f"  - pull_with_touch: outcome '{out}': {PULL_WORDS.get(out, out)}"
+            if res.get("flips"):
+                bits.append(f"hinge side flipped {res['flips']}x after an early slip/jam")
+            if res.get("regrasps"):
+                bits.append(f"{res['regrasps']} re-grasp(s)")
+            tool = "guarded_pull" if r.get("kind") == "guarded_pull" else "pull_with_touch"
+            lines.append(f"  - {tool}: outcome '{out}': {PULL_WORDS.get(out, out)}"
                          + (f" ({', '.join(bits)})" if bits else "") + ".")
     if not lines:
         return None

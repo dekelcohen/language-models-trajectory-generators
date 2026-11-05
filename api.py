@@ -821,10 +821,13 @@ class API:
         # Rebuild into a plain Trajectory before anything is sent: a custom class from the
         # model's own code block cannot be reconstructed in the simulator process.
         trajectory = common_utils.Trajectory.normalize(trajectory)
-        if max_speed is None and getattr(self, "_gripper_closed", False):
+        if getattr(self, "_gripper_closed", False):
             # Carrying / pulling: sparse waypoints otherwise command several m/s (beyond a real
             # arm's limits) and fling a friction-held part out of the fingers.
-            max_speed = config.CLOSED_GRIPPER_MAX_SPEED
+            if max_speed is None:
+                max_speed = config.CLOSED_GRIPPER_MAX_SPEED
+            if max_rot_speed is None:
+                max_rot_speed = getattr(config, "CLOSED_GRIPPER_MAX_ROT_SPEED", None)
         if max_speed or max_rot_speed:
             n0 = len(trajectory.points)
             trajectory = common_utils.Trajectory(
@@ -886,7 +889,14 @@ class API:
         if tracking_abort is not None:
             self._handle_tracking_abort(tracking_abort)
         if grasp_slip is not None:
-            self._handle_grasp_slip(grasp_slip)
+            if grasp_slip.get("on_trip") == "return":
+                text = self.grasp_slip_feedback(grasp_slip)
+                print(f"[guard] {text}")
+                self.logger.info(FAIL + text + ENDC)
+                motion = dict(motion or {})
+                motion["guard"] = grasp_slip
+            else:
+                self._handle_grasp_slip(grasp_slip)
         self._check_repeated_no_progress(trajectory, motion)
         try:
             target = list(trajectory.points[-1])
@@ -961,11 +971,20 @@ class API:
 
     @staticmethod
     def grasp_slip_feedback(v):
-        """Retry feedback for a grasp-slip verdict (touch/slip_guard.py), proprioception/vision only."""
+        """Retry feedback for a guard verdict (touch/slip_guard.py), proprioception/vision only."""
+        if v.get("mode") == "push":
+            msg = (f"PUSH {'JAM' if v.get('check') == 'jam' else 'CONTACT LOST'} ({v.get('check')} check): "
+                   f"{v.get('reason')}. The hand had moved {100 * (v.get('travel_m') or 0):.1f} cm from "
+                   f"{v.get('grasp_pos')} along {v.get('direction')}; stopped at {v.get('slip_pos')}; last in "
+                   f"contact at {v.get('last_held_pos')}; peak felt load {v.get('peak_load_N')} N.")
+            msg += (" The part does not move this way: push along another direction / closer to its centre."
+                    if v.get("check") == "jam" else
+                    " Re-locate the part, put the hand back against it (lower, closer to its centre) and push again.")
+            return msg + API._reacquired_text(v)
         msg = (f"GRASP {'JAM' if v.get('check') == 'jam' else 'SLIP'} ({v.get('check')} check): {v.get('reason')}. The hand had moved "
                f"{100 * (v.get('travel_m') or 0):.1f} cm from the grasp {v.get('grasp_pos')} along "
-               f"{v.get('direction')}; stopped at {v.get('slip_pos')}. Finger width {v.get('width_at_grasp_mm')} -> "
-               f"{v.get('width_mm')} mm; peak felt load {v.get('peak_load_N')} N")
+               f"{v.get('direction')}; stopped at {v.get('slip_pos')}; last held at {v.get('last_held_pos')}. "
+               f"Finger width {v.get('width_at_grasp_mm')} -> {v.get('width_mm')} mm; peak felt load {v.get('peak_load_N')} N")
         if v.get("peak_load_pos"):
             msg += f" at {v['peak_load_pos']}"
         if v.get("track_dist_m") is not None:
@@ -981,7 +1000,53 @@ class API:
         else:
             hint = ("It slid out with little resistance: the grasp was shallow or on the wrong part (e.g. the "
                     "lever's hub instead of the bar). Re-detect it and grasp deeper, at the middle of the bar.")
-        return msg + " " + hint
+        return msg + " " + hint + API._reacquired_text(v)
+
+    @staticmethod
+    def _reacquired_text(v):
+        r = v.get("reacquired")
+        if not r:
+            return ""
+        if r.get("lost") or r.get("part_pos") is None:
+            return f" Camera tracking lost '{r.get('part')}' after the trip: re-detect it."
+        return (f" After a {v.get('settle_s')} s settle the camera tracks '{r['part']}' at {r['part_pos']} "
+                f"({'trusted' if r.get('trusted') else 'UNTRUSTED - prefer last_held_pos or re-detect'}).")
+
+    def guard_motion(self, mode="hold", part=None, on_trip="stop", max_force=None, settle_s=None):
+        """Configure the contact guard that watches every following trajectory (touch/slip_guard.py).
+
+        ``mode``: "hold" (default; arms after a close that holds something: width, force, tracking
+        checks), "push" (arms now, without a grasp: contact lost / jam while pushing), "off".
+        ``part``: tracked object name (track_objects) to watch / re-acquire. ``on_trip``: "stop"
+        (default; the code stops and the attempt fails with feedback) or "return" (the trajectory
+        stops, the code continues, and ``execute_trajectory`` returns ``motion["guard"]`` = verdict
+        with check, reason, last_held_pos, slip_pos, travel_m, and ``reacquired`` = where tracking
+        sees ``part`` after a ~0.5 s settle). ``max_force`` (N): jam threshold (default 250).
+        Resets to hold/stop at the next subtask. Returns the active spec."""
+        spec = {"mode": mode, "part": part, "on_trip": on_trip, "max_force": max_force,
+                "settle_s": float(settle_s if settle_s is not None else
+                                  (getattr(config, "slip_guard_settle_s", 0.5) if on_trip == "return" else 0.0))}
+        self.main_connection.send([config.SET_MOTION_GUARD, spec])
+        resp = self.main_connection.recv()
+        try:
+            self.logger.info(resp[0])
+        except Exception:
+            pass
+        if not isinstance(resp, list) or len(resp) < 2 or resp[1] is None:
+            raise ValueError(f"guard_motion failed: {resp[0] if isinstance(resp, list) and resp else resp}")
+        print(f"guard_motion: {resp[1]}")
+        return resp[1]
+
+    def guarded_pull(self, direction, hinge=None, travel=0.35, max_deg=50.0, part=None, **kw):
+        """Pull the held handle in small guarded steps with automatic correction (helpers/guarded_pull.py):
+        wrong hinge side -> mirror + retry, slip -> re-grasp at the re-acquired / last-held point,
+        late jam -> end stop. Returns {"outcome", "travel_m", "swept_deg", "hinge", "flips", "regrasps", "events"}."""
+        from helpers.guarded_pull import guarded_pull
+        res = guarded_pull(self, direction, hinge=hinge, travel=travel, max_deg=max_deg, part=part, **kw)
+        print(f"guarded_pull: {({k: v for k, v in res.items() if k != 'events'})}")
+        self._record_touch("guarded_pull", res)
+        self._budget_tick("guarded_pull")
+        return res
 
     def _handle_grasp_slip(self, verdict):
         """The grasp-slip guard stopped the trajectory: fail the attempt with detailed feedback,

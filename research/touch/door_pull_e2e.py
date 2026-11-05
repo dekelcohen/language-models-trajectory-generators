@@ -51,6 +51,9 @@ ap.add_argument("--arc-yaw", action="store_true", help="--arc: turn the wrist wi
 ap.add_argument("--arc-wrong", action="store_true", help="--arc: swing the WRONG way (wrong hinge side) -> grasp-slip guard test")
 ap.add_argument("--hinge-err", type=float, default=0.0, help="--arc: hinge estimate pushed this far (m) further from the handle")
 ap.add_argument("--debug", action="store_true", help="trace each regrasp phase (eval door angle + image)")
+ap.add_argument("--guarded", default="off", choices=("off", "right", "wrong", "line"),
+                help="open with helpers.guarded_pull: hinge hint on the (eval) right side, mirrored to the "
+                     "wrong side, or none (straight pull along --dir, hinge fitted from the hand path)")
 args = ap.parse_args()
 os.makedirs(args.out, exist_ok=True)
 
@@ -251,7 +254,55 @@ call([config.CLOSE_GRIPPER], reply=False)
 st = exe([grasp], "closed", tip=seen)
 
 t1 = time.time()
-if args.touch:
+if args.guarded != "off":
+    from helpers.guarded_pull import guarded_pull
+
+    class _GuardApi:
+        """The agent API surface guarded_pull uses, over the raw IPC pipe."""
+        main_connection, logger = parent, _Log()
+
+        def get_robot_state(self):
+            return call([config.GET_ROBOT_STATE])
+
+        def guard_motion(self, mode="hold", **kw):
+            return call([config.SET_MOTION_GUARD, {"mode": mode, **kw}])[1]
+
+        def open_gripper(self):
+            call([config.OPEN_GRIPPER], reply=False)
+
+        def close_gripper(self):
+            call([config.CLOSE_GRIPPER], reply=False)
+
+        def execute_trajectory(self, traj):
+            pts = [list(map(float, p)) for p in traj.points]
+            r = call([config.EXECUTE_TRAJECTORY, pts])
+            g = r[2].get("grasp_slip") if len(r) > 2 and isinstance(r[2], dict) else None
+            tip = np.asarray(pts[-1][:3]) - [0, 0, DZ]
+            for _ in range(0 if g else 3):
+                if np.linalg.norm(tip - call([config.GET_ROBOT_STATE])["eef_pos"]) < 0.004:
+                    break
+                r = call([config.EXECUTE_TRAJECTORY, [pts[-1]]])
+                g = r[2].get("grasp_slip") if len(r) > 2 and isinstance(r[2], dict) else None
+                if g:
+                    break
+            if g:
+                print(f"[door] guard trip {g['check']} at {g['slip_pos']} door={math.degrees(door_angle()):.1f}deg "
+                      f"reacq={g.get('reacquired')}", flush=True)
+            out = {"eef_pos": call([config.GET_ROBOT_STATE])["eef_pos"]}
+            if g:
+                out["guard"] = g
+            return out
+
+    h = None
+    if args.press:
+        pressed = list(np.asarray(grasp[:3]) - [0, 0, args.press]) + list(grasp[3:])
+        exe(lin(grasp, pressed, step=0.005), "press", settle=3)
+    if args.guarded != "line":
+        h = hinge[:2] if args.guarded == "right" else 2 * (seen[:2] + np.dot(hinge[:2] - seen[:2], normal[:2]) * normal[:2]) - hinge[:2]
+    print(f"[door] guarded_pull hinge hint {None if h is None else np.round(h, 3).tolist()} dir {np.round(d0, 3).tolist()}", flush=True)
+    res = guarded_pull(_GuardApi(), direction=list(d0), hinge=None if h is None else list(h))
+    print(f"[door] guarded_pull -> {json.dumps({k: v for k, v in res.items() if k != 'events'})}", flush=True)
+elif args.touch:
     from touch import recovery
     _orig_exec = recovery._execute
 

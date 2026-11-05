@@ -245,3 +245,24 @@ The reviewer was not the problem: failed attempts opened 0.4–1.6°, successes 
   python -m pytest tests/test_tracking_door_pybullet.py tests/test_touch_pull.py tests/test_tracking_review_evidence.py -q
   ```
   39 pass. `test_optional_shoulder_camera_joins_through_the_pose` is a known flake.
+
+## 2026-11-05: guarded pull, jam rules, door:hidden rollouts (code `958b5f5`, tracking off)
+- **Opt-in guard** (`guard_motion`, `guarded_pull`, §7 of `document.md`). It needs a settle of ~0.5 s before re-acquiring, because tracker batches lag 135–225 ms.
+- **Genesis harness** (`door_pull_e2e.py --sim genesis --guarded`):
+  - A false jam at 6 cm came from a decaying press preload (1075 → 282 → 58 N) while the hand moved freely.
+  - Fix: a jam now needs a stall (< 1.5 cm over the streak) and a lag behind the command (≥ 1 cm).
+  - Press 0.03 + wrong arc: jam trip at 1.1 cm (396 N).
+  - Correct arc: door 55° open.
+  - Without a press, both arcs open ~25° and end blocked at 17–18 cm (likely reach / IK; open).
+- **Rollouts** (`outputs/2026-11-05/door_hidden_ALLterra_slipguard_{1,2,3}`): 3/3 SUCCESS.
+
+| run | result | root cause / note |
+|---|---|---|
+| 1 | door 88° | Pole attempt 1 pushed it over; it was never grasped. Door subtask 2: width slip at 2.6 cm, door 9°, reviewer accepted. Subtask 3 opened it to 88°. |
+| 2 | door 15° | Pole toppled. Width trip at 8.5 mm finger drop. |
+| 3 | door 9° | Pole fell during descent. Reviewer FN at 11.7° ("swung back closed"); attempt 2 accepted at 9.4°. Many width trips at 8–9 mm drop with fingers at 21–27 mm. |
+
+Open:
+- The pole is toppled, never grasped.
+- Door openings are mostly small (9–15°).
+- Width trips at an 8–9 mm drop on the round lever may be FPs (unproven; threshold unchanged).

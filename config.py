@@ -40,6 +40,9 @@ gripper_movement_force_franka = 1000
 # Default hand speed cap (m/s) while the gripper is commanded closed and the code gives no
 # max_speed (~ISO/TS 15066 collaborative speed; a real FR3 tops out at 1.7 m/s Cartesian).
 CLOSED_GRIPPER_MAX_SPEED = 0.3
+# Same for the wrist (rad/s, largest Euler change; shortest way round): an unlimited 270 deg spin
+# in 6 poses flung a held USB plug (Genesis, 2026-11-05). FR3 joint 7 tops out at ~2.6 rad/s.
+CLOSED_GRIPPER_MAX_ROT_SPEED = 1.0
 # Commanded closed but both fingers together still this far apart (m) => an object is held.
 # Fully closed is 2 * gripper_goal_position_closed_franka = 1 mm.
 gripper_holding_min_width_franka = 0.005
@@ -48,6 +51,9 @@ gripper_holding_min_width_franka = 0.005
 # attempt with feedback. External force is sampled every N waypoints (Jacobian + gravity model).
 slip_guard_enabled = True
 slip_guard_force_every = 2
+# After a trip with on_trip="return": hold still this long (s) so the tracker's latency
+# (CoTracker ~0.15-0.25 s per batch) catches up, then report where the tracked part is now.
+slip_guard_settle_s = 0.5
 ee_index_franka = 11
 
 robotiq_motor_joint = 1
@@ -175,6 +181,7 @@ GET_TRACKING_REPORT = 25
 CLEAR_GRASP_MARKERS = 26
 TOUCH_INSERT = 27      # touch-guided insertion (impedance + force feedback); simulators with torque control only
 TOUCH_PULL = 28        # touch-guided pull of a grasped handle (door/drawer); torque control only
+SET_MOTION_GUARD = 29  # configure the grasp-slip / contact guard (touch/slip_guard.py)
 
 # --- Rollout tracking -------------------------------------------------------
 # Tracking is opt-in (--tracking). When disabled nothing in the capture path changes,

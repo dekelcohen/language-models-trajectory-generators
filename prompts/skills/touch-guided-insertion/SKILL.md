@@ -36,7 +36,11 @@ metadata:
    `top_z = r["finger_bottom_z"]`. Rise 3 cm, `open_gripper()`, grasp at centre z = top_z - body
    height / 2 (command z = centre z + 0.06). body height = the HOUSING only (USB-A plug: 8 mm, so
    centre = top_z - 0.004), never the detection box / depth height (it merges a stand or cable);
-   no stand/floor heuristics. The arm settles a few mm LOW under load: before
+   no stand/floor heuristics. **Sanity-check the touch**: a contact > 5 mm ABOVE the located
+   point's z (or > body height + 5 mm above the surface it lies on) hit something else - the
+   edge of the support it fell off, a neighbour - not the part: do not grasp there (it closes on
+   air). Re-locate from straight above (wrist camera looking down, 15-20 cm over the point) and
+   touch again; a dropped part usually lies on the floor next to its support. The arm settles a few mm LOW under load: before
    `close_gripper()` read `get_robot_state()["eef_pos"]` and re-command `target + error` until
    within 1 mm (a grasp 4 mm below the centre lets the part pivot during insertion).
    Settle correction (here and below): new command = the PREVIOUS COMMANDED pose + error (NOT the

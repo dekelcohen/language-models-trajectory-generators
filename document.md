@@ -876,7 +876,12 @@ no-op (no IPC traffic). Tests: `tests/test_vis_grasp.py`.
   - **tracking**: the tracked part moved ≥ 6 cm further from the fingers than at the grasp;
   - **touch**: the load collapsed (< 30 % of its peak) while the hand kept moving, *and* the
     fingers closed in or the track drifted. A load drop alone (a latch releasing) is only noted;
-  - **jam**: median-of-3 load > 250 N for 3 samples (the part does not move this way).
+  - **jam**: median-of-3 load > 250 N for 3 samples while the hand stalls (< 1.5 cm travel over the
+    streak). Without the stall rule, coarse steps (one sample per 3 cm step) turned a decaying load
+    into a false jam. The hand must also lag the command by ≥ 1 cm (`jam_lag`), so a wrist turn
+    in place (no commanded advance) never counts as a jam.
+  - **wrist cap**: while holding, `execute_trajectory` caps rotation at 1 rad/s and takes the
+    short way round (`CLOSED_GRIPPER_MAX_ROT_SPEED`). An uncapped 270° spin flung a USB plug at 405 N.
 - `api._handle_grasp_slip` turns the verdict into retry feedback (check, travel + direction, grasp
   vs slip point, widths, peak load and where, track distance, hint: wrong path vs shallow grasp),
   sets `failed_task` and skips the remaining code. A jam after ≥ 15 cm travel is treated as the
@@ -887,6 +892,30 @@ no-op (no IPC traffic). Tests: `tests/test_vis_grasp.py`.
 - Validation (`research/touch/door_pull_e2e.py --no-touch --press 0.03 --arc 50 --arc-yaw [--arc-wrong]`):
   correct arc → door opens, no trip (PyBullet), end-stop jam only (Genesis); wrong arc → trip after
   0.6 cm (PyBullet, width) / 1.1 cm (Genesis, jam).
+
+#### Opt-in guard modes + guarded pull (real-time correction, no LLM round trip)
+- `guard_motion(mode, part=None, on_trip="stop", max_force=None)` (main prompt tool 6a, IPC `SET_MOTION_GUARD`):
+  - `hold` (default, auto after a holding close), `push` (arms without a grasp: contact lost / jam), `off`;
+  - `on_trip="return"`: the trajectory stops but the code continues; `execute_trajectory` returns
+    `motion["guard"]` = verdict + `last_held_pos` + `reacquired` (tracked `part` position after a
+    ~0.5 s settle, `config.slip_guard_settle_s`, so CoTracker latency has caught up);
+  - spec resets to hold/stop at the next subtask (`RESET_EEF`).
+- `guarded_pull(direction, hinge=None, travel=0.35, max_deg=50, part=None)` (tool 6c, `helpers/guarded_pull.py`):
+  - top-down only; 3 cm steps from the measured pose, fixed arc radius, wrist turns with the door (≤ 6°/step);
+  - early trip (< 15 cm) = wrong path → next hypothesis (mirrored hinge; for a straight pull, an arc
+    either side), continue from where the hand is (going back re-closes the door);
+  - late slip → re-grasp at the tracked / last-held point projected on the arc; late jam → `end_stop`;
+  - result `{outcome, travel_m, swept_deg, hinge, flips, regrasps}` also goes to the reviewer's force-feedback evidence.
+- Door skill recommends it over a hand-written arc.
+- Harness: `door_pull_e2e.py --approach top --press 0.02 --guarded right|wrong|line`.
+  PyBullet: open-loop top-down arc trips at 6 cm (door 8.6°); guarded_pull reaches door 27–29° (right hinge),
+  26.6° (wrong hinge: mirrored after 7 cm, then continued). Without wrist follow it trips at 3 cm.
+  The PyBullet round lever rolls in a top-down grip (fingers pried open at ~30°); side approach is steadier.
+  Genesis (no press): right and wrong hinge both open ~25° (the stiff hand drags the door along the
+  shared start tangent; no trip), then the hand stalls at 17–18 cm. With `--press 0.02` the press
+  itself jams (~4000 N, the lever barely moves) and its decaying preload causes a false early trip;
+  don't press a Genesis lever with a stiff hand.
+- Plan for fast-VLM re-acquire / occlusion search / visual checks: `docs/plans/fast_vlm_feedback.md`.
 
 ### Reviewer & correction (`task_completed` → `run_vlm_review`)
 - `task_completed()`:
@@ -1760,6 +1789,19 @@ has no `shapely` and nothing on the tracking path needs it.
 ---
 
 ## Changelog
+
+- **Wrist-turn cap while holding + guard jam rules** (§7): with the gripper closed, `execute_trajectory`
+  also caps wrist rotation (`CLOSED_GRIPPER_MAX_ROT_SPEED` = 1 rad/s, shortest way round). An
+  uncapped 270° wrist spin had flung a held USB plug. A jam now needs the hand to stall (it moved
+  < 1.5 cm over the streak) and to lag behind the command (≥ 1 cm). A decaying press preload or
+  an in-place wrist turn no longer reads as a jam.
+  Touch skill: a contact > 5 mm above the located part means the fingers hit its support, so
+  re-locate from above before grasping.
+
+- **Opt-in contact guard + guarded pull** (§7): `guard_motion("hold"|"push"|"off", on_trip="return")`
+  lets LLM code react to a slip/jam (verdict with last-held point and tracking re-acquire after a
+  0.5 s settle); `guarded_pull` opens a grasped door/drawer in guarded steps and corrects a wrong
+  hinge side or a slip without an LLM call. Plan for fast-VLM pointing: `docs/plans/fast_vlm_feedback.md`.
 
 - **Grasp-slip guard** (§7, `touch/slip_guard.py`): trajectories stop the moment a held part
   slips out (width), is lost by the tracker, loses its load with the fingers closing in, or jams

@@ -454,21 +454,74 @@ def _held_track(robot, pick=False):
     return best
 
 
-def _slip_guard_sample(sim, robot, i):
-    """Feed one waypoint to the grasp-slip guard (touch/slip_guard.py); arms it on the first
-    sample after a close that holds something. Returns the verdict or None."""
-    if not getattr(config, "slip_guard_enabled", True) or robot.gripper_open:
+GUARD_DEFAULT = {"mode": "hold", "on_trip": "stop", "part": None, "max_force": None, "settle_s": 0.0}
+
+
+def _guard_spec(robot):
+    spec = getattr(robot, "guard_spec", None)
+    return spec if spec else dict(GUARD_DEFAULT)
+
+
+def _set_motion_guard(sim, robot, spec):
+    """SET_MOTION_GUARD: store the guard spec and re-arm on the next waypoint (push: always;
+    hold: when the gripper is closed on something)."""
+    new = dict(GUARD_DEFAULT)
+    new.update({k: v for k, v in (spec or {}).items() if k in GUARD_DEFAULT})
+    if new["mode"] not in ("hold", "push", "off"):
+        raise ValueError(f"guard mode must be hold | push | off, got {new['mode']!r}")
+    if new["on_trip"] not in ("stop", "return"):
+        raise ValueError(f"on_trip must be stop | return, got {new['on_trip']!r}")
+    robot.guard_spec = new
+    if getattr(robot, "slip_guard", None) is not None:
+        robot.slip_guard.disarm()
+    robot.slip_guard_pending = new["mode"] == "push" or (new["mode"] == "hold" and not robot.gripper_open)
+    return new
+
+
+def _reacquire(robot, name):
+    """Where the tracker sees ``name`` now (after the post-trip settle). None without a track."""
+    session = getattr(robot, "tracking_session", None)
+    rep = getattr(session, "last_report", None) if session is not None else None
+    if rep is None or not name:
+        return None
+    obj = rep.get(name)
+    if obj is None or obj.lost:
+        return {"part": name, "part_pos": None, "trusted": False, "lost": True}
+    p = rep.world_point(name)
+    pose = getattr(obj, "pose", None)
+    return {"part": name, "part_pos": None if p is None else [round(float(v), 4) for v in p],
+            "trusted": bool(not obj.predicted and not getattr(pose, "tentative", False)),
+            "lost": False, "latency_s": None if getattr(rep, "latency_s", None) is None
+            else round(float(rep.latency_s), 3)}
+
+
+def _slip_guard_sample(sim, robot, i, cmd=None):
+    """Feed one waypoint to the grasp-slip / contact guard (touch/slip_guard.py). Arms it on the
+    first sample after a close that holds something (hold mode) or after ``guard_motion("push")``.
+    Returns the verdict or None."""
+    spec = _guard_spec(robot)
+    push = spec["mode"] == "push"
+    if not getattr(config, "slip_guard_enabled", True) or spec["mode"] == "off":
+        return None
+    if robot.gripper_open and not push:
         return None
     guard = getattr(robot, "slip_guard", None)
     pos, width, holding = _motion_sample(sim, robot)
     if getattr(robot, "slip_guard_pending", False):
         robot.slip_guard_pending = False
-        if not holding or width is None:
+        if not push and (not holding or width is None):
             return None
-        from touch.slip_guard import GraspSlipGuard
-        guard = robot.slip_guard = GraspSlipGuard()
-        guard.arm(width, pos)
-        robot.slip_track_name, robot.slip_track_d0 = _held_track(robot, pick=True)
+        from touch.slip_guard import GraspSlipGuard, SlipGuardConfig
+        cfg = SlipGuardConfig(mode=spec["mode"])
+        if spec.get("max_force"):
+            cfg.jam_load = float(spec["max_force"])
+        guard = robot.slip_guard = GraspSlipGuard(cfg)
+        guard.arm(width if (holding and not robot.gripper_open) else None, pos)
+        if spec.get("part"):
+            robot.slip_track_name = spec["part"]
+            robot.slip_track_d0 = _held_track(robot)[1]
+        else:
+            robot.slip_track_name, robot.slip_track_d0 = _held_track(robot, pick=True)
         return None
     if guard is None or not guard.armed:
         return None
@@ -479,7 +532,7 @@ def _slip_guard_sample(sim, robot, i):
     if os.environ.get("SLIP_GUARD_TRACE"):
         print(f"[slip_guard] i={i} pos={np.round(pos, 3).tolist()} w={width} "
               f"|F|={None if force is None else round(float(np.linalg.norm(force)), 1)} rise={rise}", flush=True)
-    return guard.update(pos, width=width, force=force, track_dist=rise, track_name=name)
+    return guard.update(pos, width=width, force=force, track_dist=rise, track_name=name, cmd=cmd)
 
 
 def _gripper_proprio(sim, robot):
@@ -916,7 +969,7 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                     if not robot.gripper_open:
                         pos, _w, holding = _motion_sample(sim, robot)
                         held_samples.append((pos, holding))
-                    slip = _slip_guard_sample(sim, robot, i)
+                    slip = _slip_guard_sample(sim, robot, i, cmd=point[:3])
                     if slip is not None:
                         logger.info(FAIL + f"Grasp-slip guard stopped the trajectory at point {i} "
                                     f"({slip['check']}): {slip['reason']}" + ENDC)
@@ -933,6 +986,21 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
 
                 pre_settle, _w, _h = _motion_sample(sim, robot)
                 step_env_and_record_loop(env, robot)
+                if slip is not None:
+                    # Hold still until the tracker's latency has caught up, then report where
+                    # the part is now (a re-grasp target without a new VLM pointing pass).
+                    spec = _guard_spec(robot)
+                    settle_s = float(spec.get("settle_s") or 0.0)
+                    if spec["on_trip"] == "return":
+                        settle_s = max(settle_s, float(getattr(config, "slip_guard_settle_s", 0.5)))
+                    extra = int(max(0.0, settle_s - 100 * config.control_dt) / config.control_dt)
+                    for _ in range(extra):
+                        robot.step_env_and_record(env)
+                    slip["settle_s"] = round(settle_s, 2)
+                    slip["reacquired"] = _reacquire(robot, spec.get("part") or slip.get("track_name"))
+                    slip["on_trip"] = spec["on_trip"]
+                    if spec["mode"] == "push":   # a push guard re-arms on the next trajectory
+                        robot.slip_guard_pending = True
                 _record_tilt_while_holding(sim, robot)
                 try:
                     proprio = _trajectory_proprio(sim, robot, desc, step_start, proprio_start,
@@ -1036,9 +1104,10 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 robot.gripper_open = True
                 robot.eef_pos_at_close = None
                 robot.max_tilt_since_close = None
-                robot.slip_guard_pending = False
-                if getattr(robot, "slip_guard", None) is not None:
-                    robot.slip_guard.disarm()
+                if _guard_spec(robot)["mode"] != "push":
+                    robot.slip_guard_pending = False
+                    if getattr(robot, "slip_guard", None) is not None:
+                        robot.slip_guard.disarm()
 
                 logger.info(OK + "Finished opening gripper!" + ENDC)
 
@@ -1070,6 +1139,7 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
                 robot.eef_pos_at_close = None
                 robot.max_tilt_since_close = None
                 robot.slip_guard_pending = False
+                robot.guard_spec = None
                 if getattr(robot, "slip_guard", None) is not None:
                     robot.slip_guard.disarm()
 
@@ -1151,6 +1221,13 @@ def run_simulation_environment(args, env_connection, logger, sim=None):
 
             elif env_connection_received[0] == config.TOUCH_PULL:
                 env_connection.send(_touch_pull(sim, env, robot, env_connection_received[1] or {}, logger))
+
+            elif env_connection_received[0] == config.SET_MOTION_GUARD:
+                try:
+                    spec = _set_motion_guard(sim, robot, env_connection_received[1] or {})
+                    env_connection.send([OK + f"Motion guard set: {spec}" + ENDC, spec])
+                except Exception as e:
+                    env_connection.send([FAIL + f"SET_MOTION_GUARD failed: {e}" + ENDC, None])
 
             elif env_connection_received[0] == VISUALIZE_BOUNDING_BOX:
                 box_cubes = env_connection_received[1]
