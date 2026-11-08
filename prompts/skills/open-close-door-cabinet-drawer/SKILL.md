@@ -37,6 +37,14 @@ From the SCENE ANALYSIS, the affordance points (prefer the top-ranked point) and
   Note which edge of the door the handle sits near: the hinge is on the **opposite** edge.
   Frames have a post on BOTH edges: a "hinge" detection within ~0.3 m of the handle is the
   latch-side jamb, not the hinge (task-text claims about the hinge side may be wrong too).
+- **Measure the door, don't guess it** (hinged doors): with the arm out of view and occluders
+  cleared, `p = estimate_door_plane(rose_xyz)` (rose_xyz = where the handle meets the door: the
+  lever end at the door, not its middle). It fits the door face in head depth and returns
+  `p["pull_dir"]` (the door normal toward the robot) and `p["hinge"]` (the far panel end), which
+  beat box detections (door:hidden r3: the "door" box was 5 cm wide, the "hinge" box was the
+  handle, and the guessed hinge was on the wrong side). Use them for the tip-direction sign
+  below and in `guarded_pull(direction=p["pull_dir"], hinge=p["hinge"])`. `None` = no door face
+  visible (something still occludes it).
 
 Then follow exactly one of sections 2, 3 or 4, and check section 2b for the approach
 direction.
@@ -74,7 +82,7 @@ Start from this procedure, verbatim:
 - **Pull along the hinge arc and turn the wrist with the door**: at swept angle `a`, top-down `rotation += a`, side `approach_yaw += a` (same sign as the arc). A fixed wrist twists the lever out of the jaws after ~20 deg. The hinge is the far door edge the lever's free tip points toward; if the door/hinge detections are implausible (far off, within ~0.3 m of the handle, or not where the tip points), put it ~0.4-0.8 m from the lever root along the tip direction - too far is safer than too near. **Open WIDE: >= 60 deg is required** (a mobile robot must pass through; a door left at 10-30 deg is a failure) - plan the arc to ~75-80 deg. If the hand stops short (reach / IK stall, lever slipping out at a large angle) below 60 deg: release, move the hand around the panel's free (latch) edge, and push that edge further along the same arc (fingers closed, pushing the panel face from the inside, the hand following the arc about the hinge) until >= 60 deg.
 - **Lever parallel to the door face, ~0.1 m out:** stay top-down - step 4's short-axis offset drops one jaw into the lever-door gap. This is NOT a 2b trigger; go to the side only on 2b trigger 3 (a top-down attempt on this lever already failed geometrically).
   If the `touch-guided-pull` skill is listed: grasp + press as above, then open with `open_with_touch()` instead of scripting the arc.
-  Otherwise, for a top-down grasp, prefer `r = guarded_pull(direction=<pull normal>, hinge=[hx, hy])` over a hand-written arc: it holds the measured z, turns the wrist, mirrors the hinge after an early slip/jam (wrong side), re-grasps after a late slip and stops at the end stop. Check `r["outcome"]` in ("opened", "end_stop"); on a hinged door it pushes the rest of the way by itself after the pull stalls (outcomes "push_stalled": check the camera, often already wide open; "push_blocked": re-grasp the handle and call it again) - do not hand-write the push; for a hand-written arc, at least call `guard_motion(on_trip="return")` and react to `motion["guard"]`.
+  Otherwise, for a top-down grasp, prefer `r = guarded_pull(direction=<pull normal>, hinge=[hx, hy])` over a hand-written arc: it holds the measured z, turns the wrist, mirrors the hinge after an early slip/jam (wrong side), re-grasps after a late slip and stops at the end stop. Check `r["outcome"]` in ("opened", "end_stop"); on a hinged door it pushes the rest of the way by itself after the pull stalls (outcomes "push_stalled": check the camera, often already wide open; "push_blocked": re-grasp the handle and call it again; "swung_shut": depth shows the panel fell back closed - grasp and pull again; `r["vision_deg"]` is the depth-measured door angle) - do not hand-write the push; for a hand-written arc, at least call `guard_motion(on_trip="return")` and react to `motion["guard"]`.
 
 - **Pull vs push** - pull is the common case. Push only when the door face (not its edge) is
   toward the robot and nothing affords pulling. Decide from: which side the hinge/frame is on,

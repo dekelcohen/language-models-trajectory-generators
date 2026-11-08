@@ -300,6 +300,16 @@ def test_guarded_pull_regrasps_at_last_held_point_after_late_slip(monkeypatch):
     assert abs(np.linalg.norm(np.asarray(grabs[0][:2]) - [0.5, 0.0]) - 0.5) < 1e-6
 
 
+def test_guarded_pull_clamps_a_hinge_hint_far_behind_the_lever():
+    """door:hidden r3 (2026-11-08): the LLM's hinge hint was 24 cm behind the lever along the pull;
+    the hinge lies on the door face, 0-20 cm behind the held lever."""
+    from helpers.guarded_pull import guarded_pull
+    door = _FakeDoor(hinge=[0.5, 0.2], start=[0.0, 0.0])         # face 20 cm behind the hand (+y)
+    r = guarded_pull(door, direction=[0, -1, 0], hinge=[0.5, 0.6], push_after_deg=None)
+    assert any("off the door plane" in e for e in r["events"])
+    assert r["outcome"] == "opened" and np.allclose(r["hinge"], [0.5, 0.2], atol=1e-3)
+
+
 def test_guarded_pull_empty_regrasp_after_early_trip_is_not_opened(monkeypatch):
     """door:hidden r1 (2026-11-08): after an early width trip the re-grasp closed on nothing, the
     guard never arms on an empty hand, and the pull swept air for 75 cm and reported 'opened'."""

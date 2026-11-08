@@ -292,3 +292,26 @@ Open:
 
 - Open: short pulls (16-21°, ~1 in 3) leave no wedge -> `push_blocked`, the LLM must re-grasp and pull again.
 
+
+## 2026-11-08 (later): hinge side from depth (`touch/door_plane.py`), door angle check
+- **r3 (opus, old code) FAIL**: pole cleared, but the LLM's door model was wrong: pull_dir ~35° off the face
+  normal, hinge on the WRONG side (perception's "door" box was 5 cm wide, the "hinge" box was the handle).
+  Pull stalled at 25°, the push landed on the panel, later grasps closed on air; stopped after ~60 min.
+- **guarded_pull can't fix a wrong hinge side**: on PyBullet a wrong-side arc rarely trips early (the hand
+  slides 3-4 cm along the lever), and hinge re-fits from the hand path drift (refit1-4: 29, 14° ...); the
+  push needs the hinge within a few cm (10 cm off -> "pushed 83°" while the door was at 23°). Removed the
+  re-fit; an LLM hint >20 cm behind / >5 cm in front of the held lever (along the pull) is now clamped onto
+  the door face band; a failed re-grasp at the last-held point falls back to the start grasp.
+- **New `api.estimate_door_plane(rose_xyz)`** (pixels + depth only): RANSAC vertical plane behind the
+  handle -> `pull_dir`, panel extent grown until a density dip (the frame gap, even with a coplanar jamb),
+  hinge = far panel end. Anchor at the rose (lever-door joint): side ratio 2.4-7 vs ~1.4 at the lever
+  middle. Needs the occluder cleared (returns None while the pole stands). Normal within ~1°, hinge ~9 cm
+  inside the true axis (the panel edge seen at handle height).
+- **New `measure_door_angle()`** + automatic check in `api.guarded_pull` after `estimate_door_plane`:
+  `vision_deg`, and "opened" with depth < half the swept angle -> outcome `swung_shut`. Harness
+  vis7/vis8: 61.6 / 60.7° measured vs 61.1 / 60.4° true.
+- **Harness `--vision` (normal + hinge from depth only)**: vis3-8 -> 0.9 (swung shut), 67.4, 2.6 (grip
+  slipped at 26°, door slammed shut by link5), 68.0, 61.1, 60.4° => 4/6 >= 60°, both failures now
+  detectable as `swung_shut`. Push still stalls at ~63-64° hand angle (marginal vs 60°).
+- Root of the remaining failures: the forearm (`panda_link5`) presses the panel (800-1500 N) during the
+  pull; when the grip slips, it pushes the door shut.

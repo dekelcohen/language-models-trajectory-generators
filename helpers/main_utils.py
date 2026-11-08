@@ -67,6 +67,8 @@ def get_exec_locals(api, logger):
         # Opt-in contact guard + guarded pull with real-time correction; documented in main_prompt.
         "guard_motion": api.guard_motion,
         "guarded_pull": api.guarded_pull,
+        "estimate_door_plane": api.estimate_door_plane,
+        "measure_door_angle": api.measure_door_angle,
         # Proprioception (EE pose, finger width / holding); named by the touch skills.
         "get_robot_state": api.get_robot_state,
         "gripper_holding": api.gripper_holding,

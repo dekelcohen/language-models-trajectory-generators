@@ -1037,12 +1037,60 @@ class API:
         print(f"guard_motion: {resp[1]}")
         return resp[1]
 
+    def estimate_door_plane(self, handle):
+        """Door face, pull direction and hinge side from head depth (touch/door_plane.py).
+
+        ``handle`` = world [x, y, z] where the handle meets the door (the rosette), not the lever's
+        middle. Returns the plane dict (``pull_dir``, ``hinge``, ``free_edge``, ``side_ratio``,
+        ``confident`` ...) or None (no vertical face visible - clear occluders first). The plane is
+        remembered: a following ``guarded_pull`` re-checks the door angle from depth."""
+        from touch.door_plane import depth_to_world, estimate_door_plane
+        _, depth = self._capture_head_image_and_depth()
+        pts = depth_to_world(depth, self.head_camera_position, self.head_camera_orientation_q,
+                             self.cam_info, robot_mask=self._load_head_robot_mask())
+        h = np.asarray(handle, float).ravel()[:3]
+        plane = estimate_door_plane(pts, h, np.asarray(self.head_camera_position, float)[:2])
+        self.logger.info(PROGRESS + f"estimate_door_plane(handle={np.round(h, 3).tolist()}): {plane} "
+                         f"({len(pts)} depth points)" + ENDC)
+        print(f"estimate_door_plane: {plane}")
+        self._door_plane = (plane, float(h[2])) if plane else None
+        return plane
+
+    def measure_door_angle(self):
+        """Door opening in deg about the hinge of the last ``estimate_door_plane``, from a new head
+        depth capture (None when unknown)."""
+        if not getattr(self, "_door_plane", None):
+            return None
+        from touch.door_plane import depth_to_world, measure_door_angle
+        plane, z = self._door_plane
+        _, depth = self._capture_head_image_and_depth()
+        pts = depth_to_world(depth, self.head_camera_position, self.head_camera_orientation_q,
+                             self.cam_info, robot_mask=self._load_head_robot_mask())
+        deg, n = measure_door_angle(pts, plane, z)
+        self.logger.info(PROGRESS + f"measure_door_angle: {deg} deg ({n} points on the panel)" + ENDC)
+        return deg
+
     def guarded_pull(self, direction, hinge=None, travel=0.55, max_deg=80.0, part=None, **kw):
         """Pull the held handle in small guarded steps with automatic correction (helpers/guarded_pull.py):
         wrong hinge side -> mirror + retry, slip -> re-grasp at the re-acquired / last-held point,
-        late jam -> end stop. Returns {"outcome", "travel_m", "swept_deg", "hinge", "flips", "regrasps", "events"}."""
+        late jam -> end stop. Returns {"outcome", "travel_m", "swept_deg", "hinge", "flips", "regrasps", "events"}.
+        After ``estimate_door_plane`` the result also has ``vision_deg`` (door angle from depth); an
+        "opened" claim the depth contradicts becomes ``"swung_shut"``."""
         from helpers.guarded_pull import guarded_pull
         res = guarded_pull(self, direction, hinge=hinge, travel=travel, max_deg=max_deg, part=part, **kw)
+        if getattr(self, "_door_plane", None):
+            try:
+                deg = self.measure_door_angle()
+                res["vision_deg"] = deg
+                if deg is not None and res.get("outcome") == "opened" and deg < 0.5 * float(res.get("swept_deg") or 0):
+                    # harness door_vis3/5: the panel swung back shut behind the hand; the hand path can't see it
+                    msg = (f"depth shows the door at {deg:.0f} deg, not the {res['swept_deg']:.0f} deg the hand "
+                           f"swept: it swung back shut")
+                    res["events"] = list(res.get("events") or []) + [msg]
+                    res["outcome"] = "swung_shut"
+                    self.logger.info(FAIL + "guarded_pull: " + msg + ENDC)
+            except Exception as e:
+                self.logger.info(PROGRESS + f"guarded_pull: door-angle check failed: {e}" + ENDC)
         print(f"guarded_pull: {({k: v for k, v in res.items() if k != 'events'})}")
         self._record_touch("guarded_pull", res)
         self._budget_tick("guarded_pull")

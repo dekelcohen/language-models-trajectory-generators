@@ -42,6 +42,19 @@ def _mirror(c, origin, d):
     return origin + 2 * float(np.dot(v, d)) * d - v
 
 
+def _fit_path(path):
+    """Circle through the measured hand path -> (centre_xy, radius) if it is a clear door arc."""
+    from touch.pull import fit_circle_xy
+    P = np.asarray(path)
+    chord = _unit(P[-1] - P[0])
+    bow = 0.0 if chord is None else float(np.max(np.abs(
+        (P[:, 0] - P[0, 0]) * chord[1] - (P[:, 1] - P[0, 1]) * chord[0])))
+    fit = fit_circle_xy(P) if bow >= 0.003 else None
+    if fit is not None and 0.15 <= fit[1] <= 1.5 and fit[2] < 0.01:
+        return np.asarray(fit[0], float)[:2], float(fit[1])
+    return None
+
+
 def _arc_sign(c, p, d):
     """+1 (CCW) / -1 so that moving along the circle about ``c`` from ``p`` goes along ``d``."""
     r = p - c
@@ -244,6 +257,12 @@ def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.0
     """Pull the held handle along ``direction`` (world, horizontal part used) or around ``hinge``
     ([x, y] of the hinge axis, the door edge FAR from the handle), guarded against slips and jams.
 
+    Get ``direction`` and ``hinge`` from ``estimate_door_plane`` (depth) when possible: on a lever
+    the wrong hinge side often does NOT trip early (the hand slides along the lever instead), and
+    the hand path is too contaminated by that slide to re-fit the hinge. A hint farther than
+    0-20 cm behind the lever along ``direction`` is clamped onto that band. If a re-grasp after an
+    early trip closes on nothing (the door swung back shut), it re-grasps at the start position.
+
     ``push_after_deg`` (default 15; None = off): a late slip / jam / stall on a hinge arc after that
     many degrees switches to ``push_open(route="around")`` (``push_kw`` overrides): release, go out
     past the free edge, round it and down outside the panel, come in behind it (stopping where the
@@ -286,6 +305,15 @@ def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.0
     z, yaw0 = float(tip0[2]), float(st["rotation"])
     o = tip0[:2].copy()
     centre = None if hinge is None else np.asarray(hinge, float)[:2]
+    if centre is not None:
+        # The hinge lies on the door face, 0-20 cm behind the held lever along the pull normal. Clamp
+        # an LLM hint that is farther off (door:hidden r3: a hint 24 cm behind and on the wrong side).
+        off = float(np.dot(centre - o, d0))
+        if not -0.20 <= off <= 0.05:
+            fixed = centre + (float(np.clip(off, -0.20, 0.05)) - off) * d0
+            log(f"hinge hint {np.round(centre, 3).tolist()} is off the door plane ({off * 100:+.0f} cm along "
+                f"the pull): using {np.round(fixed, 3).tolist()}")
+            centre = fixed
     line_d = d0.copy()
     sgn = _arc_sign(centre, o, d0) if centre is not None else 0.0
     # early-trip hypotheses: the hinge on the other side; for a straight pull, an arc either way
@@ -307,7 +335,7 @@ def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.0
     def restart(reason, v):
         """Continue the new hypothesis from where the hand is (the part followed it so far - going
         back would re-close it and wear the grip); re-grasp first if the part left the hand."""
-        nonlocal p, yaw
+        nonlocal p, yaw, s, path
         st_ = api.get_robot_state()
         if st_.get("gripper_holding"):
             return True
@@ -316,6 +344,13 @@ def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.0
         log(f"re-grasp after the {reason} trip at {np.round(where, 3).tolist()} (last held)")
         _regrasp(api, [float(where[0]), float(where[1]), z], yaw)
         st_ = api.get_robot_state()
+        if not st_.get("gripper_holding") and float(np.linalg.norm(where[:2] - o)) > 0.03:
+            # released early, the door usually swings back shut: the handle is where it started
+            log(f"re-grasp closed on nothing: trying the start grasp {np.round(o, 3).tolist()}")
+            _regrasp(api, [float(o[0]), float(o[1]), z], yaw0)
+            st_ = api.get_robot_state()
+            if st_.get("gripper_holding"):
+                s, path, yaw = 0.0, [o.copy()], yaw0
         p = np.asarray(st_["eef_pos"], float)[:2]
         if not st_.get("gripper_holding"):
             # the guard does not arm on an empty hand: going on would sweep air and report "opened"
@@ -381,14 +416,9 @@ def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.0
                     log(f"blocked: the hand stopped moving after {s * 100:.0f} cm")
                     return res
                 if centre is None and s >= fit_after_m and len(path) >= 5:
-                    from touch.pull import fit_circle_xy
-                    P = np.asarray(path)
-                    chord = _unit(P[-1] - P[0])
-                    bow = 0.0 if chord is None else float(np.max(np.abs(
-                        (P[:, 0] - P[0, 0]) * chord[1] - (P[:, 1] - P[0, 1]) * chord[0])))
-                    fit = fit_circle_xy(P) if bow >= 0.003 else None
-                    if fit is not None and 0.15 <= fit[1] <= 1.5 and fit[2] < 0.01:
-                        centre = np.asarray(fit[0], float)[:2]
+                    fit = _fit_path(path)
+                    if fit is not None:
+                        centre = fit[0]
                         sgn = _arc_sign(centre, p, line_d)
                         o = path[0]
                         log(f"measured path is an arc: hinge {np.round(centre, 3).tolist()} r={fit[1]:.2f} m")

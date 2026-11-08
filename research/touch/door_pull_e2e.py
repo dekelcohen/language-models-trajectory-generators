@@ -53,6 +53,9 @@ ap.add_argument("--arc-wrong", action="store_true", help="--arc: swing the WRONG
 ap.add_argument("--hinge-err", type=float, default=0.0, help="--arc: hinge estimate pushed this far (m) further from the handle")
 ap.add_argument("--debug", action="store_true", help="trace each regrasp phase (eval door angle + image)")
 ap.add_argument("--gp-kw", default="", help="--guarded: extra guarded_pull kwargs k=json,k=json, e.g. follow_yaw=false,step=0.015")
+ap.add_argument("--hinge-shift", default="", help="--guarded: add dx,dy (m) to the hinge hint (a bad LLM guess)")
+ap.add_argument("--vision", action="store_true",
+                help="--guarded: pull normal + hinge from touch.door_plane on the head depth (rosette anchor)")
 ap.add_argument("--guarded", default="off", choices=("off", "right", "wrong", "line"),
                 help="open with helpers.guarded_pull: hinge hint on the (eval) right side, mirrored to the "
                      "wrong side, or none (straight pull along --dir, hinge fitted from the hand path)")
@@ -139,9 +142,21 @@ print(f"[door] (eval) hinge {np.round(hinge, 3).tolist()} lever grasp {np.round(
       f"lever_dir {np.round(lever_dir, 3).tolist()} radius {np.linalg.norm(radial):.3f} "
       f"tangent {np.round(tangent, 3).tolist()} angle {door_angle():.3f}", flush=True)
 
-call([config.CAPTURE_IMAGES])
+cap = call([config.CAPTURE_IMAGES])
 shutil.copy(config.rgb_image_head_path, os.path.join(args.out, "head.png"))
 shutil.copy(config.rgb_image_wrist_path, os.path.join(args.out, "wrist.png"))
+VISION = None
+if args.vision:                                      # pixels + depth only; the anchor is the rosette (+ --err)
+    import utils as _u
+    from touch.door_plane import depth_to_world, estimate_door_plane
+    _u.args = _u.args or argparse.Namespace(save_grasp_inputs=False)
+    _dep = np.load(os.path.splitext(config.depth_image_head_path)[0] + ".npy").astype(np.float32)
+    _mp = os.path.splitext(config.depth_image_head_path)[0] + "_robot_mask.npy"
+    _pts = depth_to_world(_dep, cap[0], cap[1], cap[5] if len(cap) > 5 else None,
+                          robot_mask=np.load(_mp) if os.path.exists(_mp) else None)
+    _anchor = lp + np.array([float(v) for v in args.err.split(",")])
+    VISION = estimate_door_plane(_pts, _anchor, np.asarray(cap[0])[:2])
+    print(f"[door] vision door plane: {VISION}", flush=True)
 if args.stage == "scene":
     os._exit(0)
 if args.stage == "probe":                            # eval: how much hinge torque does the door need?
@@ -329,6 +344,10 @@ if args.guarded != "off":
         exe(lin(grasp, pressed, step=0.005), "press", settle=3)
     if args.guarded != "line":
         h = hinge[:2] if args.guarded == "right" else 2 * (seen[:2] + np.dot(hinge[:2] - seen[:2], normal[:2]) * normal[:2]) - hinge[:2]
+        if args.hinge_shift:
+            h = np.asarray(h, float) + np.asarray([float(v) for v in args.hinge_shift.split(",")])
+    if VISION:
+        h, d0 = np.asarray(VISION["hinge"], float), np.asarray(VISION["pull_dir"], float)
     print(f"[door] guarded_pull hinge hint {None if h is None else np.round(h, 3).tolist()} dir {np.round(d0, 3).tolist()}", flush=True)
     res = guarded_pull(_GuardApi(), direction=list(d0), hinge=None if h is None else list(h), **{k: json.loads(v) for k, v in (kv.split("=", 1) for kv in re.split(r",(?=\w+=)", args.gp_kw) if kv)})
     print(f"[door] guarded_pull -> {json.dumps({k: v for k, v in res.items() if k != 'events'})}", flush=True)
@@ -394,6 +413,13 @@ print(f"[door] open wall time {time.time() - t1:.0f}s", flush=True)
 ang = door_angle()
 print(f"[door] RESULT {'touch' if args.touch else 'open-loop'} dir={args.dir} err={args.err}: "
       f"door angle {math.degrees(ang):.1f} deg -> {'OPEN' if ang > math.radians(20) else 'not open'}", flush=True)
-call([config.CAPTURE_IMAGES])
+cap2 = call([config.CAPTURE_IMAGES])
 shutil.copy(config.rgb_image_head_path, os.path.join(args.out, f"head_after_{'touch' if args.touch else 'ol'}.png"))
+if VISION:                                           # pixels-only door angle vs the eval truth
+    from touch.door_plane import measure_door_angle
+    _dep = np.load(os.path.splitext(config.depth_image_head_path)[0] + ".npy").astype(np.float32)
+    _mp = os.path.splitext(config.depth_image_head_path)[0] + "_robot_mask.npy"
+    _pts = depth_to_world(_dep, cap2[0], cap2[1], cap2[5] if len(cap2) > 5 else None,
+                          robot_mask=np.load(_mp) if os.path.exists(_mp) else None)
+    print(f"[door] vision door angle {measure_door_angle(_pts, VISION, lp[2])} (true {math.degrees(ang):.1f})", flush=True)
 os._exit(0 if ang > math.radians(20) else 2)
