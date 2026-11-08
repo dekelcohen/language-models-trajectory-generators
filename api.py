@@ -1062,6 +1062,15 @@ class API:
                 print(f"estimate_door_plane: door already open {deg:.0f} deg; closed-door plane: {plane}")
                 return plane
         plane = estimate_door_plane(pts, h, np.asarray(self.head_camera_position, float)[:2])
+        if ref and plane:
+            # door:hidden r8: re-estimates with the arm in view stopped the panel at the arm's shadow
+            # (width 0.46 -> 0.26 / 0.36 m) and moved the hinge 10-20 cm in; the push then missed.
+            # Occlusion only shrinks the panel, so keep the wider face when the normal agrees.
+            same = abs(float(np.dot(plane["pull_dir"][:2], ref[0]["pull_dir"][:2]))) > 0.99
+            if same and plane["width_m"] < ref[0]["width_m"] - 0.03:
+                self.logger.info(PROGRESS + f"estimate_door_plane: new panel {plane['width_m']} m narrower than "
+                                 f"the earlier {ref[0]['width_m']} m (occluded); keeping the earlier plane" + ENDC)
+                plane = dict(ref[0])
         self.logger.info(PROGRESS + f"estimate_door_plane(handle={np.round(h, 3).tolist()}): {plane} "
                          f"({len(pts)} depth points)" + ENDC)
         print(f"estimate_door_plane: {plane}")

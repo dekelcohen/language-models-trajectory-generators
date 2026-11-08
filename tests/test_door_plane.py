@@ -50,3 +50,22 @@ def test_measure_door_angle_sees_a_door_that_swung_back_shut():
     assert abs(deg - 60) < 4
     deg, _ = measure_door_angle(np.vstack([_panel([0.0, 0.0], 0.5, 2), _jamb(0.54, 0.64)]), plane, 0.65)
     assert deg < 6
+
+
+def test_api_keeps_the_wider_closed_face_when_the_arm_occludes_a_re_estimate(monkeypatch):
+    """door:hidden r8: a re-estimate with the arm in view saw a 0.26 m panel and moved the hinge in."""
+    import logging
+    from types import SimpleNamespace
+    import touch.door_plane as dp
+    from api import API
+    full = np.vstack([_panel([0.0, 0.0], 0.5, 0), _jamb(0.54, 0.64)])
+    shadowed = full[(full[:, 0] > 0.25) | (full[:, 2] > 0.85)]          # arm shadow over x < 0.25
+    clouds = iter([full, shadowed])
+    monkeypatch.setattr(dp, "depth_to_world", lambda *a, **k: next(clouds))
+    fake = SimpleNamespace(_capture_head_image_and_depth=lambda: (None, None), head_camera_position=[0.3, -1.0, 1.0],
+                           head_camera_orientation_q=None, cam_info=None, _load_head_robot_mask=lambda: None,
+                           logger=logging.getLogger("t"))
+    monkeypatch.setattr(dp, "measure_door_angle", lambda *a, **k: (0.0, 300))
+    first = API.estimate_door_plane(fake, [0.4, -0.06, 0.65])
+    again = API.estimate_door_plane(fake, [0.4, -0.06, 0.65])
+    assert abs(first["hinge"][0]) < 0.03 and again["hinge"] == first["hinge"]
