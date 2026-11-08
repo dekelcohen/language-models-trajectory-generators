@@ -1103,7 +1103,7 @@ class API:
         print(f"grasp_door_lever: {res}")
         return res
 
-    def open_door(self, handle, goal_deg=60.0, max_pulls=3):
+    def open_door(self, handle, goal_deg=65.0, max_pulls=3):
         """One call that opens a hinged door wide from depth + proprioception (helpers/door_open.py):
         estimate_door_plane -> grasp_door_lever -> guarded_pull -> measure_door_angle, re-grasping and pulling
         again up to ``max_pulls`` times until the door is >= ``goal_deg``; releases and lifts at the end.

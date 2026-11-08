@@ -10,7 +10,7 @@ import numpy as np
 
 import config
 
-GOAL_DEG = 60.0
+GOAL_DEG = 65.0                  # 60 deg wanted + ~3-5 deg depth error margin
 
 
 def _rot_about(p, c, ang):
