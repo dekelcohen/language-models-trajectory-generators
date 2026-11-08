@@ -7,7 +7,8 @@ handle. The door is the largest vertical surface right behind the handle:
 * pull direction = the plane normal pointing toward the camera (the robot's side);
 * the panel's extent along the plane is grown outward from the handle until a gap in the
   points (so a coplanar wall far away is not merged in);
-* hinge = the panel end FARTHER from the handle (handles sit near the free edge).
+* hinge = the panel end FARTHER from the rose (the bump 1-6 cm in front of the face near the
+  given handle point; handles sit near the free edge). Without a visible rose, the given point.
 
 door:hidden r3 (2026-11-08): the LLM guessed the door plane ~35 deg off and put the hinge on
 the wrong side; perception's "door" box was 5 cm wide and the "hinge" box was the handle.
@@ -36,7 +37,8 @@ def depth_to_world(depth, cam_pos, cam_q, cam_info=None, stride=2, robot_mask=No
 
 def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z=0.08,
                         inlier_m=0.015, max_face_m=0.20, bin_m=0.02, max_gap_m=0.02, min_density=0.3,
-                        min_width_m=0.2, iters=300, seed=0):
+                        min_width_m=0.2, iters=300, seed=0, rose_off_m=(0.01, 0.06), rose_radius_m=0.3,
+                        min_rose_pts=10):
     """Fit the vertical door plane behind ``handle`` in world ``points`` (N, 3).
 
     Returns a dict (all xy in world metres) or ``None`` when no vertical plane is found:
@@ -52,7 +54,8 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
     d_xy = np.linalg.norm(P[:, :2] - hxy, axis=1)
     keep = (d_xy < radius) & (np.abs(P[:, 2] - h[2]) < z_band) & (P[:, 2] > floor_z)
     keep &= np.linalg.norm(P - h, axis=1) > 0.04          # not the lever itself
-    Q = P[keep][:, :2]
+    P3 = P[keep]
+    Q = P3[:, :2]
     if len(Q) < 50:
         return None
 
@@ -116,28 +119,39 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
         return last
     k_pos, k_neg = grow(+1), grow(-1)
     e_pos, e_neg = (k_pos + 1) * bin_m, k_neg * bin_m          # outer bin edges
-    far, near = (e_pos, e_neg) if abs(e_pos) >= abs(e_neg) else (e_neg, e_pos)
-    if abs(far) + abs(near) < min_width_m:
+    if abs(e_pos) + abs(e_neg) < min_width_m:
         return None
-    ratio = abs(far) / max(abs(near), 1e-3)
+    # The rose (where the handle meets the door) is the bump just proud of the face; it sits near the
+    # free edge whatever point on the handle was given (door:hidden r5: an anchor at the lever's tip,
+    # mid-panel, picked the wrong side; the rose stays ~6 cm from the free edge, harness 2026-11-08).
+    off3 = (P3[:, :2] - foot) @ nrm
+    s3 = (P3[:, :2] - foot) @ t
+    bump = ((off3 > rose_off_m[0]) & (off3 < rose_off_m[1]) & (np.abs(P3[:, 2] - h[2]) < 0.12)
+            & (np.linalg.norm(P3[:, :2] - hxy, axis=1) < rose_radius_m) & (s3 > e_neg) & (s3 < e_pos))
+    rose_s = float(np.median(s3[bump])) if int(bump.sum()) >= min_rose_pts else None
+    ref_s = rose_s if rose_s is not None else 0.0
+    far, near = (e_pos, e_neg) if abs(e_pos - ref_s) >= abs(e_neg - ref_s) else (e_neg, e_pos)
+    ratio = abs(far - ref_s) / max(abs(near - ref_s), 1e-3)
     hinge = foot + far * t
     free = foot + near * t
+    rose = foot + ref_s * t
     return {
         "pull_dir": [round(float(nrm[0]), 3), round(float(nrm[1]), 3), 0.0],
         "tangent": [round(float(t[0]), 3), round(float(t[1]), 3), 0.0],
         "hinge": [round(float(hinge[0]), 3), round(float(hinge[1]), 3)],
         "free_edge": [round(float(free[0]), 3), round(float(free[1]), 3)],
-        "handle_to_hinge_m": round(abs(far), 3),
-        "handle_to_free_m": round(abs(near), 3),
-        "width_m": round(abs(far) + abs(near), 3),
+        "handle_to_hinge_m": round(abs(far - ref_s), 3),
+        "handle_to_free_m": round(abs(near - ref_s), 3),
+        "width_m": round(abs(far - near), 3),
         "face_offset_m": round(face_off, 3),
+        "rose": [round(float(rose[0]), 3), round(float(rose[1]), 3)] if rose_s is not None else None,
         "n_inliers": int(len(inl)),
         "side_ratio": round(float(ratio), 2),
         "confident": bool(ratio >= 1.3 and len(inl) >= 80),
     }
 
 
-def measure_door_angle(points, plane, z, z_band=0.15, r_min=0.12, bin_deg=3.0, min_pts=30):
+def measure_door_angle(points, plane, z, z_band=0.15, r_min=0.12, bin_deg=3.0, min_pts=30, min_bin_pts=25):
     """Door opening (deg) about ``plane["hinge"]`` from world ``points`` seen AFTER a pull/push.
 
     Points at the handle height ``z`` (+-``z_band``) within the panel's radius of the hinge are
@@ -165,5 +179,7 @@ def measure_door_angle(points, plane, z, z_band=0.15, r_min=0.12, bin_deg=3.0, m
     k = np.floor((ang + 5.0) / bin_deg).astype(int)
     cnt = np.bincount(k)
     best = int(np.argmax(cnt))
+    if cnt[best] < min_bin_pts:              # door:hidden r5: 8-16 stray points read as 27-54 deg
+        return None, int(cnt[best])
     sel = ang[(k >= best - 1) & (k <= best + 1)]
     return round(float(np.median(sel)), 1), int(cnt[best])

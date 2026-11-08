@@ -19,6 +19,7 @@ ap.add_argument("--noise", type=float, default=0.0, help="handle position error 
 ap.add_argument("--stride", type=int, default=2)
 ap.add_argument("--anchor", default="lever", choices=("lever", "latch"))
 ap.add_argument("--clear-pole", action="store_true", help="door:hidden: lay the pole on the floor (as after clearing)")
+ap.add_argument("--door-deg", default="", help="comma list: set the hinge joint (deg) and measure the angle from depth")
 args = ap.parse_args()
 
 import config  # noqa: E402
@@ -62,6 +63,7 @@ mpath = os.path.splitext(config.depth_image_head_path)[0] + "_robot_mask.npy"
 mask = np.load(mpath) if os.path.exists(mpath) else None
 P = depth_to_world(depth, cam_pos, cam_q, cam_info, stride=args.stride, robot_mask=mask)
 t1 = time.time()
+np.savez(os.path.join("outputs", "touch", f"door_points_{args.task.replace(':', '_')}.npz"), P=P, cam=np.asarray(cam_pos))
 handle = np.array([-0.277 + args.noise, 0.009 + args.noise, 0.672]) if args.anchor == "lever" else \
     np.array([-0.098 + args.noise, -0.013 + args.noise, 0.672])
 g = estimate_door_plane(P, handle, cam_pos[:2])
@@ -82,5 +84,16 @@ if g:
     ang = np.degrees(np.arccos(abs(np.dot(g["pull_dir"][:2], [-0.95, 0.312]) / np.linalg.norm([-0.95, 0.312]))))
     print(f"[probe] hinge error {err:.3f} m, normal error {ang:.1f} deg, "
           f"side {'RIGHT' if err < 0.25 else 'WRONG'}")
+if g and args.door_deg:
+    from touch.door_plane import measure_door_angle
+    for dd in [float(v) for v in args.door_deg.split(",")]:
+        pb.resetJointState(DOOR, HINGE, np.radians(dd))
+        r = call([config.CAPTURE_IMAGES])
+        depth = np.load(os.path.splitext(config.depth_image_head_path)[0] + ".npy").astype(np.float32)
+        mask = np.load(mpath) if os.path.exists(mpath) else None
+        P2 = depth_to_world(depth, r[0], r[1], r[5] if len(r) > 5 else None, stride=args.stride, robot_mask=mask)
+        g2 = estimate_door_plane(P2, handle, cam_pos[:2])
+        print(f"[probe] joint {dd:+.0f} deg: measure_door_angle {measure_door_angle(P2, g, handle[2])}, "
+              f"re-estimate pull_dir {g2 and g2['pull_dir']}", flush=True)
 sys.stdout.flush()
 os._exit(0)

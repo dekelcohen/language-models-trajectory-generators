@@ -25,6 +25,14 @@ def test_door_plane_puts_the_hinge_at_the_far_panel_end_not_across_the_gap():
     assert abs(plane["hinge"][0]) < 0.03 and abs(plane["free_edge"][0] - 0.5) < 0.03
 
 
+def test_door_plane_finds_the_hinge_from_the_rose_when_given_the_lever_tip():
+    """door:hidden r5: the LLM passed the lever's tip (mid-panel); both panel ends were ~equally far."""
+    rose = np.asarray([[x, -0.03, z] for x in np.arange(0.40, 0.45, 0.01) for z in np.arange(0.63, 0.68, 0.01)])
+    pts = np.vstack([_panel([0.0, 0.0], 0.5, 0), _jamb(0.54, 0.64), rose])
+    plane = estimate_door_plane(pts, [0.26, -0.07, 0.65], cam_xy=[0.3, -1.0])
+    assert plane and abs(plane["hinge"][0]) < 0.03 and plane["confident"]
+
+
 def test_measure_door_angle_sees_a_door_that_swung_back_shut():
     plane = estimate_door_plane(np.vstack([_panel([0.0, 0.0], 0.5, 0), _jamb(0.54, 0.64)]),
                                 [0.4, -0.06, 0.65], cam_xy=[0.3, -1.0])

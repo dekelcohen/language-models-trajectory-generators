@@ -1040,8 +1040,8 @@ class API:
     def estimate_door_plane(self, handle):
         """Door face, pull direction and hinge side from head depth (touch/door_plane.py).
 
-        ``handle`` = world [x, y, z] where the handle meets the door (the rosette), not the lever's
-        middle. Returns the plane dict (``pull_dir``, ``hinge``, ``free_edge``, ``side_ratio``,
+        ``handle`` = world [x, y, z] of the door handle (any point on it; the rose where it meets the
+        door is located from depth). Returns the plane dict (``pull_dir``, ``hinge``, ``free_edge``, ``rose``, ``side_ratio``,
         ``confident`` ...) or None (no vertical face visible - clear occluders first). The plane is
         remembered: a following ``guarded_pull`` re-checks the door angle from depth."""
         from touch.door_plane import depth_to_world, estimate_door_plane
@@ -1049,11 +1049,23 @@ class API:
         pts = depth_to_world(depth, self.head_camera_position, self.head_camera_orientation_q,
                              self.cam_info, robot_mask=self._load_head_robot_mask())
         h = np.asarray(handle, float).ravel()[:3]
+        ref = getattr(self, "_door_plane", None)
+        if ref:
+            from touch.door_plane import measure_door_angle
+            deg, n = measure_door_angle(pts, ref[0], ref[1])
+            if deg is not None and deg > 10.0:
+                # door:hidden r6: a re-estimate on the OPEN door replaced the closed-face reference and every
+                # later door angle read None / 0 deg while the door was at 72 deg. Keep the closed face.
+                plane = dict(ref[0], door_open_deg=deg)
+                self.logger.info(PROGRESS + f"estimate_door_plane: the door is already open {deg:.0f} deg; "
+                                 f"returning the closed-door plane measured before ({n} panel points)" + ENDC)
+                print(f"estimate_door_plane: door already open {deg:.0f} deg; closed-door plane: {plane}")
+                return plane
         plane = estimate_door_plane(pts, h, np.asarray(self.head_camera_position, float)[:2])
         self.logger.info(PROGRESS + f"estimate_door_plane(handle={np.round(h, 3).tolist()}): {plane} "
                          f"({len(pts)} depth points)" + ENDC)
         print(f"estimate_door_plane: {plane}")
-        self._door_plane = (plane, float(h[2])) if plane else None
+        self._door_plane = (plane, float(h[2])) if plane else ref
         return plane
 
     def measure_door_angle(self):
@@ -1089,6 +1101,11 @@ class API:
                     res["events"] = list(res.get("events") or []) + [msg]
                     res["outcome"] = "swung_shut"
                     self.logger.info(FAIL + "guarded_pull: " + msg + ENDC)
+                elif deg is not None and res.get("outcome") == "opened" and deg < 55.0:
+                    # door:hidden r6: the hand swept 61 deg, the panel was at 38 (the push lags the hand)
+                    res["events"] = list(res.get("events") or []) + [
+                        f"depth shows the door at {deg:.0f} deg (< 60): only partly open"]
+                    res["outcome"] = "partly_open"
             except Exception as e:
                 self.logger.info(PROGRESS + f"guarded_pull: door-angle check failed: {e}" + ENDC)
         print(f"guarded_pull: {({k: v for k, v in res.items() if k != 'events'})}")
@@ -1539,6 +1556,25 @@ class API:
                          f"max_carried={facts['max_carried_m']} pulls={len(facts['pulls'])}" + ENDC)
         return facts, text
 
+    def _door_angle_review_evidence(self):
+        """Depth-measured door angle at review time (after ``estimate_door_plane``) -> prompt text or None.
+
+        door:hidden r6: the door was at 72 deg, but the reviewer failed the attempt because "the final
+        door angle could not be measured" from the frames."""
+        if not getattr(self, "_door_plane", None):
+            return None
+        try:
+            deg = self.measure_door_angle()
+        except Exception as e:                  # evidence is optional; never break the review
+            self.logger.info(WARNING + f"Review: door angle evidence failed: {type(e).__name__}: {e}" + ENDC)
+            return None
+        self.logger.info(PROGRESS + f"Review: door angle evidence -> {deg}" + ENDC)
+        if deg is None:
+            return ("DOOR ANGLE (head depth camera): not measurable now (too few panel points visible); "
+                    "judge from the frames.")
+        return (f"DOOR ANGLE (head depth camera, measured now about the hinge seen before the door "
+                f"opened; about +-5 deg): the door is open {deg:.0f} deg (60 deg or more = wide open).")
+
     def _apply_pull_proprio_verdict(self, facts, success, reason, improvement_steps, camera_moved=()):
         """Measured-veto + retry direction bookkeeping -> (success, reason, improvement_steps).
 
@@ -1692,6 +1728,9 @@ class API:
         touch_text = self._touch_review_evidence(start_idx)
         if touch_text:
             media_section = media_section + "\n\n" + touch_text + "\n"
+        door_text = self._door_angle_review_evidence()
+        if door_text:
+            media_section = media_section + "\n\n" + door_text + "\n"
         if disp_text:
             media_section = media_section + "\n\n" + disp_text + "\n"
 
