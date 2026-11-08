@@ -69,6 +69,8 @@ def get_exec_locals(api, logger):
         "guarded_pull": api.guarded_pull,
         "estimate_door_plane": api.estimate_door_plane,
         "measure_door_angle": api.measure_door_angle,
+        "grasp_door_lever": api.grasp_door_lever,
+        "open_door": api.open_door,
         # Proprioception (EE pose, finger width / holding); named by the touch skills.
         "get_robot_state": api.get_robot_state,
         "gripper_holding": api.gripper_holding,

@@ -1091,6 +1091,31 @@ class API:
         self.logger.info(PROGRESS + f"measure_door_angle: {deg} deg ({n} points on the panel)" + ENDC)
         return deg
 
+    def grasp_door_lever(self, door_deg=0.0):
+        """Top-down grasp at the depth-measured lever middle of the last ``estimate_door_plane`` (fingers across
+        the bar, +-2 cm retries, lever pressed 3 cm). ``door_deg``: the door's current opening (the lever has
+        swung with it). Returns {"holding", "xyz", "rotation", "width", "tries"}."""
+        from helpers.door_open import grasp_door_lever
+        ref = getattr(self, "_door_plane", None)
+        if not ref:
+            raise RuntimeError("grasp_door_lever: call estimate_door_plane(handle_xyz) first")
+        res = grasp_door_lever(self, ref[0], door_deg=door_deg)
+        print(f"grasp_door_lever: {res}")
+        return res
+
+    def open_door(self, handle, goal_deg=60.0, max_pulls=3):
+        """One call that opens a hinged door wide from depth + proprioception (helpers/door_open.py):
+        estimate_door_plane -> grasp_door_lever -> guarded_pull -> measure_door_angle, re-grasping and pulling
+        again up to ``max_pulls`` times until the door is >= ``goal_deg``; releases and lifts at the end.
+        Returns {"outcome": "opened" | "partly_open" | "grasp_failed" | "no_door_face", "door_deg", "pulls"}."""
+        from helpers.door_open import open_door
+        res = open_door(self, handle, goal_deg=goal_deg, max_pulls=max_pulls)
+        out = {k: v for k, v in res.items() if k != "plane"}
+        print(f"open_door: {out}")
+        self._record_touch("open_door", {"outcome": res["outcome"], "door_deg": res["door_deg"],
+                                         "pulls": len(res["pulls"])})
+        return out
+
     def guarded_pull(self, direction, hinge=None, travel=0.55, max_deg=80.0, part=None, **kw):
         """Pull the held handle in small guarded steps with automatic correction (helpers/guarded_pull.py):
         wrong hinge side -> mirror + retry, slip -> re-grasp at the re-acquired / last-held point,

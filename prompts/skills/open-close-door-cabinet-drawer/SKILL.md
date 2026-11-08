@@ -37,6 +37,11 @@ From the SCENE ANALYSIS, the affordance points (prefer the top-ranked point) and
   Note which edge of the door the handle sits near: the hinge is on the **opposite** edge.
   Frames have a post on BOTH edges: a "hinge" detection within ~0.3 m of the handle is the
   latch-side jamb, not the hinge (task-text claims about the hinge side may be wrong too).
+- **Hinged door with a lever: call `r = open_door(handle_xyz)` first** (any point on the handle, the
+  arm out of view, occluders cleared). It does the measuring, grasping, pulling/pushing and the
+  depth angle check below in one deterministic call (harness: 60-61 deg in one pull). Print `r`.
+  `"opened"` -> done; `"partly_open"` / `"grasp_failed"` -> call it again once; `"no_door_face"` ->
+  something still hides the door. Only script the steps below yourself if it is not available.
 - **Measure the door, don't guess it** (hinged doors): with the arm out of view and occluders
   cleared, `p = estimate_door_plane(handle_xyz)` (any point on the handle; it finds the rose - where
   the handle meets the door - in depth). It fits the door face in head depth and returns

@@ -69,3 +69,15 @@ def test_api_keeps_the_wider_closed_face_when_the_arm_occludes_a_re_estimate(mon
     first = API.estimate_door_plane(fake, [0.4, -0.06, 0.65])
     again = API.estimate_door_plane(fake, [0.4, -0.06, 0.65])
     assert abs(first["hinge"][0]) < 0.03 and again["hinge"] == first["hinge"]
+
+
+def test_lever_grasp_follows_the_door_about_the_hinge():
+    """A partly open door: the re-grasp target is the closed-door lever point swung about the hinge toward
+    the robot (pull_dir), and the hand rotation turns with it."""
+    import math
+    from helpers.door_open import lever_grasp_now
+    plane = {"hinge": [0.0, 0.0], "free_edge": [0.5, 0.0], "pull_dir": [0.0, -1.0, 0.0],
+             "lever_grasp": {"xyz": [0.3, -0.1, 0.65], "rotation": -math.pi / 2}}
+    g = lever_grasp_now(plane, 90.0)
+    assert np.allclose(g["xyz"], [-0.1, -0.3, 0.65], atol=1e-6)        # swung toward -y (the robot)
+    assert abs(abs(g["rotation"])) < 1e-6 or abs(abs(g["rotation"]) - math.pi) < 1e-6

@@ -58,6 +58,9 @@ ap.add_argument("--vision", action="store_true",
                 help="--guarded: pull normal + hinge from touch.door_plane on the head depth (rosette anchor)")
 ap.add_argument("--vision-grasp", action="store_true",
                 help="with --vision --approach top: grasp at the plane's lever_grasp (xyz + rotation)")
+ap.add_argument("--open-door", action="store_true",
+                help="with --vision --guarded right: release, then run helpers/door_open.open_door end to end")
+ap.add_argument("--start-deg", type=float, default=0.0, help="--open-door (pybullet): set the door to this angle first")
 ap.add_argument("--guarded", default="off", choices=("off", "right", "wrong", "line"),
                 help="open with helpers.guarded_pull: hinge hint on the (eval) right side, mirrored to the "
                      "wrong side, or none (straight pull along --dir, hinge fitted from the hand path)")
@@ -346,18 +349,54 @@ if args.guarded != "off":
             return out
 
     h = None
-    if args.press:
-        pressed = list(np.asarray(grasp[:3]) - [0, 0, args.press]) + list(grasp[3:])
-        exe(lin(grasp, pressed, step=0.005), "press", settle=3)
-    if args.guarded != "line":
-        h = hinge[:2] if args.guarded == "right" else 2 * (seen[:2] + np.dot(hinge[:2] - seen[:2], normal[:2]) * normal[:2]) - hinge[:2]
-        if args.hinge_shift:
-            h = np.asarray(h, float) + np.asarray([float(v) for v in args.hinge_shift.split(",")])
-    if VISION:
-        h, d0 = np.asarray(VISION["hinge"], float), np.asarray(VISION["pull_dir"], float)
-    print(f"[door] guarded_pull hinge hint {None if h is None else np.round(h, 3).tolist()} dir {np.round(d0, 3).tolist()}", flush=True)
-    res = guarded_pull(_GuardApi(), direction=list(d0), hinge=None if h is None else list(h), **{k: json.loads(v) for k, v in (kv.split("=", 1) for kv in re.split(r",(?=\w+=)", args.gp_kw) if kv)})
-    print(f"[door] guarded_pull -> {json.dumps({k: v for k, v in res.items() if k != 'events'})}", flush=True)
+    if args.open_door:                                # helpers/door_open.open_door, start from an open hand above
+        from helpers import door_open
+        from touch.door_plane import measure_door_angle as _mda
+
+        class _DoorApi(_GuardApi):
+            _door_plane = None
+
+            def estimate_door_plane(self, handle):
+                self._door_plane = (VISION, float(lp[2]))
+                d = self.measure_door_angle()
+                return dict(VISION, door_open_deg=d) if d is not None and d > 10.0 else VISION
+
+            def measure_door_angle(self):
+                c = call([config.CAPTURE_IMAGES])
+                dep = np.load(os.path.splitext(config.depth_image_head_path)[0] + ".npy").astype(np.float32)
+                mp = os.path.splitext(config.depth_image_head_path)[0] + "_robot_mask.npy"
+                pts = depth_to_world(dep, c[0], c[1], c[5] if len(c) > 5 else None,
+                                     robot_mask=np.load(mp) if os.path.exists(mp) else None)
+                deg, n = _mda(pts, VISION, float(lp[2]))
+                print(f"[door] measure_door_angle {deg} ({n} pts; true {math.degrees(door_angle()):.1f})", flush=True)
+                return deg
+
+            def guarded_pull(self, direction, hinge=None, max_deg=85.0, **kw):
+                return guarded_pull(self, direction, hinge=hinge, max_deg=max_deg, **kw)
+
+        _api = _DoorApi()
+        door_open._release_and_clear(_api)
+        if args.start_deg and args.sim == "pybullet":  # scene setup: a partly open door (test push_door)
+            import pybullet as pb
+            pb.resetJointState(DOOR, HINGE, math.radians(args.start_deg))
+            call([config.EXECUTE_TRAJECTORY, [list(np.asarray(call([config.GET_ROBOT_STATE])["eef_pos"]) + [0, 0, DZ]) + [rot]]])
+            print(f"[door] start angle set to {math.degrees(door_angle()):.1f} deg", flush=True)
+        res = door_open.open_door(_api, list(lp))
+        print(f"[door] open_door -> {json.dumps({k: v for k, v in res.items() if k != 'plane'}, default=str)}", flush=True)
+        args.guarded = "skip"
+    else:
+        if args.press:
+            pressed = list(np.asarray(grasp[:3]) - [0, 0, args.press]) + list(grasp[3:])
+            exe(lin(grasp, pressed, step=0.005), "press", settle=3)
+        if args.guarded != "line":
+            h = hinge[:2] if args.guarded == "right" else 2 * (seen[:2] + np.dot(hinge[:2] - seen[:2], normal[:2]) * normal[:2]) - hinge[:2]
+            if args.hinge_shift:
+                h = np.asarray(h, float) + np.asarray([float(v) for v in args.hinge_shift.split(",")])
+        if VISION:
+            h, d0 = np.asarray(VISION["hinge"], float), np.asarray(VISION["pull_dir"], float)
+        print(f"[door] guarded_pull hinge hint {None if h is None else np.round(h, 3).tolist()} dir {np.round(d0, 3).tolist()}", flush=True)
+        res = guarded_pull(_GuardApi(), direction=list(d0), hinge=None if h is None else list(h), **{k: json.loads(v) for k, v in (kv.split("=", 1) for kv in re.split(r",(?=\w+=)", args.gp_kw) if kv)})
+        print(f"[door] guarded_pull -> {json.dumps({k: v for k, v in res.items() if k != 'events'})}", flush=True)
 elif args.touch:
     from touch import recovery
     _orig_exec = recovery._execute

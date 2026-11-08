@@ -92,6 +92,8 @@ if g and args.door_deg:
         depth = np.load(os.path.splitext(config.depth_image_head_path)[0] + ".npy").astype(np.float32)
         mask = np.load(mpath) if os.path.exists(mpath) else None
         P2 = depth_to_world(depth, r[0], r[1], r[5] if len(r) > 5 else None, stride=args.stride, robot_mask=mask)
+        np.savez(os.path.join("outputs", "touch", f"door_points_{args.task.replace(':', '_')}_deg{dd:.0f}.npz"),
+                 P=P2, cam=np.asarray(cam_pos), latch=np.asarray(pb.getLinkState(DOOR, 2)[0]))  # latch: eval only
         g2 = estimate_door_plane(P2, handle, cam_pos[:2])
         print(f"[probe] joint {dd:+.0f} deg: measure_door_angle {measure_door_angle(P2, g, handle[2])}, "
               f"re-estimate pull_dir {g2 and g2['pull_dir']}", flush=True)

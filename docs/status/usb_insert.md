@@ -157,3 +157,13 @@ Run: `images_usb_u4`, packaged to `outputs/2026-11-08/usb_u4_false_slipped_seatc
 - Also fixed in `agent_runner`: a long print output was dropped silently (now head + tail), and LLM code
   calling `raise SystemExit` killed the whole run (now caught, see `document.md` exec table).
 
+
+## 2026-11-08 (night): model variants (same pipeline, `--attempts 3 --max-planner-iter 5`)
+| run | LLM / perception | result | notes |
+|---|---|---|---|
+| u6 | opus-5.5 / terra (defaults) | SUCCESS, 12 min | seated attempt 1 (see above) |
+| u7 | gpt-6-astra / gpt-6-astra | FAIL | `outputs/2026-11-08/usb_u7_astra_llm+perception_FAIL` |
+| u8 | gpt-6-sol / terra | FAIL | held the plug, but the planner spent 5 iterations on camera-view subtasks |
+| u9 | opus-5.5 / gpt-6-sol | FAIL (90 min budget) | plug slipped; insert searched y 0.58-0.66 (port at 0.496), then a line search with an empty hand |
+- Only the defaults (opus LLM + terra perception) inserted. Swapping either model hurt: sol/astra as LLM
+  wander in the planner; sol as perception put the port box ~8 cm off. Keep the defaults.
