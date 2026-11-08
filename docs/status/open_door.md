@@ -360,3 +360,42 @@ Fixes after r5/r6:
 | od2 (old loop) | -8 cm | 52.8 (re-grasp at 21° missed, door knocked shut) |
 | od4 / od5 (`--start-deg` 40 / 50, push_door) | 0 | 87.7 / 90.0 |
 | od6 / od7 (new loop) | -8 cm / 0 | 63.7 / 63.1 (one pull) |
+
+## 2026-11-08 (late morning): why the door fell back, and the fixes
+- q2 (qwen3.8-27b, calls `open_door`; SUCCESS truth 90°, 29 min, but messy): first pull jammed at
+  45° ("held part forced the fingers 30 mm open"), push out of reach, and after release the door read
+  29°, then 5.8° after a "push_stalled hand 67°". The LLM then hand-wrote more attempts; reviewer
+  accepted at 102° by depth.
+- **od4/od5 above were invalid**: `--start-deg` reset the panel into the hand and it was flung to
+  ~88°. The harness now lifts the hand first; a 20° start settles at ~13°.
+- **Root causes (DOOR_DIAG, eval-only truth per move):**
+  1. Vision hinge ~9 cm short of the true axis: in this URDF the axis sits past a 6 cm frame gap, at
+     the jamb. The pull arc is then too small and pries the lever out of the jaws at 25-45°.
+  2. The released panel can fall back on the lift (od12/od13: 27 -> 9°, it leaned on the forearm).
+     `push_open(around)` then came in at the old hand angle, i.e. IN FRONT of the panel, and pushed it
+     shut ("push_stalled hand 71°" -> door 2°).
+  3. A diagonal approach from high up to the hover point crossed the swung panel (od2, q2).
+- **Fixes** (commit d497400):
+  1. `estimate_door_plane`: hinge at the first dense bin after the hinge-side gap (`hinge_gap_m`);
+     err 9.3 -> 6.1 cm (the rest: axis 4.5 cm behind the face). Real doors: gap of a few mm, no change.
+  2. `push_open(around)`: after the release lift, `measure_door_angle` (head depth); < 19° ->
+     `door_fell_back` (open_door re-grasps a near-closed door, which works); else aim 20° behind
+     the measured panel, not the hand.
+  3. `door_open._approach`: up over the panel top (`top_z`, depth), over to 15 cm in front of the
+     swung face, down, in.
+
+| harness (closed start, new code) | anchor err | door (truth) |
+|---|---|---|
+| od15 (diag, before fix 2) | 0 | 72.1 (pull 36° -> push to 76°) |
+| od21 / od23 | 0 / -2,+2 cm | 73.7 / 73.1 (one pull + push) |
+| od22 | +2,-3 cm | 73.1 (push_blocked -> door 0 -> re-grasp, pull + push) |
+
+### Agent rollouts with the fixes (d497400), door:hidden
+| run | LLM | door (truth) | time | path |
+|---|---|---|---|---|
+| r9 | opus | 76.3° | 6 min | pull -> 61.7°, measured 68° after release, push -> 70.4° |
+| q3 | qwen3.8-27b | 77.6° | 5 min | pull -> 56°, measured 70°, push -> 74.9° |
+| q4 | qwen3.8-27b | 76.0° | 10 min | pull -> `door_fell_back` 0.6° (push skipped), re-grasp, pull -> 72.7° |
+
+Before the fixes: r4-r8 16-21 min (2 of 5 FAIL), q1 42 min, q2 29 min. All three now open in one
+`open_door` call with 2 moves; the small model only has to detect the handle and call it.
