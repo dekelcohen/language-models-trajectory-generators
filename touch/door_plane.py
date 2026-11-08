@@ -121,6 +121,15 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
         return last
     k_pos, k_neg = grow(+1), grow(-1)
     e_pos, e_neg = (k_pos + 1) * bin_m, k_neg * bin_m          # outer bin edges
+
+    def jamb(sign, last, max_m=0.10):
+        # first dense bin after the frame gap: the hinge axis sits at the jamb, past the gap (PyBullet
+        # door: a 6 cm gap, axis 8.7 cm beyond the panel's visible end; real doors: a few mm)
+        for i in range(1, int(round(max_m / bin_m)) + 1):
+            k2 = last + sign * i
+            if counts.get(k2, 0) >= low:
+                return k2 * bin_m if sign > 0 else (k2 + 1) * bin_m
+        return None
     if abs(e_pos) + abs(e_neg) < min_width_m:
         return None
     # The rose (where the handle meets the door) is the bump just proud of the face; it sits near the
@@ -134,9 +143,14 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
     ref_s = rose_s if rose_s is not None else 0.0
     far, near = (e_pos, e_neg) if abs(e_pos - ref_s) >= abs(e_neg - ref_s) else (e_neg, e_pos)
     ratio = abs(far - ref_s) / max(abs(near - ref_s), 1e-3)
-    hinge = foot + far * t
+    j = jamb(+1, k_pos) if far == e_pos else jamb(-1, k_neg)
+    hinge_s = far if j is None else j
+    hinge = foot + hinge_s * t
     free = foot + near * t
     rose = foot + ref_s * t
+    # Panel top (approach height over a partly open door): face points over the panel span, any height.
+    on_face = (np.abs((P[:, :2] - foot) @ nrm) < inlier_m) & (((P[:, :2] - foot) @ t - e_neg) * ((P[:, :2] - foot) @ t - e_pos) < 0)
+    top_z = float(np.percentile(P[on_face, 2], 98)) if int(on_face.sum()) >= 20 else None
     # Lever grasp: the bar 7-16 cm proud of the face on the hinge side of the rose. Points crowd near
     # the rose, so take the middle of the seen span (offline door:hidden: 1.5 cm from the true middle);
     # the head camera sees the bar's top, so drop ~1.5 cm to its centre line.
@@ -159,12 +173,14 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
         "tangent": [round(float(t[0]), 3), round(float(t[1]), 3), 0.0],
         "hinge": [round(float(hinge[0]), 3), round(float(hinge[1]), 3)],
         "free_edge": [round(float(free[0]), 3), round(float(free[1]), 3)],
-        "handle_to_hinge_m": round(abs(far - ref_s), 3),
+        "handle_to_hinge_m": round(abs(hinge_s - ref_s), 3),
+        "hinge_gap_m": round(abs(hinge_s - far), 3),
         "handle_to_free_m": round(abs(near - ref_s), 3),
         "width_m": round(abs(far - near), 3),
         "face_offset_m": round(face_off, 3),
         "rose": [round(float(rose[0]), 3), round(float(rose[1]), 3)] if rose_s is not None else None,
         "lever_grasp": grasp,
+        "top_z": None if top_z is None else round(top_z, 3),
         "n_inliers": int(len(inl)),
         "side_ratio": round(float(ratio), 2),
         "confident": bool(ratio >= 1.3 and len(inl) >= 80),

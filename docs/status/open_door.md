@@ -336,3 +336,27 @@ Fixes after r5/r6:
   (< 55° by depth).
 - Remaining: the grasp itself is LLM-placed (z / offset along the lever) and misses often (r7). Next: a
   deterministic grasp point from the rose + plane (mid-lever, ~0.10 m proud of the face, rose z).
+
+## 2026-11-08 (morning): deterministic `open_door` (helpers/door_open.py)
+- r8 (opus, SUCCESS 67.6°, 18 min): a re-estimate with the arm in view saw a narrower panel and moved the
+  hinge 19 cm -> push_blocked. **Fix:** with a closed door, a re-estimate narrower than the earlier one
+  (same normal) keeps the earlier plane (arm occlusion only shrinks the panel). Fired 3x live in q1.
+- q1 (qwen3.8-27b, before the helpers, SUCCESS 66.3°, 42 min): ignored `lever_grasp`, ~8 grasps
+  closed on nothing, wrong rotations.
+- **`lever_grasp`** in `estimate_door_plane`: bar points 7-16 cm proud of the face on the hinge side
+  of the rose; middle of the seen span, z = median - 1.5 cm; rotation across the bar. Offline 1.5 cm
+  from the true lever middle; same point for anchors 8 cm off.
+- **`open_door(handle)`** (one call; also `grasp_door_lever`, `push_door`): plane -> mid-lever grasp
+  (+-2 cm retries, holding + width check, 3 cm press) -> `guarded_pull` -> release + lift -> depth angle;
+  until >= 65° (60 + depth error): door >= 30° -> push from behind without a grasp (`push_door`), else
+  re-grasp at the lever swung about the hinge. Re-grasping a swinging lever at ~21° missed 3x and
+  knocked the door shut (od2), hence the push path.
+
+| harness (PyBullet, `--vision --vision-grasp --open-door`) | anchor err | door (truth) |
+|---|---|---|
+| vg1 / vg3 (grasp only + guarded_pull) | 0 | 60.9 / 61.2 |
+| vg2 | -8,+2,+1 cm | 1.6 (push_blocked) |
+| od1 / od3 | 0 / 3 cm | 60.3 / 59.4 (one pull) |
+| od2 (old loop) | -8 cm | 52.8 (re-grasp at 21° missed, door knocked shut) |
+| od4 / od5 (`--start-deg` 40 / 50, push_door) | 0 | 87.7 / 90.0 |
+| od6 / od7 (new loop) | -8 cm / 0 | 63.7 / 63.1 (one pull) |

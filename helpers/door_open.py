@@ -45,6 +45,28 @@ def _line(a, b, step=0.01):
     return [list(a + (b - a) * (i / n)) for i in range(1, n + 1)]
 
 
+def _approach(api, plane, door_deg, target, rot, desc, front_m=0.15):
+    """Hand to ``target`` (fingertip xyz) without crossing the panel: up above the panel top, over to
+    ``front_m`` in front of the (swung) face, down, then in horizontally. A diagonal path from high up to
+    the hover point under the panel top knocked a 21-31 deg door shut (harness od2, door:hidden q2)."""
+    from common_utils import Trajectory
+    dz = config.gripper_depth_offset_franka
+    n = np.asarray(plane["pull_dir"][:2], float)
+    if door_deg and abs(door_deg) > 1.0:
+        n = _rot_about(n, np.zeros(2), _open_sign(plane) * math.radians(abs(door_deg)))
+    top = plane.get("top_z")
+    safe = (float(top) + 0.06) if top is not None else float(target[2]) + 0.30
+    tip = np.asarray(api.get_robot_state()["eef_pos"], float)
+    x, y, z = (float(v) for v in target)
+    fx, fy = x + front_m * n[0], y + front_m * n[1]
+    a = [tip[0], tip[1], tip[2] + dz, rot]
+    up = [tip[0], tip[1], max(tip[2], safe) + dz, rot]
+    over = [fx, fy, max(tip[2], safe) + dz, rot]
+    down = [fx, fy, z + dz, rot]
+    api.execute_trajectory(Trajectory(_line(a, up, 0.02) + _line(up, over, 0.02) + _line(over, down, 0.02)
+                                      + _line(down, [x, y, z + dz, rot], 0.01), desc))
+
+
 def grasp_door_lever(api, plane, door_deg=0.0, offsets=(0.0, 0.02, -0.02), clear_z=0.12, press_m=0.03):
     """Top-down grasp at the depth-measured lever middle, fingers across the bar; checks
     ``gripper_holding`` and the finger width, and retries +-2 cm along the bar. ``press_m``: press the
@@ -62,12 +84,9 @@ def grasp_door_lever(api, plane, door_deg=0.0, offsets=(0.0, 0.02, -0.02), clear
     for k, off in enumerate(offsets):
         x, y, z = np.asarray(g["xyz"], float) + np.r_[off * u, 0.0]
         api.open_gripper()
-        tip = np.asarray(api.get_robot_state()["eef_pos"], float)
-        cur = [tip[0], tip[1], tip[2] + dz, rot]
-        up = [tip[0], tip[1], max(tip[2], z + clear_z) + dz, rot]
         above = [x, y, z + clear_z + dz, rot]
         down = [x, y, z + dz, rot]
-        api.execute_trajectory(Trajectory(_line(cur, up, 0.02) + _line(up, above, 0.02), f"door lever: above try {k}"))
+        _approach(api, plane, door_deg, (x, y, z + clear_z), rot, f"door lever: above try {k}")
         api.execute_trajectory(Trajectory(_line(above, down, 0.005), f"door lever: descend try {k}"))
         api.close_gripper()
         st = api.get_robot_state()
@@ -109,13 +128,10 @@ def push_door(api, plane, door_deg, max_deg=85.0, hover=0.12):
     g0, gn = plane["lever_grasp"], lever_grasp_now(plane, door_deg)
     c, o = np.asarray(plane["hinge"], float), np.asarray(g0["xyz"][:2], float)
     sgn = _arc_sign(c, o, np.asarray(plane["pull_dir"][:2], float))
-    z, rot, dz = float(g0["xyz"][2]), float(gn["rotation"]), config.gripper_depth_offset_franka
+    z, rot = float(g0["xyz"][2]), float(gn["rotation"])
     x, y = gn["xyz"][:2]
     api.open_gripper()
-    tip = np.asarray(api.get_robot_state()["eef_pos"], float)
-    up = [tip[0], tip[1], max(tip[2], z + hover) + dz, rot]
-    api.execute_trajectory(Trajectory(_line([tip[0], tip[1], tip[2] + dz, rot], up, 0.02)
-                                      + _line(up, [x, y, z + hover + dz, rot], 0.02), "door: over the swung lever"))
+    _approach(api, plane, door_deg, (x, y, z + hover), rot, "door: over the swung lever")
     return push_open(api, c, sgn, float(np.linalg.norm(o - c)), math.atan2(y - c[1], x - c[0]),
                      math.atan2(o[1] - c[1], o[0] - c[0]), z, rot, max_deg=max_deg, route="around",
                      log=lambda m: api.logger.info(f"[door_open] {m}"))

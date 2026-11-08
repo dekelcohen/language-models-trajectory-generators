@@ -296,6 +296,9 @@ if args.guarded != "off":
 
         def open_gripper(self):
             call([config.OPEN_GRIPPER], reply=False)
+            if os.environ.get("DOOR_DIAG"):
+                call([config.GET_ROBOT_STATE])
+                print(f"[diag] open_gripper -> door={math.degrees(door_angle()):.1f}", flush=True)
 
         def close_gripper(self):
             call([config.CLOSE_GRIPPER], reply=False)
@@ -324,7 +327,8 @@ if args.guarded != "off":
                 k = getattr(self, "k", 0)
                 self.k = k + 1
                 lever_yaw = math.degrees(math.atan2(ld[1], ld[0]))
-                print(f"[diag] k={k} door={math.degrees(door_angle()):.1f} cmd_rot={math.degrees(pts[-1][3]):.1f} "
+                print(f"[diag] k={k} {getattr(traj, 'desc', '')!r} door={math.degrees(door_angle()):.1f} "
+                      f"tip={np.round(st_['eef_pos'], 3).tolist()} cmd_rot={math.degrees(pts[-1][3]):.1f} "
                       f"meas_rot={None if st_.get('rotation') is None else round(math.degrees(st_['rotation']), 1)} "
                       f"lever_yaw={lever_yaw:.1f} w={st_.get('gripper_width')} "
                       f"tip-lever={np.round((np.asarray(st_['eef_pos']) - grip_pt) * 1000, 0).tolist()}mm", flush=True)
@@ -378,8 +382,12 @@ if args.guarded != "off":
         door_open._release_and_clear(_api)
         if args.start_deg and args.sim == "pybullet":  # scene setup: a partly open door (test push_door)
             import pybullet as pb
+            tip0 = np.asarray(call([config.GET_ROBOT_STATE])["eef_pos"], float)
+            high = [tip0[0], tip0[1], max(tip0[2], 1.05) + DZ, rot]   # above the panel: a reset into the hand ejects the door
+            call([config.EXECUTE_TRAJECTORY, lin(list(tip0 + [0, 0, DZ]) + [rot], high, step=0.02)])
             pb.resetJointState(DOOR, HINGE, math.radians(args.start_deg))
-            call([config.EXECUTE_TRAJECTORY, [list(np.asarray(call([config.GET_ROBOT_STATE])["eef_pos"]) + [0, 0, DZ]) + [rot]]])
+            print(f"[door] reset -> {math.degrees(door_angle()):.1f} deg (hand tip {np.round(tip0, 3).tolist()})", flush=True)
+            call([config.EXECUTE_TRAJECTORY, [high]])
             print(f"[door] start angle set to {math.degrees(door_angle()):.1f} deg", flush=True)
         res = door_open.open_door(_api, list(lp))
         print(f"[door] open_door -> {json.dumps({k: v for k, v in res.items() if k != 'plane'}, default=str)}", flush=True)

@@ -80,6 +80,20 @@ def _push_around(api, c, sgn, r_grip, a_grip, a_start, z, rot, max_deg, r_push, 
     tip = go(tip[:2], z + hover, "push_open: lift off the handle")
     a_h = math.atan2(tip[1] - c[1], tip[0] - c[0])
     yaw_h = rot[0]
+    h_deg = hand_deg(tip[:2])
+    # The released panel can fall back on the lift (it leaned on the forearm; harness od12/od13: 27 -> 9 deg),
+    # and coming in at the old angle then lands IN FRONT of it and pushes it shut. Look first (head depth).
+    door_m = None
+    if callable(getattr(api, "measure_door_angle", None)):
+        try:
+            door_m = api.measure_door_angle()
+        except Exception as e:  # noqa: BLE001 - a failed look falls back to the hand angle
+            log(f"push_open(around): measure_door_angle failed: {e}")
+    if door_m is not None:
+        log(f"push_open(around): door measured at {door_m:.0f} deg after the release (hand {hand_deg(tip[:2]):.0f})")
+        if door_m < min_open_deg + 8.0:
+            log("push_open(around): the door fell back; not going round (re-grasp it instead)")
+            return "door_fell_back", 0.0
 
     def turn(a):                                        # same yaw-follows-arc rule as guarded_pull
         rot[0] = yaw_h + sgn * math.remainder(a - a_h, 2 * math.pi)
@@ -94,6 +108,8 @@ def _push_around(api, c, sgn, r_grip, a_grip, a_start, z, rot, max_deg, r_push, 
         log(f"push_open(around): reached only r={r_got:.2f} of {r_out:.2f} m (arm reach); not going round")
         return "push_blocked", 0.0
     a_b = a_h - sgn * math.radians(behind_deg)
+    if door_m is not None and door_m < h_deg:
+        a_b = a_start + sgn * math.radians(door_m - behind_deg)    # behind the measured panel
     a_min = a_start + sgn * math.radians(min_open_deg)
     if sgn * (a_b - a_min) < 0:
         a_b = a_min
