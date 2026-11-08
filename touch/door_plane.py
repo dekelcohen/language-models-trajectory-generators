@@ -14,6 +14,8 @@ door:hidden r3 (2026-11-08): the LLM guessed the door plane ~35 deg off and put 
 the wrong side; perception's "door" box was 5 cm wide and the "hinge" box was the handle.
 """
 
+import math
+
 import numpy as np
 
 
@@ -135,6 +137,23 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
     hinge = foot + far * t
     free = foot + near * t
     rose = foot + ref_s * t
+    # Lever grasp: the bar 7-16 cm proud of the face on the hinge side of the rose. Points crowd near
+    # the rose, so take the middle of the seen span (offline door:hidden: 1.5 cm from the true middle);
+    # the head camera sees the bar's top, so drop ~1.5 cm to its centre line.
+    grasp = None
+    if rose_s is not None:
+        u = np.sign(far - ref_s) * t
+        offr = (P3[:, :2] - rose) @ nrm
+        sr = (P3[:, :2] - rose) @ u
+        lev = (offr > 0.07) & (offr < 0.16) & (sr > 0.03) & (sr < 0.35) & (np.abs(P3[:, 2] - h[2]) < 0.1)
+        if int(lev.sum()) >= min_rose_pts:
+            lo, hi = np.percentile(sr[lev], [5, 95])
+            gxy = rose + 0.5 * (lo + hi) * u + float(np.median(offr[lev])) * nrm
+            rot = math.atan2(u[1], u[0]) + math.pi / 2           # fingers close across the bar
+            rot = (rot + math.pi / 2) % math.pi - math.pi / 2
+            grasp = {"xyz": [round(float(gxy[0]), 3), round(float(gxy[1]), 3),
+                             round(float(np.median(P3[lev, 2])) - 0.015, 3)],
+                     "rotation": round(rot, 3), "lever_len_m": round(float(hi - lo), 3), "n": int(lev.sum())}
     return {
         "pull_dir": [round(float(nrm[0]), 3), round(float(nrm[1]), 3), 0.0],
         "tangent": [round(float(t[0]), 3), round(float(t[1]), 3), 0.0],
@@ -145,6 +164,7 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
         "width_m": round(abs(far - near), 3),
         "face_offset_m": round(face_off, 3),
         "rose": [round(float(rose[0]), 3), round(float(rose[1]), 3)] if rose_s is not None else None,
+        "lever_grasp": grasp,
         "n_inliers": int(len(inl)),
         "side_ratio": round(float(ratio), 2),
         "confident": bool(ratio >= 1.3 and len(inl) >= 80),

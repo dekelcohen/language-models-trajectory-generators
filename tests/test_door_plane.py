@@ -33,6 +33,16 @@ def test_door_plane_finds_the_hinge_from_the_rose_when_given_the_lever_tip():
     assert plane and abs(plane["hinge"][0]) < 0.03 and plane["confident"]
 
 
+def test_door_plane_gives_a_mid_lever_grasp_across_the_bar():
+    """Lever bar 0.11 m proud of the face, from the rose (x 0.42) 0.2 m toward the hinge, centre z 0.65."""
+    rose = np.asarray([[x, -0.03, z] for x in np.arange(0.40, 0.45, 0.01) for z in np.arange(0.63, 0.68, 0.01)])
+    bar = np.asarray([[x, -0.11, 0.665] for x in np.arange(0.22, 0.42, 0.005) for _ in range(2)])
+    pts = np.vstack([_panel([0.0, 0.0], 0.5, 0), _jamb(0.54, 0.64), rose, bar])
+    g = estimate_door_plane(pts, [0.3, -0.11, 0.66], cam_xy=[0.3, -1.0])["lever_grasp"]
+    assert g and np.allclose(g["xyz"], [0.32, -0.11, 0.65], atol=0.02)
+    assert abs(abs(g["rotation"]) - np.pi / 2) < 0.05          # closing axis along y, across the x bar
+
+
 def test_measure_door_angle_sees_a_door_that_swung_back_shut():
     plane = estimate_door_plane(np.vstack([_panel([0.0, 0.0], 0.5, 0), _jamb(0.54, 0.64)]),
                                 [0.4, -0.06, 0.65], cam_xy=[0.3, -1.0])

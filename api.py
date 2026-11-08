@@ -1042,7 +1042,7 @@ class API:
 
         ``handle`` = world [x, y, z] of the door handle (any point on it; the rose where it meets the
         door is located from depth). Returns the plane dict (``pull_dir``, ``hinge``, ``free_edge``, ``rose``, ``side_ratio``,
-        ``confident`` ...) or None (no vertical face visible - clear occluders first). The plane is
+        ``confident``, ``lever_grasp`` = {``xyz``, ``rotation``} mid-lever top-down grasp ...) or None (no vertical face visible - clear occluders first). The plane is
         remembered: a following ``guarded_pull`` re-checks the door angle from depth."""
         from touch.door_plane import depth_to_world, estimate_door_plane
         _, depth = self._capture_head_image_and_depth()

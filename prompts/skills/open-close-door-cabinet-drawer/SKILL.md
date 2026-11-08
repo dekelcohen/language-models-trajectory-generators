@@ -45,6 +45,12 @@ From the SCENE ANALYSIS, the affordance points (prefer the top-ranked point) and
   handle, and the guessed hinge was on the wrong side). Use them for the tip-direction sign
   below and in `guarded_pull(direction=p["pull_dir"], hinge=p["hinge"])`. `None` = no door face
   visible (something still occludes it).
+  `p["lever_grasp"]` (when not None) = `{"xyz", "rotation"}`: a top-down grasp at the lever's middle
+  and centre line, fingers across the bar, measured from depth (~1.5 cm from the true middle).
+  Use it as the grasp target (above it at +0.10 m, descend, close) instead of the box centre /
+  the shifted-xy recipe below (door:hidden r7: hand-placed grasps closed on nothing 3 times).
+  If the close still misses, lift, re-run `estimate_door_plane` with the arm out of view and
+  try +-0.02 m along the bar.
 
 Then follow exactly one of sections 2, 3 or 4, and check section 2b for the approach
 direction.

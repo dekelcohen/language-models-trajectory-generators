@@ -315,3 +315,24 @@ Open:
   detectable as `swung_shut`. Push still stalls at ~63-64° hand angle (marginal vs 60°).
 - Root of the remaining failures: the forearm (`panda_link5`) presses the panel (800-1500 N) during the
   pull; when the grip slips, it pushes the door shut.
+
+## 2026-11-08 (night): agent rollouts with the depth door model (opus, `--attempts 2 --max-planner-iter 4`)
+| run | result | door (truth) | time | what happened |
+|---|---|---|---|---|
+| r4 | SUCCESS | 73.9° | 21 min (r1: 38) | plane + hinge from depth, pull + push; `swung_shut` caught live once (73° swept vs 6° depth), re-pulled |
+| r5 | FAIL | - | stopped | LLM anchored `estimate_door_plane` at the lever TIP: side ratio 1.09 -> wrong hinge side; `measure_door_angle` used 8-16 pts (garbage) |
+| r6 | FAIL | 71.7° | stopped | door opened, then the LLM re-ran `estimate_door_plane` on the OPEN door (overwrote the closed reference) -> angle None/0 -> reviewer failed it ("angle could not be measured") |
+| r7 | (see below) | | | correct side; several grasps `closed_on_nothing`; re-pull reached 25.8° |
+
+Fixes after r5/r6:
+- **Hinge side from the rose bump**: points 1-6 cm proud of the face within 0.3 m of the anchor = the rose/
+  lever; hinge = the panel end FARTHER from the rose. Any anchor along the handle now works (offline: 19/21
+  anchors correct, 2 return None, 0 wrong).
+- `measure_door_angle` requires >= 25 points in the best bin (else None).
+- **Closed-face reference is kept**: a re-estimate while the door is > 10° open returns the original plane
+  plus `door_open_deg`.
+- **Reviewer evidence**: `_door_angle_review_evidence` adds "DOOR ANGLE (head depth camera): X°" to the
+  review prompt, so the reviewer doesn't have to judge the angle from an image; `partly_open` outcome
+  (< 55° by depth).
+- Remaining: the grasp itself is LLM-placed (z / offset along the lever) and misses often (r7). Next: a
+  deterministic grasp point from the rose + plane (mid-lever, ~0.10 m proud of the face, rose z).

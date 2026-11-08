@@ -56,6 +56,8 @@ ap.add_argument("--gp-kw", default="", help="--guarded: extra guarded_pull kwarg
 ap.add_argument("--hinge-shift", default="", help="--guarded: add dx,dy (m) to the hinge hint (a bad LLM guess)")
 ap.add_argument("--vision", action="store_true",
                 help="--guarded: pull normal + hinge from touch.door_plane on the head depth (rosette anchor)")
+ap.add_argument("--vision-grasp", action="store_true",
+                help="with --vision --approach top: grasp at the plane's lever_grasp (xyz + rotation)")
 ap.add_argument("--guarded", default="off", choices=("off", "right", "wrong", "line"),
                 help="open with helpers.guarded_pull: hinge hint on the (eval) right side, mirrored to the "
                      "wrong side, or none (straight pull along --dir, hinge fitted from the hand path)")
@@ -191,6 +193,11 @@ DZ = config.gripper_depth_offset_franka
 # rotation that closes the fingers across the bar: the closing axis at rot 0 is the hand's x
 rot = math.atan2(lever_dir[1], lever_dir[0]) + math.pi / 2
 rot = (rot + math.pi / 2) % math.pi - math.pi / 2
+if args.vision_grasp and VISION and VISION.get("lever_grasp"):
+    seen = np.asarray(VISION["lever_grasp"]["xyz"], float)
+    rot = float(VISION["lever_grasp"]["rotation"])
+    print(f"[door] vision grasp {seen.round(3).tolist()} rot {rot:.3f} (true mid {np.round(lever_mid, 3).tolist()}, "
+          f"err {np.linalg.norm(seen - lever_mid):.3f} m)", flush=True)
 d0 = {"normal": normal, "tangent": tangent}.get(args.dir)
 if d0 is None:                                       # skew: 30 deg away from the hinge side
     c, s = math.cos(math.radians(30)), math.sin(math.radians(30))
