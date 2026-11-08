@@ -259,7 +259,7 @@ The system talks to several third-party APIs. **Which keys you need depends enti
 | `AWS_PROFILE`, `AWS_REGION` | Any AWS Bedrock model is used. `AWS_PROFILE` selects the local AWS credentials profile (default `default`), `AWS_REGION` the Bedrock region (default `eu-central-1`) | Your AWS account / `aws configure` |
 | `AWS_BEDROCK_GUARDRAIL_ID` | Optional, Bedrock only — applies a Bedrock Guardrail to each invocation (with optional `AWS_BEDROCK_GUARDRAIL_VERSION`, default `DRAFT`) | AWS Bedrock console |
 | `MOONDREAM_API_KEY` | `--seg-provider moondream` (the default segmentation provider) | [moondream.ai](https://moondream.ai/) console |
-| `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT_NAME` | Any model prefixed with `azure-` is used, e.g. the default `-lm azure-gpt-5` | Your Azure OpenAI resource |
+| `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT_NAME` | Any model prefixed with `azure-` is used, e.g. `-lm azure-gpt-5` (the default is `copilot-claude-opus-5.5`) | Your Azure OpenAI resource |
 | `OPENAI_API_KEY` | Plain OpenAI models (e.g. `-lm gpt-4o`) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
 
 Using `--seg-provider langsam` runs locally and needs no key.

@@ -9,9 +9,13 @@ Two modes (``SlipGuardConfig.mode``):
 
 Checks, one sample per waypoint, all available on a real Franka:
 
-* **width** (hold) - Franka Hand width: the fingers closed on air (< ``air_width``) or closed
-  ``width_drop`` further than at the grasp (the part slid out between them), or the part forced
-  them ``width_rise`` open (it is jammed against the motion). Trips alone.
+* **width** (hold) - Franka Hand width: the fingers closed on air (< ``air_width``) or the part
+  forced them ``width_rise`` open (it is jammed against the motion). Trips alone. The reference
+  width is the median of the first ``baseline_n`` held samples (the reading right after a close
+  is a transient: 17.9 mm vs a settled 33 mm on the door lever). A closing of more than
+  ``width_drop`` that stays above ``air_width`` does NOT trip alone: fingers rolling on a round
+  lever swing 26-39 mm while still holding it (PyBullet harness, 80 deg pull), which tripped
+  good pulls at 9-15 deg. It is noted and corroborates the touch check.
 * **tracking** - camera tracking of the part (only when a trusted, measured track exists):
   the part moved more than ``track_max_dist`` further from the fingers than at arming. Trips alone.
 * **touch** - external force from the joint torques (``O_F_ext_hat_K``): a load that built up
@@ -40,9 +44,10 @@ import numpy as np
 class SlipGuardConfig:
     mode: str = "hold"              # hold | push
     air_width: float = 0.005        # m: fingers (nearly) closed on nothing
-    width_drop: float = 0.008       # m closed further than at the grasp (fingers rolling on a round
-                                    # lever swing the width by ~6 mm while still holding)
+    width_drop: float = 0.008       # m closed further than the reference: noted + corroborates a load
+                                    # loss, never trips alone (a rolling lever swings the width ~13 mm)
     width_rise: float = 0.02        # m the fingers were forced open (the part pries them: jammed path)
+    baseline_n: int = 3             # held-width samples whose median is the reference width
     partial_drop: float = 0.0015    # m: corroborates a load loss
     track_max_dist: float = 0.06    # m the tracked part moved further from the fingers since arming
     load_on: float = 8.0            # N felt while carrying / pulling / pushing: arms the touch check
@@ -67,6 +72,7 @@ class GraspSlipGuard:
         """``width`` None (e.g. push with an open hand) disables the width check."""
         self.armed = True
         self.w0 = None if width is None else float(width)
+        self.w_seen = [] if width is None else [float(width)]
         self.p0 = np.asarray(ee_pos, float)
         self.p_last = self.p0.copy()
         self.cmd_last = None
@@ -130,16 +136,21 @@ class GraspSlipGuard:
 
     def _checks(self, c, push, p, width, load, track_dist, track_name):
         if width is not None and self.w0 is not None:
+            if len(self.w_seen) < c.baseline_n and width >= c.air_width:
+                self.w_seen.append(float(width))
+                self.w0 = float(np.median(self.w_seen))
             drop = self.w0 - width
+            settled = len(self.w_seen) >= c.baseline_n
             self.n_width = self._count("width", self.n_width,
-                                       width < c.air_width or drop > c.width_drop or -drop > c.width_rise)
+                                       width < c.air_width or (settled and -drop > c.width_rise))
             if self.n_width >= c.confirm:
                 why = (f"the fingers closed on air ({width * 1000:.1f} mm)" if width < c.air_width else
                        f"the held part forced the fingers {-drop * 1000:.0f} mm open ({self.w0 * 1000:.1f} -> "
-                       f"{width * 1000:.1f} mm): it is jammed against this motion" if -drop > c.width_rise else
-                       f"the fingers closed {drop * 1000:.1f} mm further than at the grasp "
-                       f"({self.w0 * 1000:.1f} -> {width * 1000:.1f} mm)")
+                       f"{width * 1000:.1f} mm): it is jammed against this motion")
                 return self._verdict("width", why, p, width, load, track_dist, track_name)
+            if settled and drop > c.width_drop and not any(n.startswith("fingers closed") for n in self.notes):
+                self.notes.append(f"fingers closed {drop * 1000:.1f} mm ({self.w0 * 1000:.1f} -> "
+                                  f"{width * 1000:.1f} mm) but still hold something")
 
         if track_dist is not None:
             self.n_track = self._count("tracking", self.n_track, track_dist > c.track_max_dist)

@@ -76,6 +76,19 @@ CONTINUE_TASK_PROMPT = (
     "or the attempt cannot continue (the reviewer judges the result; a failed review starts a new attempt)."
 )
 
+# Printed output of one code block fed back to the LLM: longer output keeps its head and tail.
+PRINT_OUTPUT_MAX_CHARS = 6000
+_PRINT_HEAD_CHARS = 1500
+
+
+def _truncate_print_output(s, max_chars=PRINT_OUTPUT_MAX_CHARS, head=_PRINT_HEAD_CHARS):
+    """Keep the first ``head`` and the last (max_chars - head) chars of a long block output
+    (the tail usually holds the block's results), with a marker for what was cut."""
+    if len(s) <= max_chars:
+        return s
+    tail = max_chars - head
+    return (s[:head] + f"\n[... {len(s) - max_chars} chars of printed output omitted ...]\n" + s[-tail:])
+
 
 # --- Prompt helper ------------------------------------------------------
 def prepend_to_initial_command(command, args, logger):
@@ -763,9 +776,12 @@ def execute_python_blocks(ctx, task, assistant_content):
       5. Blocks skipped because of case 2     -> BLOCKS_NOT_EXECUTED_PROMPT telling the LLM
                                                 exactly which blocks never ran.
       6. load_skill()/read_file() called      -> the requested text is appended VERBATIM to the
-                                                feedback, bypassing the <2000 char print cap
-                                                below (a skill body would otherwise be dropped
-                                                silently and the LLM would act without it).
+                                                feedback, bypassing the print cap below (a skill
+                                                body would otherwise be truncated and the LLM
+                                                would act without it).
+      7. Block prints more than PRINT_OUTPUT_MAX_CHARS -> the head and the tail are kept with an
+                                                "[... N chars omitted ...]" marker (dropping it all
+                                                made the LLM think the block printed nothing).
 
     Returns: str feedback prompt for the next user turn (may be "").
     Side effects: runs robot actions; may set task.completed_task / task.failed_task.
@@ -811,10 +827,25 @@ def execute_python_blocks(ctx, task, assistant_content):
             feedback += ERROR_CORRECTION_PROMPT.replace("[INSERT BLOCK NUMBER]", str(block_number)).replace("[INSERT ERROR MESSAGE]", error_message)
             feedback += "\n"
             error = True
+        except SystemExit:
+            # LLM code used `raise SystemExit` / exit() to "abort": it used to kill the whole run
+            # (door:hidden r2, 2026-11-08). Stop only this block; keep what it printed.
+            logger.info(WARNING + f"[exec] block {block_number} raised SystemExit; stopping this response's "
+                        "blocks (the run continues)" + ENDC)
+            s = f.getvalue()
+            if s:
+                printed_outputs.append(_truncate_print_output(s) if len(s) > PRINT_OUTPUT_MAX_CHARS else s)
+            feedback += (f"Code block {block_number} raised SystemExit: that only stops the code block (later "
+                         "blocks were skipped). To end the attempt call task_completed() or task_failed().\n")
+            error = True
         else:
             executed_blocks += 1
             s = f.getvalue()
-            if s != "" and len(s) < 2000:
+            if s != "":
+                if len(s) > PRINT_OUTPUT_MAX_CHARS:     # truncate, never drop: a silent block misleads the LLM
+                    logger.info(WARNING + f"[exec] block {block_number} printed {len(s)} chars; truncated to "
+                                f"{PRINT_OUTPUT_MAX_CHARS} (head + tail) for the LLM" + ENDC)
+                    s = _truncate_print_output(s)
                 printed_outputs.append(s)
 
     if printed_outputs:
@@ -1267,7 +1298,7 @@ def _run_planner_code_blocks(messages, planner_locals, skills=None, carried=None
                     f = StringIO()
                     with redirect_stdout(f):
                         exec(code, exec_env)
-                except Exception:
+                except (Exception, SystemExit):   # SystemExit from LLM code must not end the run
                     error_message = traceback.format_exc()
                     new_prompt += ERROR_CORRECTION_PROMPT.replace("[INSERT BLOCK NUMBER]", str(block_number)).replace("[INSERT ERROR MESSAGE]", error_message)
                     new_prompt += "\n"

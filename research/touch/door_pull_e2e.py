@@ -13,6 +13,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import threading
@@ -51,6 +52,7 @@ ap.add_argument("--arc-yaw", action="store_true", help="--arc: turn the wrist wi
 ap.add_argument("--arc-wrong", action="store_true", help="--arc: swing the WRONG way (wrong hinge side) -> grasp-slip guard test")
 ap.add_argument("--hinge-err", type=float, default=0.0, help="--arc: hinge estimate pushed this far (m) further from the handle")
 ap.add_argument("--debug", action="store_true", help="trace each regrasp phase (eval door angle + image)")
+ap.add_argument("--gp-kw", default="", help="--guarded: extra guarded_pull kwargs k=json,k=json, e.g. follow_yaw=false,step=0.015")
 ap.add_argument("--guarded", default="off", choices=("off", "right", "wrong", "line"),
                 help="open with helpers.guarded_pull: hinge hint on the (eval) right side, mirrored to the "
                      "wrong side, or none (straight pull along --dir, hinge fitted from the hand path)")
@@ -289,6 +291,34 @@ if args.guarded != "off":
                 print(f"[door] guard trip {g['check']} at {g['slip_pos']} door={math.degrees(door_angle()):.1f}deg "
                       f"reacq={g.get('reacquired')}", flush=True)
             out = {"eef_pos": call([config.GET_ROBOT_STATE])["eef_pos"]}
+            if os.environ.get("DOOR_DIAG"):            # eval-only per-step trace: lever vs hand
+                lp_, RL_ = frame(latch_link)
+                ld = RL_[:, 0]
+                grip_pt = lp_ + RL_ @ np.array([0.1 + (args.grip_x - 0.1), -0.15, 0.0])
+                st_ = call([config.GET_ROBOT_STATE])
+                k = getattr(self, "k", 0)
+                self.k = k + 1
+                lever_yaw = math.degrees(math.atan2(ld[1], ld[0]))
+                print(f"[diag] k={k} door={math.degrees(door_angle()):.1f} cmd_rot={math.degrees(pts[-1][3]):.1f} "
+                      f"meas_rot={None if st_.get('rotation') is None else round(math.degrees(st_['rotation']), 1)} "
+                      f"lever_yaw={lever_yaw:.1f} w={st_.get('gripper_width')} "
+                      f"tip-lever={np.round((np.asarray(st_['eef_pos']) - grip_pt) * 1000, 0).tolist()}mm", flush=True)
+                if args.sim == "pybullet":
+                    import pybullet as pb
+                    cs = {}
+                    for b in range(pb.getNumBodies()):
+                        if b == DOOR:
+                            continue
+                        for c in pb.getContactPoints(bodyA=b, bodyB=DOOR):
+                            nm = pb.getJointInfo(b, c[3])[12].decode() if c[3] >= 0 else "base"
+                            dl = pb.getJointInfo(DOOR, c[4])[12].decode() if c[4] >= 0 else "base"
+                            key = f"{nm}->{dl}"
+                            cs[key] = round(cs.get(key, 0) + c[9], 1)
+                    print(f"[diag]    contacts {cs}", flush=True)
+                if k % 2 == 0:
+                    call([config.CAPTURE_IMAGES])
+                    shutil.copy(config.rgb_image_head_path, os.path.join(args.out, f"diag_head_{k:02d}.png"))
+                    shutil.copy(config.rgb_image_wrist_path, os.path.join(args.out, f"diag_wrist_{k:02d}.png"))
             if g:
                 out["guard"] = g
             return out
@@ -300,7 +330,7 @@ if args.guarded != "off":
     if args.guarded != "line":
         h = hinge[:2] if args.guarded == "right" else 2 * (seen[:2] + np.dot(hinge[:2] - seen[:2], normal[:2]) * normal[:2]) - hinge[:2]
     print(f"[door] guarded_pull hinge hint {None if h is None else np.round(h, 3).tolist()} dir {np.round(d0, 3).tolist()}", flush=True)
-    res = guarded_pull(_GuardApi(), direction=list(d0), hinge=None if h is None else list(h))
+    res = guarded_pull(_GuardApi(), direction=list(d0), hinge=None if h is None else list(h), **{k: json.loads(v) for k, v in (kv.split("=", 1) for kv in re.split(r",(?=\w+=)", args.gp_kw) if kv)})
     print(f"[door] guarded_pull -> {json.dumps({k: v for k, v in res.items() if k != 'events'})}", flush=True)
 elif args.touch:
     from touch import recovery

@@ -1,0 +1,172 @@
+<!doctype html>
+<!--
+Static viewer for the private HF dataset RoboTrick/vlm_traj_rollouts (layout written by
+helpers/rollout_report.py: rollouts/<date>/<run>/{summary.md, vlm_traj.log, videos/*.mp4, *.png,
+s<k>_a<n>/*.png, perception/*.png}). Runs fully in the browser: sign in with HF (OAuth,
+read-repos scope) or paste a read token. Static Space because Gradio Spaces need a paid plan.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VLM trajectory rollouts</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; display: flex; height: 100vh; }
+  #side { width: 340px; overflow-y: auto; border-right: 1px solid #ddd; padding: 8px; box-sizing: border-box; }
+  #main { flex: 1; overflow-y: auto; padding: 12px 18px; }
+  .run { padding: 4px 6px; cursor: pointer; border-radius: 4px; font-size: 13px; word-break: break-all; }
+  .run:hover { background: #eef; } .run.sel { background: #dde; font-weight: 600; }
+  .date { margin-top: 10px; font-weight: 700; color: #555; }
+  .ok { color: #070; } .fail { color: #a00; }
+  .tabs button { margin-right: 4px; } .tabs button.sel { font-weight: 700; }
+  .gal { display: flex; flex-wrap: wrap; gap: 8px; }
+  .gal figure { margin: 0; width: 300px; } .gal img { width: 300px; cursor: zoom-in; }
+  .gal figcaption { font-size: 11px; word-break: break-all; }
+  pre { white-space: pre-wrap; font-size: 12px; background: #f6f6f6; padding: 8px; }
+  video { max-width: 100%; max-height: 70vh; }
+  #auth { padding: 8px; background: #ffd; margin-bottom: 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="side">
+  <div id="auth">
+    <button id="login">Sign in with Hugging Face</button>
+    <div style="margin-top:6px">or read token: <input id="tok" type="password" size="16">
+      <button id="usetok">Use</button></div>
+  </div>
+  <div id="runs">Not signed in.</div>
+</div>
+<div id="main"><h2>VLM trajectory rollouts</h2><p>Pick a rollout on the left.</p></div>
+
+<script type="module">
+import { oauthLoginUrl, oauthHandleRedirectIfPresent } from "https://cdn.jsdelivr.net/npm/@huggingface/hub@1/+esm";
+import { marked } from "https://cdn.jsdelivr.net/npm/marked@12/+esm";
+
+const REPO = "RoboTrick/vlm_traj_rollouts";
+const HUB = "https://huggingface.co";
+let TOKEN = sessionStorage.getItem("hf_tok") || "";
+let INDEX = {};
+const cache = new Map();
+const $ = (id) => document.getElementById(id);
+
+async function hub(url) {
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${TOKEN}` } });
+  if (!r.ok) throw new Error(`${r.status} ${url}`);
+  return r;
+}
+
+async function listAll() {
+  let url = `${HUB}/api/datasets/${REPO}/tree/main/rollouts?recursive=true`;
+  const files = [];
+  while (url) {
+    const r = await hub(url);
+    for (const e of await r.json()) if (e.type === "file") files.push(e.path);
+    const m = /<([^>]+)>;\s*rel="next"/.exec(r.headers.get("Link") || "");
+    url = m ? m[1] : null;
+  }
+  return files;
+}
+
+async function blobUrl(path) {
+  if (!cache.has(path)) {
+    const r = await hub(`${HUB}/datasets/${REPO}/resolve/main/${path.split("/").map(encodeURIComponent).join("/")}`);
+    cache.set(path, URL.createObjectURL(await r.blob()));
+  }
+  return cache.get(path);
+}
+async function text(path) {
+  return (await hub(`${HUB}/datasets/${REPO}/resolve/main/${path}`)).text();
+}
+
+async function loadIndex() {
+  $("runs").textContent = "Loading...";
+  INDEX = {};
+  for (const f of await listAll()) {
+    const p = f.split("/");
+    if (p.length < 4) continue;
+    const key = `${p[1]}/${p[2]}`;
+    (INDEX[key] ||= []).push(p.slice(3).join("/"));
+  }
+  const keys = Object.keys(INDEX).sort().reverse();
+  const box = $("runs"); box.innerHTML = "";
+  let lastDate = "";
+  for (const k of keys) {
+    const [date, name] = k.split("/");
+    if (date !== lastDate) { box.insertAdjacentHTML("beforeend", `<div class="date">${date}</div>`); lastDate = date; }
+    const d = document.createElement("div");
+    d.className = "run " + (/SUCCESS/.test(name) ? "ok" : /FAIL/.test(name) ? "fail" : "");
+    d.textContent = name; d.onclick = () => showRun(k, d);
+    box.appendChild(d);
+  }
+  if (!keys.length) box.textContent = "No rollouts found.";
+}
+
+async function showRun(key, el) {
+  document.querySelectorAll(".run").forEach((x) => x.classList.remove("sel")); el?.classList.add("sel");
+  const files = INDEX[key];
+  const groups = ["overview", ...[...new Set(files.filter((f) => f.includes("/") && f.endsWith(".png")).map((f) => f.split("/")[0]))].sort()];
+  const vids = files.filter((f) => f.endsWith(".mp4")).sort();
+  const m = $("main");
+  m.innerHTML = `<h2>${key}</h2><div class="tabs">
+    <button data-t="summary">Summary</button><button data-t="videos">Videos</button>
+    <button data-t="images">Images</button><button data-t="log">Log</button></div><div id="tab"></div>`;
+  const tabs = {
+    summary: async () => files.includes("summary.md") ? marked.parse(await text(`rollouts/${key}/summary.md`)) : "(no summary)",
+    videos: async () => {
+      const opts = vids.map((v) => `<option ${v.endsWith("rgb_image_full.mp4") ? "selected" : ""}>${v}</option>`).join("");
+      setTimeout(async () => {
+        const s = $("vsel"), play = async () => { $("vid").src = await blobUrl(`rollouts/${key}/${s.value}`); };
+        s.onchange = play; if (vids.length) await play();
+      });
+      return `<p>rgb = head camera, wrist = wrist camera; attempt_&lt;first&gt;_&lt;last&gt; = frame range.</p>
+        <select id="vsel">${opts}</select><br><video id="vid" controls autoplay muted></video>`;
+    },
+    images: async () => {
+      const opts = groups.map((g) => `<option>${g}</option>`).join("");
+      setTimeout(async () => {
+        const s = $("gsel"), show = async () => {
+          const g = s.value;
+          // per-candidate segmentation masks are dozens per attempt; hide them to keep the gallery usable
+          const sel = files.filter((f) => f.endsWith(".png") && (g === "overview" ? !f.includes("/") :
+            f.startsWith(g + "/") && !f.includes("bounding_cube_mask"))).sort();
+          $("gal").innerHTML = "Loading...";
+          const html = await Promise.all(sel.map(async (f) => {
+            const u = await blobUrl(`rollouts/${key}/${f}`);
+            return `<figure><a href="${u}" target="_blank"><img src="${u}"></a><figcaption>${f}</figcaption></figure>`;
+          }));
+          $("gal").innerHTML = html.join("") || "(none)";
+        };
+        s.onchange = show; await show();
+      });
+      return `<p>Group: <select id="gsel">${opts}</select> (overview, perception, s&lt;subtask&gt;_a&lt;attempt&gt;)</p><div id="gal" class="gal"></div>`;
+    },
+    log: async () => files.includes("vlm_traj.log")
+      ? `<pre>${(await text(`rollouts/${key}/vlm_traj.log`)).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</pre>` : "(no log)",
+  };
+  const open = async (t) => {
+    m.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("sel", b.dataset.t === t));
+    $("tab").innerHTML = "Loading...";
+    try { $("tab").innerHTML = await tabs[t](); } catch (e) { $("tab").textContent = String(e); }
+  };
+  m.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => open(b.dataset.t)));
+  open("summary");
+}
+
+async function start(tok) {
+  TOKEN = tok; sessionStorage.setItem("hf_tok", tok);
+  try { await loadIndex(); $("auth").style.display = "none"; }
+  catch (e) { $("runs").textContent = "Cannot list the dataset (" + e.message + "). Need read access to " + REPO + "."; }
+}
+
+$("usetok").onclick = () => start($("tok").value.trim());
+$("login").onclick = async () => {
+  window.location.href = await oauthLoginUrl({ scopes: window.huggingface?.variables?.OAUTH_SCOPES || "openid profile read-repos" });
+};
+try {
+  const oauth = await oauthHandleRedirectIfPresent();
+  if (oauth) start(oauth.accessToken);
+  else if (TOKEN) start(TOKEN);
+} catch (e) { $("runs").textContent = String(e); }
+</script>
+</body>
+</html>

@@ -15,6 +15,19 @@ def _touch_recovery():
 
     return recovery
 
+def _estimate_opening(logger):
+    from touch.opening_estimate import estimate_opening, format_estimate
+
+    def estimate_opening_logged(candidates, edge_candidates=None, axis=(1, 0, 0), **kw):
+        est = estimate_opening(candidates, edge_candidates=edge_candidates, axis=axis, **kw)
+        text = format_estimate(est)
+        logger.info(PROGRESS + "[opening] " + text + ENDC)
+        print(text)
+        return est
+
+    return estimate_opening_logged
+
+
 def get_exec_locals(api, logger):
     """Returns the local variables dictionary for the exec environment."""
     # Assuming math and numpy (as np) are imported globally in main.py
@@ -47,6 +60,8 @@ def get_exec_locals(api, logger):
         "get_grasp_info": api.get_grasp_info,
         # Wrist-camera pointing -> 3D candidates; documented only by the touch skill.
         "locate_with_wrist_camera": api.locate_with_wrist_camera,
+        # Robust aggregation of those candidates (median height, outlier rejection); touch skill.
+        "estimate_opening": _estimate_opening(logger),
         # Force-feedback pull / open of a grasped handle; documented only by the touch-pull skill.
         "pull_with_touch": api.pull_with_touch,
         # Opt-in contact guard + guarded pull with real-time correction; documented in main_prompt.

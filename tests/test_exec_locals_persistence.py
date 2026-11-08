@@ -131,6 +131,23 @@ class ExecEnvPersistenceTest(unittest.TestCase):
         )
         self.assertIn("q= 7", feedback)
 
+    def test_long_print_output_is_truncated_not_dropped(self):
+        """>2000 chars used to be dropped whole -> the LLM saw 'no output' and used stale values."""
+        feedback = self.run_turn("print('HEAD ' + 'x' * 9000)\nprint('PORT estimate: [0.09, 0.496, 0.069]')")
+        self.assertIn("HEAD", feedback)
+        self.assertIn("PORT estimate: [0.09, 0.496, 0.069]", feedback)
+        self.assertIn("chars of printed output omitted", feedback)
+        self.assertLess(len(feedback), agent_runner.PRINT_OUTPUT_MAX_CHARS + 1000)
+
+    def test_system_exit_in_llm_code_stops_the_block_not_the_run(self):
+        """door:hidden r2 (2026-11-08): `raise SystemExit` in a block killed main.py."""
+        feedback = agent_runner.execute_python_blocks(
+            self.ctx, self.task,
+            block("print('grasp not load-bearing')\nraise SystemExit") + "\ntext\n" + block("print('SECOND_BLOCK')"))
+        self.assertIn("grasp not load-bearing", feedback)
+        self.assertIn("raised SystemExit", feedback)
+        self.assertNotIn("SECOND_BLOCK", feedback)
+
 
 class PlannerExecEnvTest(unittest.TestCase):
     """Planner scope: one namespace per run_plan() call, isolated between runs."""

@@ -266,3 +266,29 @@ Open:
 - The pole is toppled, never grasped.
 - Door openings are mostly small (9–15°).
 - Width trips at an 8–9 mm drop on the round lever may be FPs (unproven; threshold unchanged).
+
+## 2026-11-08: success = door >= 60°, back-face push in `guarded_pull`, SystemExit crash
+- **Goal change**: the door must open ≥ 60° (a future mobile robot passes through); clearing the pole any
+  way (toppled is fine) counts as success.
+- **Why the pull stops at 18-36°**: the panel swings into the forearm (`panda_link5`); it pries the jaws open
+  (width guard trip, fingers forced 30 → 54 mm) or stalls. No hinge spring (velocity motor, force 2); the
+  forearm closes it a further 0-14° on release.
+- **Rollouts**: r1 (opus) SUCCESS 64° in 38 min with an LLM-written back-face push; r2 (opus) reached 45°
+  then the LLM code `raise SystemExit` killed the process (fixed: `execute_python_blocks` catches it, keeps
+  the output, tells the LLM to use task_completed()/task_failed()).
+- **Deterministic push** (`push_open(route="around")`, now default via `push_after_deg=15`), found with the
+  harness (`DOOR_DIAG=1 door_pull_e2e.py --guarded right --gp-kw ...`), failures in order:
+
+| harness runs | change | door (final) | failure |
+|---|---|---|---|
+| around4 | r_out = r_grip+0.12 | 0° | arcing round at the free-edge radius swept a 37° door shut |
+| around5 | r_out +0.18 | 55° | wrist met the back face coming in; aborted as "blocked" |
+| around6-10 | push from where it stopped; retreat variants | 28-57° (peak 66°) | retreat dragged the door back (~2 kN on the high-friction latch) |
+| around11-13 | push at r_grip-0.10 | 89, 16, 90° | one-shot in-move: the IK path flung the door open or shut |
+| around14-21 | r_out +0.30, stepped in-move, below 0.15 | 0-21° | arm column blocked by the latch spindle (sticks 10 cm out of the back face) |
+| around25-27 | push from the spindle stop, drop-then-slide retreat | 54, 46, 70° | hand rode up over the spindle (below 0.05) |
+| around28-30 | below 0.15 | (pull blocked), 61, 60° (peaks 79, 77) | unloaded drop still lost ~17° |
+| around31-33 | unload 2 cm along the arc first; stall < 2° | (pull 21° -> push_blocked), 65, 74° | - |
+
+- Open: short pulls (16-21°, ~1 in 3) leave no wedge -> `push_blocked`, the LLM must re-grasp and pull again.
+

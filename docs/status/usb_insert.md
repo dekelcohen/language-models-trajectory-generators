@@ -103,3 +103,57 @@ Open: wrist port detection is sparse (terra); `holding` uses finger width only, 
 - Still open:
   - `test_touch_sim_runner::test_finds_offset_hole_and_seats...` gives `over_force` (pre-existing);
   - one success out of 2 runs, so not yet stable.
+
+## 2026-11-08: u3 root causes (Genesis, claude-opus-5.5 / terra / terra, code before the fixes below)
+Run: `images_usb_u3`, packaged to `outputs/2026-11-08/usb_u3_dropped_output_FAIL`.
+- **Pick (subtask 1):** success on attempt 1 (00:20, ~4 min).
+- **Root cause 1: the LLM never saw its own port estimate.**
+  - The view block printed > 2000 chars (all candidates of 4 views), and `execute_python_blocks`
+    dropped any block output >= 2000 chars WHOLE, so the LLM got "executed successfully with no output".
+  - It fell back to the first single candidate (0.096, 0.424, 0.055): 1.4 cm low, 7 cm off along the face.
+  - The 9 on-face candidates it had collected were good: z 0.066-0.072 (median 0.070, truth 0.069).
+  - Fix: long output is truncated to head + tail (6000 chars) with an "N chars omitted" marker, never
+    dropped (`agent_runner.PRINT_OUTPUT_MAX_CHARS`, test `test_long_print_output_is_truncated_not_dropped`).
+- **Root cause 2: hand-rolled candidate aggregation.**
+  - Every LLM wrote its own median / edge-reject code; edge hits were often BELOW the port hits
+    (bad edge pointing), which the skill's "drop within 3 mm of the edge" rule turns into dropping real hits.
+  - Fix: deterministic `estimate_opening(port_cands, edge_cands, axis)` (`touch/opening_estimate.py`):
+    face-plane filter, median z with 4 mm rejection, edge hits used only when the edge is ABOVE the port,
+    returns `search_line` / `search_half` / `search_cross` for `insert_with_touch`. On u3's real
+    candidates: z 0.0703 (1.3 mm), y 1.2 cm off, inside the +-4 cm line search
+    (`tests/test_opening_estimate.py`). The skill now calls it instead of describing the math.
+- **Insert attempt 1:** line search at the wrong height (z 2.3 cm low), only along y -> hooked the
+  base corner (933 N), plug dropped -> `slipped`.
+- **Attempts 2-3:** the plug was on the floor; the LLM chased the fixed stand at (-0.125, 0.443) as if
+  it were the plug, grasps closed on air at ~27 N. (Not fixed yet: the re-pick needs the same
+  "contact > 5 mm above the located part = a support" rule applied to the stand.)
+
+## 2026-11-08: u4, false "slipped" from the seat check (fixed)
+Run: `images_usb_u4`, packaged to `outputs/2026-11-08/usb_u4_false_slipped_seatcheck_FAIL` (stopped manually after attempt 1).
+- **The u3 fixes worked.** `estimate_opening` put the port at (0.091, 0.504, 0.071) / (0.091, 0.488, 0.070)
+  vs truth (0.092, 0.496, 0.069), i.e. < 1 cm, and the LLM used it. Pick OK on attempt 1.
+- **Insert:** the edge finder found two side-edge catches, the column raster seated the plug
+  (advance 7.2 mm), then the 2 mm sideways seat check moved 1.51 mm > `verify_tol` 0.8 mm -> `slipped`.
+  The hand ended at the port; the next motion pulled the hand off the plug (held by the port) and it fell.
+- **Harness repro** (`usb_pipeline_e2e.py --grasp-touch --regrasp --calib touch --err 0.0075,0.0006 --sweep 0.032`,
+  `outputs/touch/e2e_u4err.txt`): truth at the check was **depth 11.5 mm, lateral 0.2 mm (seated)**,
+  but the check moved 0.87 mm -> `slipped`. A false negative.
+- Seat-check data: seated 0.27 (ver2) / 0.87 (e2e_u4err) / 1.51 mm (u4); lost plug 2.4 mm (ver4).
+  **Fix:** `InsertConfig.verify_tol` 0.8 -> 1.8 mm (the slip unit test, a full 2 mm move, still trips).
+- **Eval logging:** `env._touch_insert` now logs `[eval] insert phase verify|done` (truth at the
+  seat check), via the new `run_touch_insert(on_phase=...)` hook. The old end-of-call truth came after
+  the back-off, when a seated plug could already have fallen out. Log only, never sent to the agent.
+
+## 2026-11-08: u5 search window missed the port (fixed); u6 SUCCESS
+- **u5** (`outputs/2026-11-08/usb_u5_search_window_miss_FAIL`): `estimate_opening` kept hits at y 0.462 /
+  0.4713 / 0.498 (truth 0.496) -> median 0.4713; the old `search_half` = spread/2 + 5 mm = 23 mm stopped 2 mm
+  short of the port -> `search_exhausted` twice; the 2.5 cm back-off then tore the plug from the fingers
+  (237 -> 3.6 N, Genesis flung it ~1 m).
+  **Fix** (`touch/opening_estimate.py`): `search_half = clamp(max|hit - median| + 6 mm, 15, 40 mm)`, i.e. the
+  search always reaches the farthest kept hit (`test_u5_search_reaches_the_farthest_kept_hit`).
+- **u6** (`outputs/2026-11-08/usb_u6_search_fix_SUCCESS`, opus-5.5 + terra perception, 12 min):
+  estimate y 0.4773 +- 0.021 (covers the port), seated on attempt 1: plug tip (0.100, 0.496, 0.069) vs port
+  mouth (0.092, 0.496, 0.069) = 8 mm in, released and retreated; the reviewer accepted.
+- Also fixed in `agent_runner`: a long print output was dropped silently (now head + tail), and LLM code
+  calling `raise SystemExit` killed the whole run (now caught, see `document.md` exec table).
+

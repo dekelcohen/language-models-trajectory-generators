@@ -66,7 +66,9 @@ class InsertConfig:
     # more than verify_tol = not in the opening -> "slipped". 0 disables.
     verify_shift: float = 0.002   # m
     verify_s: float = 0.4         # s
-    verify_tol: float = 0.0008    # m
+    verify_tol: float = 0.0018    # m; a plug in the opening moved 0.27 / 0.87 / 1.51 mm (grasp + port
+                                  # compliance; 0.8 mm gave false "slipped" for a fully seated plug,
+                                  # harness e2e_u4err + usb u4 2026-11-08), a lost one 2.4 mm
     # Line search instead of the spiral, for an opening known only along a line (e.g. its height
     # on a face, but not where along the face): raster passes +-sweep_half along sweep_dir (world,
     # made perpendicular to the axis) at spiral_speed; rows step sweep_pitch across it

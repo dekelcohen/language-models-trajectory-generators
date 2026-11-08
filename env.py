@@ -517,6 +517,8 @@ def _slip_guard_sample(sim, robot, i, cmd=None):
             cfg.jam_load = float(spec["max_force"])
         guard = robot.slip_guard = GraspSlipGuard(cfg)
         guard.arm(width if (holding and not robot.gripper_open) else None, pos)
+        if os.environ.get("SLIP_GUARD_TRACE"):
+            print(f"[slip_guard] ARMED i={i} mode={spec['mode']} w0={width} pos={np.round(pos, 3).tolist()}", flush=True)
         if spec.get("part"):
             robot.slip_track_name = spec["part"]
             robot.slip_track_d0 = _held_track(robot)[1]
@@ -620,12 +622,19 @@ def _touch_insert(sim, env, robot, spec, logger):
             cfg = InsertConfig(**{k: (tuple(float(x) for x in v) if isinstance(v, (list, tuple)) else float(v))
                                   for k, v in (spec.get("config") or {}).items()})
             _log_insert_truth(sim, env, robot, spec, logger, "start")
+
+        def _on_phase(ph):
+            # eval-only: the truth when the seat check starts / ends (the end-of-call truth comes
+            # after the back-off, when a plug that was in may already have fallen out)
+            if ph in ("verify", "done"):
+                _log_insert_truth(sim, env, robot, spec, logger, f"phase {ph}")
         res = run_touch_insert(
             sim, robot.id, robot.ee_index, robot.joint_indices[:arm_n], list(robot.gripper_joint_indices),
             step=lambda: robot.step_env_and_record(env), dt=config.control_dt,
             axis=spec["axis"], tool_offset=spec.get("tool_offset", (0.0, 0.0, 0.0)),
             grip_force=float(spec.get("grip_force", 20.0)), max_s=float(spec.get("max_s", 20.0)),
-            cfg=cfg, log=lambda m: logger.info(PROGRESS + m + ENDC), controller=controller)
+            cfg=cfg, log=lambda m: logger.info(PROGRESS + m + ENDC), controller=controller,
+            on_phase=None if controller is not None else _on_phase)
         robot.step_env_and_record(env, force_record=True)
         if controller is not None:
             ok = res.get("outcome") == "contact"

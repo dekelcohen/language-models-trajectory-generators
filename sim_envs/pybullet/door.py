@@ -1,5 +1,7 @@
 """Door sim-env: face robot toward the Adroit door, set cameras, load the door."""
 
+import math
+import os
 import traceback
 
 import numpy as np
@@ -254,6 +256,11 @@ class SimEnvDoor(SimEnvBase):
         config.base_start_position_franka = [-0.3, 0.5, 0.0]
         # Euler angles [roll, pitch, yaw]; yaw = -pi/2 faces the door
         config.base_start_orientation_e_franka = [0.0, 0.0, -np.pi / 3]
+        if os.environ.get("DOOR_BASE"):                  # experiment only: "x,y,yaw_deg"
+            bx, by, byaw = (float(v) for v in os.environ["DOOR_BASE"].split(","))
+            config.base_start_position_franka = [bx, by, 0.0]
+            config.base_start_orientation_e_franka = [0.0, 0.0, math.radians(byaw)]
+            print(f"[Env] DOOR_BASE override: base {config.base_start_position_franka} yaw {byaw} deg")
         # Problem: robot eef collapses into the door and hides the handled
         # Solution: Make the robot 'lean back' by rotating the joint above the base (idx 1)
         config.joint_start_positions_franka[1] = -1.5

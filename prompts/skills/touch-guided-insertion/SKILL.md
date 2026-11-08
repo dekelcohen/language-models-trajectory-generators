@@ -70,20 +70,24 @@ metadata:
    with the hand: if the palm / held part fills the view at the carry rotation, take the views at
    carry rotation +-1.571 (the part turns too - harmless in free space), then turn back to the carry
    rotation before step 3 (check `get_robot_state()["rotation"]`).
-   **Confirm before aiming**: move the hand ~5 cm sideways (still not hiding the face) and call
-   again. Accept a position only if both views agree within ~3 mm (use their mean). If they
-   disagree (common: device textures show several slot-like marks and a small opening is a few
-   pixels), do NOT keep re-viewing: the HEIGHT (z) is usually consistent across views, the position
-   ALONG the face is not. Opening z = the MEDIAN z of ALL candidates from all views on that face
-   (drop any > 5 mm from the median - a single odd candidate is a mis-hit); opening y = the mean of
-   the candidates' y. Print both. The touch line search in step 4 finds it along the face
-   (`search_line`, covers +-2.5 cm) but needs z right within ~1 mm (2.5 mm off fails even with
-   coarse extra rows - tested), so z is the number to get right.
-   **Reject edge hits**: also locate the face's top edge (`locate_with_wrist_camera("top edge of
-   the laptop side face")`, same views). Candidates within 3 mm of that edge's z are the edge, not
-   the opening (an opening sits below the top surface by at least its half-height + a wall). Fewer
-   than 4 candidates left: take 2 more views with the camera lower (~0.05 m above the opening
-   height) so the face is seen head-on, and redo the median.
+   **Collect views, then aggregate with `estimate_opening`** (do not hand-roll the median): take
+   3-4 views ~5 cm apart sideways (still not hiding the face), each calling the port locate AND the
+   face's top edge (`locate_with_wrist_camera("top edge of the laptop side face")`), and pass ALL
+   candidates of all views - outliers (other faces, odd heights, rim hits) are rejected inside:
+   ```python
+   port_c, edge_c = [], []
+   # for each view pose: port_c += locate_with_wrist_camera("USB-A port opening on the laptop side")
+   #                     edge_c += locate_with_wrist_camera("top edge of the laptop side face")
+   est = estimate_opening(port_c, edge_c, axis=[1, 0, 0])   # prints its result
+   port = est["position"]          # aim point [x, y, z]; None -> no usable hit: new views
+   ```
+   It returns `position`, `search_line`, `search_half`, `search_cross` (use them in step 4),
+   `n_used`, `z_spread`, `confident`, `notes`. Why: pointing at a small opening is consistent in
+   HEIGHT across views but scatters a few cm ALONG the face; the touch line search in step 4 finds
+   the along-face position by feel, but needs z right within ~1-2 mm, so z is the number to get
+   right. `confident` False (fewer than 3 consistent hits): take 2 more views with the camera lower
+   (~0.05 m above the opening height) so the face is seen head-on, and call it again on ALL
+   candidates. Never fall back to a single early candidate.
 3. **Calibrate the in-hand offset by touch** (the wrist camera cannot see the held tip, and closing /
    lifting shifts the part in the fingers by up to ~1 cm). First `gripper_holding()` must be True -
    a touch with an empty hand measures the fingers, not the part; False = it fell: find it and re-pick. Use `move_until_contact` on the device
@@ -128,9 +132,11 @@ metadata:
    ```
    It probes, spirals (3 mm radius; search_radius=0.005 widens it, slower) on the face to find the opening, and pushes the part in (~20 N max).
    Opening position along the face uncertain by more than ~3 mm (views disagree, or a spiral attempt
-   returned `search_exhausted`): search by feel along the face instead (seated in sim with 2 cm aim error, ~20-60 s):
+   returned `search_exhausted`): search by feel along the face instead, with the numbers from
+   `estimate_opening` (seated in sim with 2 cm aim error, ~20-60 s):
    ```python
-   res = insert_with_touch(axis=[1, 0, 0], tool_offset=offset, search_line=[0, 1, 0], search_half=0.025)
+   res = insert_with_touch(axis=[1, 0, 0], tool_offset=offset, search_line=est["search_line"],
+                           search_half=est["search_half"], search_cross=est["search_cross"])
    ```
    `search_line` = the face direction across the axis along which the aim is uncertain (horizontal
    along a laptop side); the height must be right within ~1 mm (the line passes are 0.4 mm apart).

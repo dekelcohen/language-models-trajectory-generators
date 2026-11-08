@@ -168,6 +168,26 @@ def test_slip_guard_load_drop_with_partial_closing_trips_and_feedback_says_it_re
     assert "resisted" in API.grasp_slip_feedback(v)
 
 
+def test_slip_guard_width_swing_on_a_rolling_lever_does_not_trip():
+    """Door run 2026-11-07: the width swung 39 -> 26 mm while the lever rolled in the fingers and the
+    old 8 mm drop rule cut good pulls short. A big drop that stays above air width is only a note."""
+    ws = [0.039, 0.037, 0.034, 0.030, 0.026, 0.028, 0.031, 0.027, 0.026, 0.029]
+    g = GraspSlipGuard()
+    g.arm(0.039, [0.0, 0.0, 0.7])
+    for i, w in enumerate(ws):
+        assert g.update([0.01 * i, 0.0, 0.7], width=w) is None
+    assert any(n.startswith("fingers closed") for n in g.notes)
+
+
+def test_slip_guard_transient_first_width_sample_is_not_the_baseline():
+    """The reading right after a close can be a few mm off; the median of the first 3 is the reference."""
+    g = GraspSlipGuard()
+    g.arm(0.060, [0.0, 0.0, 0.7])          # transient wide reading at arm()
+    for i, w in enumerate([0.030, 0.030, 0.031, 0.030, 0.029]):
+        assert g.update([0.01 * i, 0.0, 0.7], width=w) is None
+    assert abs(g.w0 - 0.030) < 1e-6
+
+
 def test_slip_guard_tracked_part_left_the_fingers():
     pts = [(0.01 * i, 0.018, None, 0.005 * i) for i in range(20)]
     _, v = _guard_run(pts)
@@ -275,6 +295,34 @@ def test_guarded_pull_regrasps_at_last_held_point_after_late_slip(monkeypatch):
         grabs.append(tip)
         api.p, api.holding = np.asarray(tip[:2], float), True
     monkeypatch.setattr(gp, "_regrasp", regrasp)
-    r = gp.guarded_pull(door, direction=[0, -1, 0], hinge=[0.5, 0.0])
+    r = gp.guarded_pull(door, direction=[0, -1, 0], hinge=[0.5, 0.0], push_after_deg=None)
     assert r["outcome"] == "opened" and r["regrasps"] == 1 and r["flips"] == 0
     assert abs(np.linalg.norm(np.asarray(grabs[0][:2]) - [0.5, 0.0]) - 0.5) < 1e-6
+
+
+def test_guarded_pull_empty_regrasp_after_early_trip_is_not_opened(monkeypatch):
+    """door:hidden r1 (2026-11-08): after an early width trip the re-grasp closed on nothing, the
+    guard never arms on an empty hand, and the pull swept air for 75 cm and reported 'opened'."""
+    import helpers.guarded_pull as gp
+
+    class _AirDoor(_FakeDoor):
+        def execute_trajectory(self, traj):                 # empty hand: every target is reached
+            self.p = np.asarray(traj.points[-1][:2], float)
+            return {"eef_pos": [*self.p, 0.7]}
+
+    door = _AirDoor(hinge=[0.5, 0.0], start=[0.0, 0.0])
+    door.holding = True
+    calls = {"n": 0}
+    orig = door.execute_trajectory
+
+    def first_trips(traj):                                  # first step: the fingers close on air
+        calls["n"] += 1
+        if calls["n"] == 1:
+            door.holding = False
+            return {"eef_pos": [*door.p, 0.7], "guard": {"check": "width", "reason": "air",
+                                                         "last_held_pos": [*door.p, 0.7]}}
+        return orig(traj)
+    door.execute_trajectory = first_trips
+    monkeypatch.setattr(gp, "_regrasp", lambda api, tip, rotation: None)   # closes on nothing
+    r = gp.guarded_pull(door, direction=[0, -1, 0], hinge=[-0.5, 0.0])
+    assert r["outcome"] == "slipped" and r["travel_m"] < 0.05

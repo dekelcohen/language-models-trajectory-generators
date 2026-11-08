@@ -1037,7 +1037,7 @@ class API:
         print(f"guard_motion: {resp[1]}")
         return resp[1]
 
-    def guarded_pull(self, direction, hinge=None, travel=0.35, max_deg=50.0, part=None, **kw):
+    def guarded_pull(self, direction, hinge=None, travel=0.55, max_deg=80.0, part=None, **kw):
         """Pull the held handle in small guarded steps with automatic correction (helpers/guarded_pull.py):
         wrong hinge side -> mirror + retry, slip -> re-grasp at the re-acquired / last-held point,
         late jam -> end stop. Returns {"outcome", "travel_m", "swept_deg", "hinge", "flips", "regrasps", "events"}."""

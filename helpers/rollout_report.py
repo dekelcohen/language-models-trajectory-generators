@@ -170,18 +170,140 @@ def _encode_unfinished_tail(traj, vid_dir):
             print(f"[rollout_report] could not encode unfinished {cam} clip: {e}")
 
 
-def package(run_dir, name, out_root, notes=""):
+def _transcode_h264(path):
+    """Browsers / the HF viewer cannot play the sim's mpeg4 (Part 2) clips: re-encode in place."""
+    import subprocess
+    try:
+        codec = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                "stream=codec_name", "-of", "csv=p=0", path],
+                               capture_output=True, text=True, timeout=60).stdout.strip()
+        if codec == "h264":
+            return True
+        tmp = path[:-4] + "_h264.mp4"
+        r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", path, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-movflags", "+faststart", tmp],
+                           capture_output=True, text=True, timeout=600)
+        if r.returncode != 0 or not os.path.exists(tmp):
+            print(f"[rollout_report] h264 transcode failed for {path}: {r.stderr[-300:]}")
+            return False
+        os.replace(tmp, path)
+        return True
+    except Exception as e:  # missing ffmpeg must not break packaging
+        print(f"[rollout_report] h264 transcode skipped for {path}: {e}")
+        return False
+
+
+# Per-attempt evidence images (pointing / segmentation / perception) copied from the run dir.
+ATTEMPT_IMAGE_RE = re.compile(r"(wrist_locate_.*|scene_analysis_head_.*|affordance_points_.*|seg_overlay_.*|"
+                              r"bounding_cube_mask_.*|grasp_.*|pointing_.*)\.png$")
+
+
+def _attempt_folders(run, run_dir, dst, frame, last_idx):
+    """``s<k>_a<j>/`` per subtask attempt: head + wrist end frames and every pointing / segmentation
+    image written during that attempt (assigned by file time vs. the attempt's clip save time)."""
+    vids = os.path.join(run_dir, "videos")
+    atts = []
+    for si, sub in enumerate(run["subtasks"], 1):
+        for ai, att in enumerate(sub["attempts"], 1):
+            s, e = att["range"]
+            clip = os.path.join(vids, f"rgb_image_attempt_{s}_{e}.mp4")
+            atts.append((si, ai, att, os.path.getmtime(clip) if os.path.exists(clip) else None))
+    imgs = sorted((os.path.getmtime(os.path.join(run_dir, f)), f) for f in os.listdir(run_dir)
+                  if ATTEMPT_IMAGE_RE.match(f))
+    folders = []
+    prev_t = float("-inf")
+    for k, (si, ai, att, t_end) in enumerate(atts):
+        d = os.path.join(dst, f"s{si}_a{ai}")
+        os.makedirs(d, exist_ok=True)
+        end = min(att["range"][1], last_idx) if last_idx >= 0 else att["range"][1]
+        for cam, tag in (("rgb", "head"), ("wrist", "wrist")):
+            src = frame(cam, end)
+            if src:
+                shutil.copy2(src, os.path.join(d, f"{tag}_end_{end}.png"))
+            src0 = frame(cam, att["range"][0])
+            if src0:
+                shutil.copy2(src0, os.path.join(d, f"{tag}_start_{att['range'][0]}.png"))
+        hi = t_end if (t_end is not None and k < len(atts) - 1) else float("inf")
+        n = 0
+        for t, f in imgs:
+            if prev_t < t <= hi:
+                shutil.copy2(os.path.join(run_dir, f), os.path.join(d, f))
+                n += 1
+        prev_t = hi if hi != float("inf") else prev_t
+        folders.append((f"s{si}_a{ai}", att.get("verdict") or "NO_VERDICT", n))
+    return folders
+
+
+def _run_args(run):
+    import ast
+    try:
+        return ast.literal_eval(run.get("args") or "{}")
+    except Exception:
+        return {}
+
+
+def write_metadata(dst, run, name, run_date, result, notes="", metric="", wall_min=None):
+    """HF ``videofolder`` metadata: one JSON row per video, columns fixed by .github/copilot-instructions.md."""
+    import json
+    a = _run_args(run)
+    task = a.get("task") or ""
+    sim = a.get("sim") or ""
+    rows = []
+    vdir = os.path.join(dst, "videos")
+    for f in sorted(os.listdir(vdir)) if os.path.isdir(vdir) else []:
+        if not f.endswith(".mp4"):
+            continue
+        rows.append({"file_name": f"videos/{f}", "run_date": run_date, "run_name": name, "task": task, "sim": sim,
+                     "llm": a.get("language_model") or "", "perception": a.get("planner_perception_vlm") or "",
+                     "reviewer": a.get("review_provider") or "", "camera": "wrist" if f.startswith("wrist") else "head",
+                     "outcome": result, "success": result == "SUCCESS", "wall_min": wall_min, "metric": metric,
+                     "notes": notes[:500]})
+    with open(os.path.join(dst, "metadata.jsonl"), "w", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r) + "\n")
+    return len(rows)
+
+
+def _wall_min(run_dir):
+    """Minutes between the first and last timestamped log line (same day, dd/mm HH:MM)."""
+    first = last = None
+    with open(os.path.join(run_dir, "vlm_traj.log"), encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            m = re.match(r"^(\d\d)/(\d\d) (\d\d):(\d\d) \|", line)
+            if m:
+                t = (int(m.group(1)) * 24 + int(m.group(3))) * 60 + int(m.group(4))
+                first = t if first is None else first
+                last = t
+    return None if first is None else last - first
+
+
+def upload_to_hf(dst, run_date, name, repo="RoboTrick/vlm_traj_rollouts"):
+    from huggingface_hub import HfApi
+    HfApi().upload_folder(folder_path=dst, path_in_repo=f"rollouts/{run_date}/{name}", repo_id=repo,
+                          repo_type="dataset", commit_message=f"rollout {run_date}/{name}")
+    url = f"https://huggingface.co/datasets/{repo}/tree/main/rollouts/{run_date}/{name}"
+    print(f"[rollout_report] uploaded -> {url}")
+    return url
+
+
+def package(run_dir, name, out_root, notes="", metric="", run_date=None):
     log = os.path.join(run_dir, "vlm_traj.log")
     run = parse_log(log)
+    run_date = run_date or os.path.basename(os.path.normpath(out_root))
     dst = os.path.join(out_root, name)
     os.makedirs(os.path.join(dst, "videos"), exist_ok=True)
+    shutil.copy2(log, os.path.join(dst, "vlm_traj.log"))
     vids = os.path.join(run_dir, "videos")
     if os.path.isdir(vids):
         for f in sorted(os.listdir(vids)):
-            if f.endswith(".mp4"):
+            # _tmp_* clips are half-written by a run that was killed mid-encode
+            if f.endswith(".mp4") and not f.startswith("_tmp_"):
                 shutil.copy2(os.path.join(vids, f), os.path.join(dst, "videos", f))
     traj = os.path.join(run_dir, "trajectory")
     _encode_unfinished_tail(traj, os.path.join(dst, "videos"))
+    for f in os.listdir(os.path.join(dst, "videos")):
+        if f.endswith(".mp4"):
+            _transcode_h264(os.path.join(dst, "videos", f))
     # Perception inputs per planner turn: the analysed head image + its affordance-point overlay.
     perc = [f for f in os.listdir(run_dir) if re.match(r"(scene_analysis_head|affordance_points_.*)_\d+\.png$", f)]
     if perc:
@@ -221,9 +343,14 @@ def package(run_dir, name, out_root, notes=""):
         if p:
             images.append(os.path.basename(p))
 
+    folders = _attempt_folders(run, run_dir, dst, frame, last_idx)
+    wall = _wall_min(run_dir)
+    n_meta = write_metadata(dst, run, name, run_date, result, notes, metric, wall)
+
     md = [f"# Rollout `{name}` - {result}", "",
           f"- Source: `{run_dir}`", f"- Command: `{run['command']}`",
-          f"- Planner end: {run.get('end') or '(not reached)'}", ""]
+          f"- Planner end: {run.get('end') or '(not reached)'}",
+          f"- Wall time: {wall} min" + (f"  |  Metric: {metric}" if metric else ""), ""]
     if run["args"]:
         md += ["<details><summary>Args</summary>", "", "```", run["args"], "```", "</details>", ""]
     if notes:
@@ -241,7 +368,10 @@ def package(run_dir, name, out_root, notes=""):
             if att["world"]:
                 md += [f"  - Sim world-state (EVALUATION ONLY, not seen by the agent): `{att['world'][:400]}`"]
         md += [""]
-    md += ["## Files", "", *[f"- `{i}`" for i in images], "- `videos/` (per-attempt head/wrist clips + full run)",
+    md += ["## Files", "", *[f"- `{i}`" for i in images],
+           *[f"- `{f}/` ({v}; head/wrist start+end frames, {n} pointing/segmentation image(s))" for f, v, n in folders],
+           f"- `videos/` (per-attempt head/wrist clips + full run, H.264; `metadata.jsonl` has {n_meta} rows)",
+           "- `vlm_traj.log` (full run log)",
            "- `perception/` (per planner turn: `scene_analysis_head_<step>.png` + `affordance_points_*_<step>.png`)", ""]
     with open(os.path.join(dst, "summary.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(md))
@@ -254,9 +384,14 @@ def main():
     ap.add_argument("--name", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--notes", default="")
+    ap.add_argument("--metric", default="", help="task metric, e.g. 'door 72 deg' (eval only)")
+    ap.add_argument("--run-date", default=None, help="default: basename of --out")
+    ap.add_argument("--upload", action="store_true", help="upload to the HF dataset RoboTrick/vlm_traj_rollouts")
     a = ap.parse_args()
-    dst, result = package(a.run_dir, a.name, a.out, a.notes)
+    dst, result = package(a.run_dir, a.name, a.out, a.notes, a.metric, a.run_date)
     print(f"{result}: {dst}")
+    if a.upload:
+        upload_to_hf(dst, a.run_date or os.path.basename(os.path.normpath(a.out)), a.name)
 
 
 if __name__ == "__main__":

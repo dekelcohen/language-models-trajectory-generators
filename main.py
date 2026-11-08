@@ -52,7 +52,7 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(description="Main Program.")
 
     lm = parser.add_argument_group("language model")
-    lm.add_argument("-lm", "--language_model", default="azure-gpt-5", help="select language model (e.g. azure-gpt-5, gpt-4o, or-google/gemini-2.5-flash, copilot-claude-opus-5 via the local `copilot` CLI)")
+    lm.add_argument("-lm", "--language_model", default="copilot-claude-opus-5.5", help="select language model (e.g. copilot-claude-opus-5.5 / copilot-gpt-6-astra via the local `copilot` CLI, azure-gpt-5, or-google/gemini-2.5-flash)")
     lm.add_argument("--lm-images", action=argparse.BooleanOptionalAction, default=True, help="pass images to LLM prompts (default: True, use --no-lm-images to disable)")
     lm.add_argument("--max-tokens", type=int, default=60000, help="max completion tokens for LLM responses")
     lm.add_argument("--reasoning-effort", type=str, default=None, choices=["xhigh", "high", "medium", "low", "minimal", "none"], help="reasoning effort for reasoning models (OpenRouter, Gemini)")

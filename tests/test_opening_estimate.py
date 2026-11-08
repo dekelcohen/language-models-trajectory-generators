@@ -1,0 +1,55 @@
+"""touch.opening_estimate: robust port aim point from noisy wrist-camera pointing candidates."""
+import unittest
+
+from touch.opening_estimate import estimate_opening
+
+# Real candidates from rollout usb_u3 (2026-11-08), all views of the laptop's -x side face.
+# The first view's single hit (0.096, 0.4242, 0.0549) became the LLM's fallback aim: 1.4 cm low.
+U3_PORT = [[0.096, 0.4242, 0.0549], [0.0908, 0.5416, 0.0707], [0.0907, 0.5184, 0.0698],
+           [0.0905, 0.6125, 0.0658], [-0.1311, 0.4523, 0.0413], [0.0907, 0.5405, 0.0693],
+           [0.0906, 0.5198, 0.0682], [0.0909, 0.489, 0.0713], [0.0918, 0.4555, 0.0721],
+           [-0.0357, 0.3366, 0.1119], [0.09, 0.4966, 0.07], [0.0904, 0.459, 0.0705]]
+U3_EDGE = [[0.0905, 0.598, 0.0651], [0.0905, 0.5707, 0.0664], [0.0904, 0.5665, 0.0644],
+           [0.0951, 0.6095, 0.076], [0.0971, 0.5451, 0.0551], [0.0904, 0.4649, 0.0645],
+           [0.0903, 0.6504, 0.0619], [0.2357, 0.4075, 0.0729], [0.0904, 0.473, 0.0652]]
+
+
+class EstimateOpeningTest(unittest.TestCase):
+    def test_u3_height_within_2mm_and_line_covers_the_port(self):
+        est = estimate_opening([{"position": p} for p in U3_PORT], U3_EDGE)
+        x, y, z = est["position"]
+        self.assertAlmostEqual(z, 0.069, delta=0.002)          # eval truth 0.069
+        self.assertAlmostEqual(x, 0.092, delta=0.003)
+        self.assertLessEqual(abs(y - 0.4959), est["search_half"])  # the line search reaches it
+        self.assertEqual(est["search_line"], [0.0, 1.0, 0.0])
+        self.assertTrue(est["confident"])
+        # edge hits here are BELOW the port hits (bad edge pointing) -> must not drop real port hits
+        self.assertTrue(any("edge hits ignored" in n for n in est["notes"]))
+
+    def test_u5_search_reaches_the_farthest_kept_hit(self):
+        # usb_u5: median 0.4713, the one correct hit 0.498 (truth 0.4959) was outside spread/2+5mm
+        port = [[0.0931, 0.4643, 0.0507], [-0.1311, 0.4494, 0.0405], [0.0909, 0.462, 0.07],
+                [0.0907, 0.498, 0.0708], [0.0909, 0.4713, 0.0698]]
+        edge = [[0.0957, 0.4798, 0.0593]]
+        est = estimate_opening(port, edge)
+        y = est["position"][1]
+        self.assertGreaterEqual(est["search_half"], abs(0.498 - y) + 0.005)
+        self.assertLessEqual(abs(0.4959 - y), est["search_half"])
+
+    def test_edge_hits_above_drop_rim_candidates(self):
+        port = [[0.09, 0.50, 0.069], [0.09, 0.51, 0.070], [0.09, 0.49, 0.0685], [0.09, 0.50, 0.072]]
+        est = estimate_opening(port, edge_candidates=[[0.09, 0.5, 0.0745], [0.09, 0.52, 0.075]])
+        self.assertEqual(est["n_used"], 3)
+        self.assertAlmostEqual(est["position"][2], 0.069, delta=0.0006)
+
+    def test_too_few_hits_is_not_confident(self):
+        est = estimate_opening([[0.09, 0.5, 0.07]])
+        self.assertFalse(est["confident"])
+        self.assertTrue(any("more views" in n for n in est["notes"]))
+
+    def test_empty(self):
+        self.assertIsNone(estimate_opening([])["position"])
+
+
+if __name__ == "__main__":
+    unittest.main()

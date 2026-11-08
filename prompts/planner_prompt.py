@@ -71,13 +71,15 @@ DECOMPOSITION RULES:
    1) List the objects in the scene (and their relation to the robot arm) 
    2) Whether one or more objects / surfaces / robot arm may hide the target object such that it is not observed ? 
       ) If so -> design subtask(s) to remove / clear / topple the occluding objects. 
+      Success of a clearing subtask = the occluder no longer stands in front of / blocks the view of the area it hid (picked and placed aside, pushed or knocked over - any is fine; a toppled occluder lying clear of the target and its swing path is a success). Do NOT require the hidden target (e.g. the handle) to be visible afterwards: where it is behind the occluder is only your guess, so whether it shows up is not part of this subtask's success.
 3. Identify blocking dependencies and occlusions. Examples: an object on/against a door blocks opening it; a lid must be removed before grasping contents; an obstacle must be cleared before reaching a target.
 4. When a blocker/dependency exists, order subtasks dependency-first: earlier subtasks resolve the blocker, later subtasks perform the main action. execute_subtasks runs only the NEXT one, then you re-observe and dispatch the following one.
 5. If the command is a single self-contained action, dispatch exactly ONE subtask.
 6. Keep the number of subtasks minimal - only decompose when there is a real dependency or a physically distinct phase that warrants its own attempt/verification loop.
 7. Remember not to decompose too detailed - the subtask agent is responsible for the granular motion-trajectories generation. You, the planner, just need to define the subtask high-level prompt: what to do high level (move the <object> ...), what are the constraints, but NOT HOW to do it (e.g grasp 40 cm from above), pass on *ALL* available information from the user command and scene analysis + attached image.
-   Success criteria must not depend on your guesses: if a door / drawer / lid could hinge OR slide and you are not sure which, state success as "visibly open (gap / interior exposed, clearly moved from its start)" - not a hinge angle - so a correct opening by the other motion is not rejected. For a hinged door / lid, describe the hinge only as "on the edge farthest from the handle" - never copy a left/right hinge-side guess from the scene analysis into the subtask (a wrong side reverses the pull arc).
-8. After every subtask, perception re-runs and you are re-invoked with an UPDATED SCENE ANALYSIS. Before dispatching the next subtask, check whether the previous one changed the scene in a way that blocks the next action - in particular whether the ROBOT ARM itself now occludes or blocks the next target's affordance. If so, insert a prep subtask first (e.g. "move the arm clear of the target so it is visible and reachable") before the manipulation subtask. To avoid that extra subtask, end every clearing / occluder-removal subtask with "then move the hand back to the pose it started this subtask from (a known reachable pose, clear of the target)" (part of its success criteria). Do not ask for "up / toward the base / as high as possible": near the base axis or above reach the arm folds and stays stuck low.
+   Success criteria must not depend on your guesses: if a door / drawer / lid could hinge OR slide and you are not sure which, state success as "wide open (gap / interior exposed, clearly moved from its start)" - not a hinge angle - so a correct opening by the other motion is not rejected.
+   "Open the door" means WIDE open - wide enough for a mobile robot to drive through: a hinged door swung >= ~60 deg (the panel clearly turned well past half-way toward perpendicular to the frame), a sliding door slid >= ~60% of its width. A door only ajar (a small gap, ~10-30 deg) is NOT success. Write this into the door subtask's success criteria. For a hinged door / lid, describe the hinge only as "on the edge farthest from the handle" - never copy a left/right hinge-side guess from the scene analysis into the subtask (a wrong side reverses the pull arc).
+8. After every subtask, perception re-runs and you are re-invoked with an UPDATED SCENE ANALYSIS. Before dispatching the next subtask, check whether the previous one changed the scene in a way that blocks the next action - in particular whether the ROBOT ARM itself now occludes or blocks the next target's affordance. If so, insert a prep subtask first (e.g. "move the arm clear of the target so it is visible and reachable") before the manipulation subtask. To avoid that extra subtask, end every clearing / occluder-removal subtask with "then move the hand back to the pose it started this subtask from (a known reachable pose, clear of the target)" - but do NOT put the hand return in the Success = ... criteria: the reviewer cannot verify a pose from images and fails good clears on it (door:hidden r1 lost 2 attempts this way); if the arm still blocks, step 8's prep subtask covers it. Do not ask for "up / toward the base / as high as possible": near the base axis or above reach the arm folds and stays stuck low.
 
 [INSERT RECOVERY_FROM_FAILURE]
 
@@ -87,7 +89,7 @@ Reasoning: The cylinder occludes the door handle, so it must be moved aside befo
 First turn - dispatch the NEXT subtask (clear the occluder):
 ```python
 result = execute_subtasks([
-    {"prompt": "Pick up the gray cylinder in front of the door and place it about 30 cm to the side, clear of the door and its swing path, then move the hand back to the pose it started this subtask from. Success = the gray cylinder is no longer in front of or touching the door, and neither it nor the arm hides the door handle.", "max_attempts": 2},
+    {"prompt": "Clear the gray cylinder in front of the door out of the way - pick and place it about 30 cm to the side, or push / topple it - so it ends clear of the door and its swing path, then move the hand back to the pose it started this subtask from. Success = the gray cylinder no longer stands in front of the door (toppled / lying clear of the door and its swing path is fine) and no longer occludes the door region. The handle was hidden, so whether it is visible now is NOT part of success.", "max_attempts": 2},
 ])
 print(result["executed"], result["success"], len(result["remaining"]))
 ```
@@ -101,7 +103,7 @@ print(result["executed"], result["success"])
 Third turn - the handle is now visible and clear; dispatch the door-opening subtask:
 ```python
 result = execute_subtasks([
-    {"prompt": "Grasp the door lever handle and open the door by rotating it about its hinge. Success = the door is visibly open (hinge angle clearly increased) and the handle was actuated.", "max_attempts": 3},
+    {"prompt": "Grasp the door lever handle and open the door by rotating it about its hinge. Success = the door is WIDE open - swung >= ~60 deg about its hinge, wide enough for a mobile robot to pass; only ajar (a small gap) is a failure.", "max_attempts": 3},
 ])
 print(result["executed"], result["success"])
 ```

@@ -85,7 +85,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 ### Argument reference
 | Arg | Default | Purpose |
 |-----|---------|---------|
-| `-lm, --language_model` | `azure-gpt-5` | Main LLM (planner + subtask + default reviewer). e.g. `gpt-4o`, `or-google/gemini-2.5-flash`, `copilot-claude-opus-5.5`, `copilot-gpt-6-sol` (Copilot models go through the local `copilot` CLI). |
+| `-lm, --language_model` | `copilot-claude-opus-5.5` | Main LLM (planner + subtask code). e.g. `azure-gpt-5`, `copilot-gpt-6-astra`, `or-google/gemini-2.5-flash`, `copilot-claude-opus-5.5`, `copilot-gpt-6-sol` (Copilot models go through the local `copilot` CLI). |
 | `--lm-images / --no-lm-images` | `True` | Attach images to LLM prompts. |
 | `--max-tokens` | `60000` | Max completion tokens. |
 | `--reasoning-effort` | `None` | `xhigh…none` for reasoning models. |
@@ -427,7 +427,7 @@ retry vs. done.
 
   | function | intent | states / cases handled |
   |---|---|---|
-  | `execute_python_blocks(ctx, task, assistant_content) -> feedback` | the **only** place LLM-generated code runs; must never let the LLM believe an action ran when it did not | 1) no ```` ```python ```` block → `NO_TOOL_CALL_PROMPT`; 2) block raises → `ERROR_CORRECTION_PROMPT` (block number + traceback), remaining blocks **aborted**; 3) block prints (`< 2000` chars) → collected into `PRINT_OUTPUT_PROMPT`, execution **continues**; 4) `task_completed()` / `task_failed()` fires mid-response → remaining blocks skipped on purpose, no notice; 5) blocks skipped by case 2 → `BLOCKS_NOT_EXECUTED_PROMPT` naming exactly which blocks never ran |
+  | `execute_python_blocks(ctx, task, assistant_content) -> feedback` | the **only** place LLM-generated code runs; must never let the LLM believe an action ran when it did not | 1) no ```` ```python ```` block → `NO_TOOL_CALL_PROMPT`; 2) block raises → `ERROR_CORRECTION_PROMPT` (block number + traceback), remaining blocks **aborted**; 3) block prints → collected into `PRINT_OUTPUT_PROMPT`, execution **continues**; output over `PRINT_OUTPUT_MAX_CHARS` (6000) is cut to head + tail with a marker (it used to be dropped silently at ≥ 2000 chars: usb u3 lost its 4-view port aggregation and aimed 1.4 cm low); 4) `task_completed()` / `task_failed()` fires mid-response → remaining blocks skipped on purpose, no notice; 4b) a block calls `sys.exit` / `raise SystemExit` → its printed output is kept, the LLM is told it only stopped that block (use `task_completed()` / `task_failed()`), remaining blocks skipped (door r2 2026-11-08: it killed the whole run; the planner exec catches it too); 5) blocks skipped by case 2 → `BLOCKS_NOT_EXECUTED_PROMPT` naming exactly which blocks never ran |
   | `handle_task_failure(ctx, task, prompt, scene_analysis, attempt_summaries, feedback) -> messages` | close a FAILED attempt and open the next one (state: `task.failed_task` set by reviewer / `task_failed()` / no-motion guard) | summarize attempt (`TASK_SUMMARY_PROMPT`, images stripped) → append to `attempt_summaries`; re-baseline `start_attempt_trajectory_step`; fresh conversation (`messages=[]`) with retry `MAIN_PROMPT` (no `detect_object`, no in-context example, latest EE pose) + combined `TASK_FAILURE_PROMPT`; clear `failed_task` |
   | `continue_task_turn(ctx, task, feedback) -> messages` | continue the CURRENT attempt (not completed, not failed): feed execution results back and get the next response | attaches latest head/wrist frames + `EEF_POS_SNIPPET` per `config.ENABLE_EEF_POS_IMAGE` / `--lm-images`; never sends an empty user turn (providers such as Bedrock reject an assistant-final conversation) → falls back to `CONTINUE_TASK_PROMPT` |
   | `run_task_agent_loop(ctx, task, prompt, scene_analysis, attempt_summaries) -> messages` | drive one (sub)task to termination: execute → feedback → next LLM turn | invariant: conversation always ends on an assistant response with pending blocks. Per iteration exactly one of: `completed_task` → exit; `failed_task` → `handle_task_failure`; else → `continue_task_turn`. Assumes the first assistant response was produced by `execute_task` |
@@ -900,11 +900,26 @@ no-op (no IPC traffic). Tests: `tests/test_vis_grasp.py`.
     `motion["guard"]` = verdict + `last_held_pos` + `reacquired` (tracked `part` position after a
     ~0.5 s settle, `config.slip_guard_settle_s`, so CoTracker latency has caught up);
   - spec resets to hold/stop at the next subtask (`RESET_EEF`).
-- `guarded_pull(direction, hinge=None, travel=0.35, max_deg=50, part=None)` (tool 6c, `helpers/guarded_pull.py`):
+- `guarded_pull(direction, hinge=None, travel=0.55, max_deg=80, part=None)` (tool 6c, `helpers/guarded_pull.py`):
   - top-down only; 3 cm steps from the measured pose, fixed arc radius, wrist turns with the door (≤ 6°/step);
   - early trip (< 15 cm) = wrong path → next hypothesis (mirrored hinge; for a straight pull, an arc
     either side), continue from where the hand is (going back re-closes the door);
   - late slip → re-grasp at the tracked / last-held point projected on the arc; late jam → `end_stop`;
+  - every re-grasp (early or late) is checked with `gripper_holding`; one that closed on nothing returns
+    `slipped`, and "opened" also needs the hand to still hold (r1 2026-11-08: an empty early re-grasp
+    swept air for 75 cm and reported "opened", so the LLM stopped trusting the helper);
+  - `push_after_deg=15` (ON by default; `None` = off) + `push_open(route="around")`: a late slip / jam /
+    stall on a hinge arc (the panel meets the forearm at ~20-35°) switches to pushing the back face.
+    Geometry (PyBullet door, harness `door_around5`-`33`, 2026-11-08):
+    - out past the free edge to `r_out = r_grip + 0.30` and down there (a descent near the edge slammed a
+      narrow wedge shut), hand yaw following the arc;
+    - in at `below = 0.15` under the grasp height in 3 cm radial steps (one long move swung the arm through
+      the wedge); it stops where the arm column meets the latch spindle (10 cm out of the back face) and
+      pushes from that radius (5° steps; stall = < 2° gain twice);
+    - retreat: 2 cm back along the arc (unload, along the contact normal), drop 10 cm, slide radially out
+      past the free edge, rise. Sliding / rising under the ~2 kN push load dragged a 66-78° door back 10-38°;
+    - result: 60-74° in 4/5 runs whose pull passed ~29°; a short pull (16-21°) leaves no wedge ->
+      `push_blocked` (the panel is left as it was). `swept_deg` is the hand angle, a LOWER bound;
   - result `{outcome, travel_m, swept_deg, hinge, flips, regrasps}` also goes to the reviewer's force-feedback evidence.
 - Door skill recommends it over a hand-written arc.
 - Harness: `door_pull_e2e.py --approach top --press 0.02 --guarded right|wrong|line`.

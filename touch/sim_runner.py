@@ -42,8 +42,10 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
                      k_rot: float = 40.0, gravity_every: int = 8, seed: int = 0,
                      log: Optional[Callable[[str], None]] = None,
                      on_tick: Optional[Callable[[TouchState, object], None]] = None,
-                     controller=None) -> dict:
+                     controller=None, on_phase: Optional[Callable[[str], None]] = None) -> dict:
     """Touch-guided insertion of the held part along world ``axis`` from the current pose.
+
+    ``on_phase(phase)``: called when the controller's ``phase`` changes (e.g. eval-only logging).
 
     ``tool_offset``: world vector from the EE link origin to the part's leading tip at the start
     (fixed in the hand frame afterwards). ``step()`` advances the simulator by ``dt``. Fingers are
@@ -122,7 +124,18 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
             f"tool_offset={np.round(tool_offset, 4).tolist()} grip={grip_force}N dt={dt:.4f}s x{n_per}/tick")
     try:
         from touch.insertion import run_reactive
-        res = run_reactive(ctrl, read_state, send, advance, max_s=max_s, period_s=n_per * dt, on_tick=on_tick)
+        tick = on_tick
+        if on_phase is not None:
+            seen = {"phase": getattr(ctrl, "phase", None)}
+
+            def tick(s, c):
+                if on_tick:
+                    on_tick(s, c)
+                ph = getattr(ctrl, "phase", None)
+                if ph != seen["phase"]:
+                    seen["phase"] = ph
+                    on_phase(str(ph))
+        res = run_reactive(ctrl, read_state, send, advance, max_s=max_s, period_s=n_per * dt, on_tick=tick)
     finally:
         # back to position control where we are, so the next trajectory starts from rest
         q_now = [sim.get_joint_state(body, j).position for j in arm]
