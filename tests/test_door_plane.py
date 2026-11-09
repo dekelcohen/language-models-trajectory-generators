@@ -1,6 +1,6 @@
 import numpy as np
 
-from touch.door_plane import estimate_door_plane, measure_door_angle
+from touch.door_plane import estimate_door_plane, hinge_from_swung_panel, measure_door_angle
 
 
 def _panel(hinge, width, deg, z0=0.4, z1=0.9, step=0.01):
@@ -25,12 +25,39 @@ def test_door_plane_puts_the_hinge_at_the_far_panel_end_not_across_the_gap():
     assert abs(plane["hinge"][0]) < 0.03 and abs(plane["free_edge"][0] - 0.5) < 0.03
 
 
-def test_door_plane_puts_the_hinge_at_the_jamb_past_a_hinge_side_gap():
-    """door:hidden: the axis sits past the frame gap (at the jamb), not at the panel's visible end."""
+def _swung(axis, s0, s1, deg, sign=1.0, z0=0.4, z1=0.9, step=0.01):
+    """Panel points from ``s0`` to ``s1`` m along the panel from a hinge ``axis``; the closed panel runs
+    along ``sign`` * x, opened ``deg`` toward -y (the camera / robot side)."""
+    a = np.radians(deg)
+    u = np.array([sign * np.cos(a), -np.sin(a)])
+    return np.asarray([[*(np.asarray(axis) + s * u), z] for s in np.arange(s0, s1, step)
+                       for z in np.arange(z0, z1, step)], float)
+
+
+def test_door_plane_hinge_is_only_the_visible_panel_end():
+    """No frame-gap model: the hinge hypothesis is the visible end, whatever lies past it."""
     pts = np.vstack([_panel([0.0, 0.0], 0.5, 0), _jamb(-0.14, -0.04)])
     plane = estimate_door_plane(pts, [0.4, -0.06, 0.65], cam_xy=[0.3, -1.0])
-    assert plane and abs(plane["hinge"][0] + 0.04) < 0.025 and abs(plane["free_edge"][0] - 0.5) < 0.03
-    assert 0.02 < plane["hinge_gap_m"] < 0.07
+    assert plane and abs(plane["hinge"][0]) < 0.03 and plane["hinge_source"] == "panel_end"
+
+
+def test_hinge_from_swung_panel_finds_an_axis_past_a_frame_gap():
+    """The axis 8 cm past the visible panel end (PyBullet door): measured from the panel's motion."""
+    closed = np.vstack([_swung([-0.08, 0.0], 0.08, 0.58, 0), _jamb(-0.2, -0.1)])
+    plane = estimate_door_plane(closed, [0.4, -0.06, 0.65], cam_xy=[0.3, -1.0])
+    opened = np.vstack([_swung([-0.08, 0.0], 0.08, 0.58, 15), _jamb(-0.2, -0.1)])
+    h = hinge_from_swung_panel(opened, plane, 0.65)
+    assert h and abs(h["hinge"][0] + 0.08) < 0.02 and abs(h["hinge"][1]) < 0.02
+    assert abs(h["open_deg"] - 15) < 1.5 and not h["flipped"]
+
+
+def test_hinge_from_swung_panel_flips_a_wrong_hinge_side():
+    """The plane guessed the hinge at x=0, but the door turns about the other end (x=0.52)."""
+    closed = _swung([0.52, 0.0], 0.02, 0.52, 0, sign=-1.0)
+    plane = estimate_door_plane(closed, [0.4, -0.06, 0.65], cam_xy=[0.3, -1.0])
+    assert plane and plane["hinge"][0] < 0.1
+    h = hinge_from_swung_panel(_swung([0.52, 0.0], 0.02, 0.52, 12, sign=-1.0), plane, 0.65)
+    assert h and h["flipped"] and abs(h["hinge"][0] - 0.52) < 0.03 and h["free_edge"][0] < 0.1
 
 
 def test_door_plane_finds_the_hinge_from_the_rose_when_given_the_lever_tip():

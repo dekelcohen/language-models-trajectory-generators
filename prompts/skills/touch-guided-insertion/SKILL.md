@@ -2,13 +2,15 @@
 name: touch-guided-insertion
 scope: subtask
 description: >
-  Pick up a small peg/plug (USB stick, connector, pin) and insert it into a tight hole or port
-  using force feedback. Load it for the PICK-UP subtask too (grasp depth rule). Vision alone is
-  ~1-2 mm off; this finds the opening by touch. Gives locate_with_wrist_camera(), move_until_contact(), get_grasp_info(), insert_with_touch().
+  Pick up a small plug / peg / connector (USB-A, USB-C, HDMI, charger cable, peg, mains plug) and
+  insert it into its tight hole, port or socket using force feedback, on a device standing at any
+  heading. Load it for the PICK-UP subtask too (grasp depth rule). Vision alone is ~1-2 mm off; this
+  finds the opening by touch. Gives locate_with_wrist_camera(), estimate_face_normal(),
+  face_normal_from_touches(), estimate_opening(), move_until_contact(), get_grasp_info(), insert_with_touch().
 license: MIT
 metadata:
   category: manipulation
-  tags: [insert, usb, plug, peg-in-hole, touch, force]
+  tags: [insert, plug, connector, usb, hdmi, socket, peg-in-hole, touch, force]
   requires: [touch]
 ---
 
@@ -27,15 +29,19 @@ metadata:
    **The held part turns with the hand.** Keep the pick rotation (`get_robot_state()["rotation"]`)
    in every later pose, start poses included; turn the hand only by the angle that brings the
    part's tip axis onto the insertion axis. A pick at 1.571 then poses at 0 turned the plug 90 deg,
-   so its side, not its tip, met the face (every early LLM run).
+   so its side, not its tip, met the face (every early LLM run). The part may lie pointing anywhere:
+   before the pick, get its tip direction from the camera (e.g. locate "metal tip of the plug" and
+   "plug body" and take tip - body, horizontal). After the pick the carry rotation must turn by
+   delta = atan2(axis) - atan2(tip direction) (wrap to [-pi, pi]; axis from step 2) - the hand and
+   the part turn together.
    Small parts: take x,y from the affordance point, not the detection box centre (the box may merge the stand).
    **Measure the top by touch first** (depth on a small part is a few mm off; a grasp below the body's
    mid-height lets it pivot or slide in the fingers later): `close_gripper()`, move the fingertips
    3 cm above the guessed top at the part's x,y, then
    `r = move_until_contact([0, 0, -1], max_travel=0.05, force=3.0)`;
    `top_z = r["finger_bottom_z"]`. Rise 3 cm, `open_gripper()`, grasp at centre z = top_z - body
-   height / 2 (command z = centre z + 0.06). body height = the HOUSING only (USB-A plug: 8 mm, so
-   centre = top_z - 0.004), never the detection box / depth height (it merges a stand or cable);
+   height / 2 (command z = centre z + 0.06). body height = the HOUSING only (measure it from the
+   images / touch; e.g. a USB-A plug's is ~8 mm, so centre = top_z - 0.004), never the detection box / depth height (it merges a stand or cable);
    no stand/floor heuristics. **Sanity-check the touch**: a contact > 5 mm ABOVE the located
    point's z (or > body height + 5 mm above the surface it lies on) hit something else - the
    edge of the support it fell off, a neighbour - not the part: do not grasp there (it closes on
@@ -50,22 +56,25 @@ metadata:
    Free-space transit / camera-view poses need NO correction.
    `close_gripper()` records the grasp; a later subtask
    reads it with `get_grasp_info()`. Right after closing, check
-   `get_grasp_info()["grasp_depth_below_top"]` ≈ body height / 2 (USB: 0.004); off by > 3 mm =
+   `get_grasp_info()["grasp_depth_below_top"]` ≈ body height / 2; off by > 3 mm =
    bad grasp: open, rise, redo the grasp with the command shifted by the depth error (repeating the
    same command gives the same depth); do not lift a part held below its housing.
 2. Locate the opening with the WRIST camera (the head camera cannot resolve a port; detect_object on
-   it returns the whole face/edge, cm off). Which face holds the port is a guess too: list the device's
-   side faces the part could enter, the one nearest the arm's base first (best reach and view), and try them in that order (step 5).
+   it returns the whole face/edge, cm off). Which face holds the port is a guess too: the device may
+   be turned to any heading and the port may be on either side or the back. List its faces the part
+   could enter that face the robot's side, the one nearest the arm's base first (best reach and view),
+   and try them in that order (step 5).
    Finish a face (touch insert at its candidates) before viewing the next one. Skip faces > 0.8 m
    from the arm base (reach limit: pushes there stall or knock the part out of the grasp).
    Holding the part, park the fingertips ~0.12-0.15 m in
    front of the face (opposite the axis), ~0.10 m above the opening's guessed height, offset ~0.1 m
    sideways from the guessed opening so the gripper does not hide it, then:
    ```python
-   cands = locate_with_wrist_camera("USB-A port opening on the laptop side")  # best first
+   cands = locate_with_wrist_camera("HDMI port opening on the laptop side")  # name YOUR part's port type
    ```
    Each entry: `{"label", "position": [x, y, z], "pixel"}` (~1 mm accurate). A device can show
-   several similar openings (only one may fit): keep all candidates. None found or the gripper
+   several similar openings (USB next to HDMI; only one fits the part): keep all candidates, note
+   which looks like the part's tip (width / height ratio, shape), and try that one first (step 5). None found or the gripper
    hides the face: shift the hand 0.1 m sideways / higher and call again. The wrist camera turns
    with the hand: if the palm / held part fills the view at the carry rotation, take the views at
    carry rotation +-1.571 (the part turns too - harmless in free space), then turn back to the carry
@@ -76,11 +85,15 @@ metadata:
    candidates of all views - outliers (other faces, odd heights, rim hits) are rejected inside:
    ```python
    port_c, edge_c = [], []
-   # for each view pose: port_c += locate_with_wrist_camera("USB-A port opening on the laptop side")
-   #                     edge_c += locate_with_wrist_camera("top edge of the laptop side face")
-   est = estimate_opening(port_c, edge_c, axis=[1, 0, 0])   # prints its result
+   # for each view pose: port_c += locate_with_wrist_camera("<part type> port opening on the <device> side")
+   #                     edge_c += locate_with_wrist_camera("top edge of the <device> side face")
+   fn = estimate_face_normal(port_c[0]["position"])  # head depth: {"normal", "axis", "along", ...}
+   axis = fn["axis"]               # insertion direction = into the face; NEVER assume a world axis
+   est = estimate_opening(port_c, edge_c, axis=axis)   # prints its result
    port = est["position"]          # aim point [x, y, z]; None -> no usable hit: new views
    ```
+   `estimate_face_normal` None (face not seen by the head camera): take the axis from the two
+   face touches of step 3 (`face_normal_from_touches`), starting from your best view-based guess.
    It returns `position`, `search_line`, `search_half`, `search_cross` (use them in step 4),
    `n_used`, `z_spread`, `confident`, `notes`. Why: pointing at a small opening is consistent in
    HEIGHT across views but scatters a few cm ALONG the face; the touch line search in step 4 finds
@@ -95,26 +108,35 @@ metadata:
    so its calibration error cancels. Targets below are fingertip-centre positions (= `eef_pos`):
    command pose z = target z + 0.06 (same rule as the pick); re-command until `eef_pos` is within 1 mm.
    ```python
-   face_x = port[0]                         # face plane along the axis (the opening lies in it)
-   side_y = port[1] + 0.03                  # 3 cm sideways: flat face, no opening
-   # a) face touch -> tip position along the axis, ~7 mm below the opening centre (solid face; no
-   #    separate deck-height estimate needed - the opening z from step 2 is the reference)
-   # execute_trajectory to fingertips [face_x - 0.040, side_y, port[2] - 0.007] (4 cm in front)
-   r = move_until_contact([1, 0, 0], max_travel=0.04)          # 'contact' expected
-   off_x = face_x - r["eef_pos"][0]                            # eef -> tip end, along the axis
-   # back off 1 cm along -axis
+   a, t = np.array(axis), np.array(fn["along"])   # into the face; along the face (horizontal)
+   # a) face touches -> tip position along the axis, ~7 mm below the opening centre (solid face; no
+   #    separate deck-height estimate needed - the opening z from step 2 is the reference),
+   #    3 cm to each side of the opening (flat face). Fingertips 4 cm in front of each point:
+   hits = []
+   for s in (+0.03, -0.03):
+       side = np.array(port) + s * t + [0, 0, -0.007]
+       # execute_trajectory to fingertips side - 0.040 * a (carry rotation), then:
+       r = move_until_contact(axis, max_travel=0.04)            # 'contact' expected
+       hits.append(np.array(r["eef_pos"]))
+       # back off 1 cm along -axis
+   # the face line from the two touches refines the depth-fitted normal (both see the same face)
+   n_t = face_normal_from_touches(hits[0], hits[1], outward_hint=-a)
+   if np.dot(n_t, -a) > math.cos(math.radians(10)):      # agree within 10 deg: trust the touches
+       a = -np.array(n_t); axis = a.tolist()
+   off_a = float(np.dot(np.array(port) - (hits[0] + hits[1]) / 2, a))   # eef -> tip end, along the axis
    # b) height: from the touched grasp (step 1; recorded across subtasks) - tip centred on the body height
    g = get_grasp_info()      # {"grasp_eef_pos", "touched_top_z"}
    off_z = g["touched_top_z"] - body_h / 2 - g["grasp_eef_pos"][2]   # touched_top_z None: redo step 1's touch
-   offset = [off_x, 0.0, off_z]                                # eef -> tip centre (y: fingers centre it)
+   offset = (off_a * a + np.array([0.0, 0.0, off_z])).tolist()   # eef -> tip centre (fingers centre it across)
    ```
-   (Rotate the example for other axes: touch the face along `axis`.)
+   Touches > 10 deg off the depth normal: a touch hit something else (the opening, an edge) -
+   repeat it 1 cm further along the face.
    'no_contact' on a): the face is farther - start 2 cm closer and retry.
-   **Off-centre grasp -> regrasp.** Expected off_x = middle of the part -> tip end (about half its
+   **Off-centre grasp -> regrasp.** Expected off_a = middle of the part -> tip end (about half its
    length). More than 5 mm beyond that = held near the back end: the long lever lets the part pitch in
    the fingers and wedge a few mm into the opening. Put it back (fingertips over the spot where it
    was, 1.5 cm high; `move_until_contact([0, 0, -1], max_travel=0.03, force=3.0)` until it rests on the
-   table; `open_gripper()`; rise 4 cm), shift the grasp along the part axis by (off_x - expected) toward
+   table; `open_gripper()`; rise 4 cm), shift the grasp along the part axis by (off_a - expected) toward
    the tip, descend to the same `eef_pos` z, `close_gripper()`, lift, and redo touch a).
    Do NOT press the held tip down onto a surface or edge-scan it against the deck to measure its height:
    at ~2 N it pivots / slides in the fingers. off_z comes from `get_grasp_info()` only; if that has
@@ -128,18 +150,23 @@ metadata:
    > 5 mm): the offset is wrong - redo the calibration, do not just retry.
 4. Call (gripper stays closed; do not open it before this returns):
    ```python
-   res = insert_with_touch(axis=[1, 0, 0], tool_length=0.025)  # tool_length: fingertip centre -> tip, m
+   res = insert_with_touch(axis=axis, tool_offset=offset, insert_force=f_ins, opening_width=w_open)
    ```
-   It probes, spirals (3 mm radius; search_radius=0.005 widens it, slower) on the face to find the opening, and pushes the part in (~20 N max).
+   It probes, spirals (3 mm radius; search_radius=0.005 widens it, slower) on the face to find the
+   opening, and pushes the part in. Part-specific numbers - set them, then ADAPT them per retry (step 5):
+   `insert_force` (N; start 18 for a small connector, ~10 for a loose peg, ~30 for a mains plug,
+   always below what the grip holds: `grip_force` 20 N slips at ~24 N) and `opening_width` (m: the
+   opening's width along the face, from the wrist views; USB-A ~0.012, HDMI ~0.014, USB-C ~0.009).
    Opening position along the face uncertain by more than ~3 mm (views disagree, or a spiral attempt
    returned `search_exhausted`): search by feel along the face instead, with the numbers from
    `estimate_opening` (seated in sim with 2 cm aim error, ~20-60 s):
    ```python
-   res = insert_with_touch(axis=[1, 0, 0], tool_offset=offset, search_line=est["search_line"],
-                           search_half=est["search_half"], search_cross=est["search_cross"])
+   res = insert_with_touch(axis=axis, tool_offset=offset, search_line=est["search_line"],
+                           search_half=est["search_half"], search_cross=est["search_cross"],
+                           insert_force=f_ins, opening_width=w_open)
    ```
    `search_line` = the face direction across the axis along which the aim is uncertain (horizontal
-   along a laptop side); the height must be right within ~1 mm (the line passes are 0.4 mm apart).
+   along the face, = `fn["along"]`); the height must be right within ~1 mm (the line passes are 0.4 mm apart).
    A line search that exhausted at a height you doubt by 1-2 mm: retry once with `search_cross=0.002`
    (passes cover +-2 mm in height, ~2x slower). The search also finds height by feel: a push that
    sinks 0.4-2 mm but is then blocked is a "partial catch" on an edge of the opening; two catches
@@ -159,3 +186,11 @@ metadata:
    part slid / pivoted in the grasp instead of entering): the part is not in. Back off, check
    `gripper_holding()`, re-measure the in-hand offset (step 3) before retrying, and re-locate with
    the wrist camera. `unsupported`/`disabled`: report failure.
+   **Wrong opening**: the tip went in only ~2-4 mm and then stopped hard (`jammed`, `advance_mm` < 4)
+   at a verified height = an opening of another type (its key / tongue blocks the part), like a human
+   trying the HDMI slot with a USB plug. Back off and try the next similar opening on that face.
+   **Adapt the forces per retry** (print the values you use): `jammed` with the tip already in
+   (`advance_mm` >= 4) -> `insert_force` x1.3 (stay below the grip's slip force; raise `grip_force`
+   to 30-35 together with it); `slipped` / the part turned in the fingers -> lower `insert_force` x0.7
+   and re-grasp nearer the tip with `grip_force` +10; `over_force` -> you pushed a solid face: the aim
+   or the axis is off - re-measure, do not push harder.

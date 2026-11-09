@@ -72,6 +72,7 @@ def _push_around(api, c, sgn, r_grip, a_grip, a_start, z, rot, max_deg, r_push, 
     pull), so the hand keeps its slim side toward the panel."""
     # free edge ~r_grip + 0.12 (handle ~12 cm from it); + ~6 cm for the hand's slim side and the panel's
     # thickness. r_grip + 0.12 sat ON the edge and slammed a 38 deg door shut (harness door_around4)
+    r_out_arg, r_push_arg = r_out, r_push
     r_out = float(r_out if r_out is not None else r_grip + 0.30)
     # aim for the grasp radius; the arm column (link6/7) meets the latch spindle (sticks ~10 cm out of the back
     # face at r ~0.41-0.51, lever height) on the way in, and the push then bears on that spindle
@@ -94,6 +95,36 @@ def _push_around(api, c, sgn, r_grip, a_grip, a_start, z, rot, max_deg, r_push, 
         if door_m < min_open_deg + 8.0:
             log("push_open(around): the door fell back; not going round (re-grasp it instead)")
             return "door_fell_back", 0.0
+        # The probe's hinge (fit at ~10-20 deg) is off by ~u*dtheta/theta, a few cm; going round at r ~0.8 m with
+        # that error landed the hand ON the panel (mirrored door, harness 2026-11-09). Re-fit it now that the
+        # released panel is wider open (error shrinks ~1/angle).
+        if door_m >= 25.0 and callable(getattr(api, "find_hinge_from_depth", None)):
+            try:
+                f = api.find_hinge_from_depth(hand_xy=tip[:2])
+            except Exception as e:  # noqa: BLE001 - keep the old hinge
+                log(f"push_open(around): hinge re-fit failed: {e}")
+                f = None
+            if f and f.get("hinge") is not None and not f.get("flipped"):
+                nc = np.asarray(f["hinge"], float)[:2]
+                if float(np.linalg.norm(nc - c)) < 0.12:
+                    closed = c + r_grip * np.array([math.cos(a_start), math.sin(a_start)])
+                    log(f"push_open(around): hinge re-fit at {door_m:.0f} deg: {np.round(c, 3).tolist()} -> "
+                        f"{np.round(nc, 3).tolist()}")
+                    c[:] = nc                           # pt() closes over this array
+                    r_grip = float(np.linalg.norm(closed - c))
+                    a_start = math.atan2(closed[1] - c[1], closed[0] - c[0])
+                    if r_out_arg is None:
+                        r_out = r_grip + 0.30
+                    if r_push_arg is None:
+                        r_push = r_grip
+
+                    def hand_deg(xy):  # noqa: F811 - re-bound to the re-fit hinge
+                        return math.degrees(sgn * math.remainder(math.atan2(xy[1] - c[1], xy[0] - c[0]) - a_start,
+                                                                 2 * math.pi))
+                    a_h = math.atan2(tip[1] - c[1], tip[0] - c[0])
+                    h_deg = hand_deg(tip[:2])
+                    door_m = api.measure_door_angle() or door_m
+                    log(f"push_open(around): door {door_m:.0f} deg, hand {h_deg:.0f} deg about the re-fit hinge")
 
     def turn(a):                                        # same yaw-follows-arc rule as guarded_pull
         rot[0] = yaw_h + sgn * math.remainder(a - a_h, 2 * math.pi)
@@ -118,7 +149,7 @@ def _push_around(api, c, sgn, r_grip, a_grip, a_start, z, rot, max_deg, r_push, 
         tip = go(pt(r_out, a), z + hover, "push_open: round the free edge")
     tip = go(pt(r_out, a_b), z - below, "push_open: down behind the panel")
     log(f"push_open(around): down at r={float(np.linalg.norm(tip[:2] - c)):.2f} hand angle {hand_deg(tip[:2]):.0f} "
-        f"deg, z={tip[2]:.3f}")
+        f"deg (wanted {math.degrees(sgn * math.remainder(a_b - a_start, 2 * math.pi)):.0f}), z={tip[2]:.3f}")
     if tip[2] > z - below + 0.03:
         # landed on the panel / lever: moving in from here pushes the door SHUT (harness 2026-11-08: 19.5 -> 0 deg)
         log(f"push_open(around): descent stopped at z={tip[2]:.3f} (wanted {z - below:.3f}): something is "
@@ -199,7 +230,7 @@ def push_open(api, hinge, sgn, r_grip, a_grip, a_start, z, yaw, max_deg=80.0, st
     """
     from common_utils import Trajectory
     dz = config.gripper_depth_offset_franka
-    c = np.asarray(hinge, float)[:2]
+    c = np.array(hinge, float)[:2].copy()
     rot = [float(yaw)]
 
     def pt(r, a):
@@ -269,7 +300,7 @@ def push_open(api, hinge, sgn, r_grip, a_grip, a_start, z, yaw, max_deg=80.0, st
 
 def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.03, follow_yaw=True,
                  max_flips=1, max_regrasps=2, part=None, settle_s=0.5, max_force=None,
-                 early_m=0.15, fit_after_m=0.06, push_after_deg=15.0, push_kw=None):
+                 early_m=0.15, fit_after_m=0.06, push_after_deg=15.0, push_kw=None, start_deg=0.0):
     """Pull the held handle along ``direction`` (world, horizontal part used) or around ``hinge``
     ([x, y] of the hinge axis, the door edge FAR from the handle), guarded against slips and jams.
 
@@ -321,6 +352,12 @@ def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.0
     z, yaw0 = float(tip0[2]), float(st["rotation"])
     o = tip0[:2].copy()
     centre = None if hinge is None else np.asarray(hinge, float)[:2]
+    if centre is not None and start_deg:
+        # the door is already ``start_deg`` open (e.g. after probe_hinge): angles count from the closed handle
+        a_ = -_arc_sign(centre, o, d0) * math.radians(float(start_deg))
+        v_ = o - centre
+        o = centre + np.array([math.cos(a_) * v_[0] - math.sin(a_) * v_[1], math.sin(a_) * v_[0] + math.cos(a_) * v_[1]])
+        log(f"door already {float(start_deg):.0f} deg open: closed handle at {np.round(o, 3).tolist()}")
     if centre is not None:
         # The hinge lies on the door face, 0-20 cm behind the held lever along the pull normal. Clamp
         # an LLM hint that is farther off (door:hidden r3: a hint 24 cm behind and on the wrong side).
@@ -335,6 +372,8 @@ def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.0
     # early-trip hypotheses: the hinge on the other side; for a straight pull, an arc either way
     nrm = np.array([-d0[1], d0[0]])
     hyps = [_mirror(centre, o, d0)] if centre is not None else [o + 0.5 * nrm, o - 0.5 * nrm]
+    if centre is not None and start_deg:
+        hyps = []        # the door was SEEN turning about this hinge (probe): a trip is a slip, not a wrong side
     flips_allowed = max_flips if centre is not None else max_flips + 1
     max_turn = math.radians(6.0)                 # wrist turn per step: a sudden twist pries the jaws open
 
@@ -375,7 +414,9 @@ def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.0
         return True
 
     arm()
-    p, yaw, path, s, stalls = o.copy(), yaw0, [o.copy()], 0.0, 0
+    # travel already done (start_deg): a trip after the probe is not an early wrong-hinge trip
+    s_init = 0.0 if centre is None else float(np.linalg.norm(o - centre)) * math.radians(float(start_deg or 0.0))
+    p, yaw, path, s, stalls = tip0[:2].copy(), yaw0, [tip0[:2].copy()], s_init, 0
 
     def _push(swept, why):
         """Pull stopped part-way on an arc (slip / jaws pried open / stall): push the rest."""
@@ -448,7 +489,7 @@ def guarded_pull(api, direction, hinge=None, travel=0.55, max_deg=80.0, step=0.0
                 return res
             if s >= early_m and centre is not None and push_after_deg is not None and swept >= push_after_deg:
                 return _push(swept, f"guard {v.get('check')}")
-            if s < early_m:
+            if s < early_m and not (centre is not None and start_deg):
                 if not hyps or res["flips"] >= flips_allowed:
                     res["outcome"] = "blocked" if v.get("check") == "jam" else "slipped"
                     log("early trip, no hypotheses left")

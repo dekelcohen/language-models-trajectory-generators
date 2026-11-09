@@ -647,7 +647,8 @@ class API:
         return results
 
     def insert_with_touch(self, axis, tool_length=0.025, max_s=20.0, grip_force=20.0, tool_offset=None,
-                          search_radius=None, search_line=None, search_half=0.02, search_cross=None):
+                          search_radius=None, search_line=None, search_half=0.02, search_cross=None,
+                          insert_force=None, opening_width=None):
         """Push the held part along world ``axis`` into a hole/port, guided by force feedback.
 
         Start with the part's tip a few mm in front of the opening, aligned by vision. The robot
@@ -665,6 +666,13 @@ class API:
         grasp can, which gives 'slipped'. Returns a dict with
         ``outcome`` ('seated' | 'jammed' | 'search_exhausted' | 'no_contact' | 'slipped' | 'over_force' |
         'timeout' | 'unsupported' | 'disabled'), ``advance_mm``, ``tip_pos`` and ``events`` (proprioception only).
+
+        Part-specific tuning (defaults fit a USB-A-like plug; ADAPT them across retries from the outcome):
+        ``insert_force`` (N, default 18): the push that seats the part - above the opening's retention, below
+        what makes the part slip in the grasp ('jammed' with the tip already in -> raise it ~30%;
+        'slipped' -> lower it or re-grasp with a higher ``grip_force``). ``opening_width`` (m, default
+        0.012): the opening's width along the search line, as measured by vision; the line search's
+        edge finder brackets an opening by two partial catches about this far apart.
         """
         if not getattr(self.args, "touch", True):
             print("insert_with_touch: touch is disabled (--no-touch).")
@@ -675,6 +683,12 @@ class API:
         config = {}
         if search_radius:
             config["spiral_r_max"] = float(search_radius)
+        if insert_force:
+            f = float(insert_force)
+            config.update(f_insert=f, f_max=max(35.0, 1.8 * f))
+        if opening_width:
+            w = float(opening_width)
+            config.update(edge_min_sep=0.75 * w, edge_max_sep=1.35 * w)
         if search_line is not None:
             from touch.insertion import InsertConfig
             c = InsertConfig()
@@ -1037,6 +1051,23 @@ class API:
         print(f"guard_motion: {resp[1]}")
         return resp[1]
 
+    def estimate_face_normal(self, point, radius=0.06):
+        """Outward normal of the vertical device face around ``point`` (world [x, y, z], e.g. a port
+        located by the wrist camera) from head depth (touch/face_normal.py). The insertion axis into
+        that face is ``axis`` = -normal - a device may stand at any heading, so never assume a world
+        axis. Returns {"normal", "axis", "along", "point" (on the face), "n_inliers", "rms_m"} or None
+        (face not visible from the head camera: estimate it by two touches, face_normal_from_touches)."""
+        from touch.door_plane import depth_to_world
+        from touch.face_normal import fit_vertical_face
+        _, depth = self._capture_head_image_and_depth()
+        pts = depth_to_world(depth, self.head_camera_position, self.head_camera_orientation_q,
+                             self.cam_info, robot_mask=self._load_head_robot_mask())
+        res = fit_vertical_face(pts, point, cam_xy=np.asarray(self.head_camera_position, float)[:2], r=radius)
+        self.logger.info(PROGRESS + f"estimate_face_normal(point={np.round(np.asarray(point, float), 4).tolist()}): "
+                         f"{res}" + ENDC)
+        print(f"estimate_face_normal: {res}")
+        return res
+
     def estimate_door_plane(self, handle):
         """Door face, pull direction and hinge side from head depth (touch/door_plane.py).
 
@@ -1071,6 +1102,9 @@ class API:
                 self.logger.info(PROGRESS + f"estimate_door_plane: new panel {plane['width_m']} m narrower than "
                                  f"the earlier {ref[0]['width_m']} m (occluded); keeping the earlier plane" + ENDC)
                 plane = dict(ref[0])
+            elif same and ref[0].get("hinge_source") == "swung_panel":
+                # the hinge was MEASURED (the panel moved); a fresh look only has the panel-end hypothesis
+                plane = dict(plane, hinge=ref[0]["hinge"], free_edge=ref[0]["free_edge"], hinge_source="swung_panel")
         self.logger.info(PROGRESS + f"estimate_door_plane(handle={np.round(h, 3).tolist()}): {plane} "
                          f"({len(pts)} depth points)" + ENDC)
         print(f"estimate_door_plane: {plane}")
@@ -1101,6 +1135,38 @@ class API:
             raise RuntimeError("grasp_door_lever: call estimate_door_plane(handle_xyz) first")
         res = grasp_door_lever(self, ref[0], door_deg=door_deg)
         print(f"grasp_door_lever: {res}")
+        return res
+
+    def find_hinge_from_depth(self, hand_xy=None):
+        """Hinge of the last ``estimate_door_plane`` measured from the SWUNG panel in a new head depth capture
+        (touch.door_plane.hinge_from_swung_panel; the door must be a few deg open). Updates the stored plane
+        (hinge, free_edge, hinge_source="swung_panel") so measure_door_angle / grasps use it. None if not seen."""
+        if not getattr(self, "_door_plane", None):
+            return None
+        from touch.door_plane import depth_to_world, hinge_from_swung_panel
+        plane, z = self._door_plane
+        _, depth = self._capture_head_image_and_depth()
+        pts = depth_to_world(depth, self.head_camera_position, self.head_camera_orientation_q,
+                             self.cam_info, robot_mask=self._load_head_robot_mask())
+        found = hinge_from_swung_panel(pts, plane, z, hand_xy=hand_xy)
+        self.logger.info(PROGRESS + f"find_hinge_from_depth: {found} (hypothesis was {plane.get('hinge')})" + ENDC)
+        if found:
+            self._door_plane = (dict(plane, hinge=found["hinge"], free_edge=found["free_edge"],
+                                     hinge_source="swung_panel"), z)
+        return found
+
+    def probe_door_hinge(self, pull_m=0.10):
+        """With the door lever held (after grasp_door_lever): pull ``pull_m`` straight out along the door
+        normal, then measure the hinge from the swung panel in depth (no hinge-side guess needed).
+        Returns {"hinge", "free_edge", "open_deg", "flipped", "pulled_m", "source", "holding"}; pass
+        guarded_pull(direction=p["pull_dir"], hinge=r["hinge"], start_deg=r["open_deg"]) next."""
+        from helpers.door_open import probe_hinge
+        ref = getattr(self, "_door_plane", None)
+        if not ref:
+            raise RuntimeError("probe_door_hinge: call estimate_door_plane(handle_xyz) first")
+        res = probe_hinge(self, ref[0], pull_m=pull_m)
+        print(f"probe_door_hinge: {res}")
+        self._record_touch("probe_door_hinge", {k: res.get(k) for k in ("source", "open_deg", "pulled_m", "flipped")})
         return res
 
     def open_door(self, handle, goal_deg=65.0, max_pulls=3):

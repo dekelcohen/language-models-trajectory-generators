@@ -15,6 +15,13 @@ def _touch_recovery():
 
     return recovery
 
+def _face_normal_from_touches(p1, p2, outward_hint):
+    from touch.face_normal import face_normal_from_touches
+    n = face_normal_from_touches(p1, p2, outward_hint)
+    print(f"face_normal_from_touches: {n}")
+    return n
+
+
 def _estimate_opening(logger):
     from touch.opening_estimate import estimate_opening, format_estimate
 
@@ -71,6 +78,11 @@ def get_exec_locals(api, logger):
         "measure_door_angle": api.measure_door_angle,
         "grasp_door_lever": api.grasp_door_lever,
         "open_door": api.open_door,
+        "probe_door_hinge": api.probe_door_hinge,
+        "find_hinge_from_depth": api.find_hinge_from_depth,
+        # Outward normal of a vertical device face from head depth (insertion axis = -normal); touch skill.
+        "estimate_face_normal": api.estimate_face_normal,
+        "face_normal_from_touches": _face_normal_from_touches,
         # Proprioception (EE pose, finger width / holding); named by the touch skills.
         "get_robot_state": api.get_robot_state,
         "gripper_holding": api.gripper_holding,

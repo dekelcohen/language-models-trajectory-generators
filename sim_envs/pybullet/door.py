@@ -69,10 +69,23 @@ class SimEnvDoor(SimEnvBase):
     def load_assets(self, env):
         # Load Adroit door and set strong hold forces
         try:
-            door_start_position = [-0.11, 0.04, 0.25]
-            door_start_orientation_q = self.sim.quat_from_euler([0.0, 0.0, 4.0])
+            door_start_position, yaw = [-0.11, 0.04, 0.25], 4.0
+            urdf = "my_assets/adroit_door/adroit_door.urdf"
+            if os.environ.get("DOOR_MIRROR"):            # perturbation: hinge on the other side
+                urdf = mirror_door_urdf(urdf)
+                # keep the handle where it was: the latch moves 0.30 m along the frame's x when mirrored
+                door_start_position[0] -= 0.30 * math.cos(yaw)
+                door_start_position[1] -= 0.30 * math.sin(yaw)
+            if os.environ.get("DOOR_POSE"):              # perturbation: "dx,dy,dyaw_deg" added to the pose
+                dx, dy, dyaw = (float(v) for v in os.environ["DOOR_POSE"].split(","))
+                door_start_position[0] += dx
+                door_start_position[1] += dy
+                yaw += math.radians(dyaw)
+            if os.environ.get("DOOR_MIRROR") or os.environ.get("DOOR_POSE"):
+                print(f"[Env] door perturbation: {urdf} at {np.round(door_start_position, 3).tolist()} yaw {yaw:.3f}")
+            door_start_orientation_q = self.sim.quat_from_euler([0.0, 0.0, yaw])
             self.door_id = self.sim.load_urdf(
-                "my_assets/adroit_door/adroit_door.urdf",
+                urdf,
                 door_start_position,
                 door_start_orientation_q,
                 fixed_base=True,
@@ -293,3 +306,37 @@ class SimEnvDoor(SimEnvBase):
             "  2. The y-axis is in the depth direction, decreasing away from you.\n"
             "  3. The z-axis is in the vertical direction, increasing upwards."
         )
+
+
+def mirror_door_urdf(src):
+    """Write a copy of the adroit door URDF mirrored across the frame's middle (hinge on the other post).
+
+    Frame-level x -> 0.58 - x (posts at 0.6 / -0.02); inside the panel and latch x -> -x. Joint axes are
+    pseudovectors: under x -> -x they become (ax, -ay, -az), so the door still opens toward the same side."""
+    import xml.etree.ElementTree as ET
+    tree = ET.parse(src)
+    root = tree.getroot()
+
+    def flip(el, centre):
+        o = el.find("origin")
+        if o is not None and o.get("xyz"):
+            x, y, z = (float(v) for v in o.get("xyz").split())
+            o.set("xyz", f"{centre - x if centre else -x:g} {y:g} {z:g}")
+    for link in root.findall("link"):
+        frame_level = link.get("name") == "frame_link"
+        for tag in ("inertial", "visual", "collision"):
+            for el in link.findall(tag):
+                flip(el, 0.58 if frame_level else 0.0)
+    for j in root.findall("joint"):
+        parent = j.find("parent").get("link")
+        if parent == "frame_link":
+            flip(j, 0.58)
+        elif parent != "world":
+            flip(j, 0.0)
+        a = j.find("axis")
+        if a is not None:
+            ax, ay, az = (float(v) for v in a.get("xyz").split())
+            a.set("xyz", f"{ax:g} {-ay:g} {-az:g}")
+    dst = os.path.join(os.path.dirname(src), "adroit_door_mirrored.urdf")
+    tree.write(dst)
+    return dst

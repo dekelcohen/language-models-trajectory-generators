@@ -73,6 +73,21 @@ lever grasp, port location and seat checks are all derived from depth/RGB, wrist
 
 ---
 
+## 0.5 Progress (2026-11-09)
+
+| Item | Status |
+|---|---|
+| D2 | **Done, replaced by touch + depth.** `estimate_door_plane` no longer searches a frame gap: the hinge is the visible panel end, `hinge_source="panel_end"` (a hypothesis). `helpers/door_open.probe_hinge` makes a short guarded straight pull on the held lever, then `touch.door_plane.hinge_from_swung_panel` intersects the swung panel line with the closed face (head depth) -> `hinge_source="swung_panel"`, including the flipped (wrong side) case. `guarded_pull(start_deg=...)` continues from the probed angle and does not flip a measured hinge. No VLM hinge pointing. |
+| D7 | Done: `main_prompt` example uses `p = estimate_door_plane(handle_xyz); guarded_pull(direction=p["pull_dir"], hinge=p["hinge"])`; documents `probe_door_hinge`. |
+| D8 | Done: the planner few-shot example is now "apple into a drawer, cereal box blocking it". |
+| D9 | Done: rollout anecdotes and absolute numbers removed from the door skill; the hinge is described as a hypothesis measured by the probe. |
+| P1/P2 knobs | `DOOR_POSE="dx,dy,dyaw_deg"` and `DOOR_MIRROR=1` (hinge on the other side, `my_assets/adroit_door/adroit_door_mirrored.urdf`, generated). Harness: original door 89.9 deg; `DOOR_POSE=0.05,-0.04,10` 89.6 deg; mirrored: hinge measured within ~4.5 cm at 20 deg (see docs/status/open_door.md). |
+| U1, U7 | Done: `sim_envs/genesis/usb.py` is a parametric plug scene: `PLUG_TYPE` (usb_a, usb_c, hdmi, peg), `PORT_FACE` (left, right, back), `PORT_DIR_DEG` (laptop turned to match), `PORT_U`, `PLUG_YAW_DEG` (plug not pre-aligned), `PORT_DISTRACTOR` (a second, keyed port: a foreign plug stops at 3 mm; P6b), `PLUG_SCENE_SEED`. Random headings face sideways and toward the fixed head camera (>= 15 deg). Defaults = the original scene. |
+| U2 | Done: `estimate_opening` works in the face's own frame for any heading; new `estimate_face_normal(point)` (head depth) and `face_normal_from_touches(p1, p2, hint)` give the insertion axis. |
+| U3 | Done: `insert_with_touch(insert_force=, opening_width=)`; the skill says how to adapt them per retry (jammed with the tip in -> x1.3, slipped -> x0.7 + more grip, over_force -> re-aim). |
+| U4 | Done: the insertion skill is part-agnostic (USB-A/C, HDMI, peg, mains plug), measures the axis, turns the hand by the plug's measured heading, and handles a wrong (look-alike) opening. |
+| U5, U6 | Open (sim-only conditioning; documented, not a decision input). |
+
 ## 1. Goals
 
 | # | Goal | Measured by |

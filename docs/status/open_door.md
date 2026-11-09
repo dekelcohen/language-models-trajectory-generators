@@ -399,3 +399,33 @@ Fixes after r5/r6:
 
 Before the fixes: r4-r8 16-21 min (2 of 5 FAIL), q1 42 min, q2 29 min. All three now open in one
 `open_door` call with 2 moves; the small model only has to detect the handle and call it.
+
+
+## 2026-11-09: hinge by touch + depth (no frame-gap search, no VLM)
+- `estimate_door_plane` gives only a hinge HYPOTHESIS (the visible panel end, `hinge_source="panel_end"`);
+  the old 10 cm jamb search (sized to this door's 6 cm frame gap) is gone.
+- `open_door` -> `probe_hinge`: after the lever grasp, a short guarded straight pull (18 cm request, stops
+  at the width/hold guard, usually 10-16 cm, door 9-20 deg), then `find_hinge_from_depth` fits the swung
+  panel in head depth and intersects it with the closed face (`hinge_from_swung_panel`, also detects a
+  wrong-side hypothesis: `flipped`). `guarded_pull(start_deg=...)` continues from there; a guard trip after
+  a measured hinge is a slip (re-grasp), not a wrong-side flip.
+- Hinge error ~ u * dtheta / theta: 6.6 cm at 8 deg, ~4 cm at 13-20 deg (a re-measure at 25+ deg would cut it).
+- Scripted harness (`research/touch/door_pull_e2e.py --sim pybullet --vision --vision-grasp --approach top
+  --guarded right --open-door`, run ONE at a time - parallel runs share the head image/depth files):
+  - original door: 89.9 deg OPEN.
+  - `DOOR_POSE=0.05,-0.04,10` (shifted, turned 10 deg): 89.6 deg OPEN (probe hinge at 9 deg).
+  - `DOOR_MIRROR=1` (hinge on the other side): hinge measured [0.184, 0.376] vs true [0.202, 0.335] at 20 deg;
+    first run flipped it wrongly on a guard trip (fixed); see the latest result below.
+- Fixes during the mirrored runs: the panel line is refined from points > 8 cm from the hinge (frame/jamb
+  faces flattened it: 17.9 vs true 21.5 deg -> now 22.4 vs 24.4, mirrored 20.1 vs 20.9, 34.4 vs 35.2);
+  `probe_hinge` continues along the arc about the first fit and re-fits when the first fit is < 15 deg;
+  `push_open(around)` re-fits the hinge from depth when the released door is >= 25 deg; `open_door` re-pulls
+  a partly open door with `start_deg` = the measured angle. The depth hinge is where the panel's front face
+  meets the closed face: a constant 4-6 cm from the joint axis on this door (the motion-derived arc is what
+  matters for the pull, and it works).
+- Results after the fixes: original door 82.3 deg OPEN (hinge_orig6); DOOR_POSE 89.6 deg OPEN.
+- OPEN ISSUE, mirrored door (hinge_mirror3..7): the hinge and side are found correctly every time, the pull
+  reaches 35-51 deg, but after the release the push-around route (out past the free edge, round, behind)
+  sweeps the panel shut: on this placement the free edge swings toward the robot base and the arm cannot
+  reach behind the panel (descent lands on the panel / blocked 28-30 cm short). Needs a different push
+  route (e.g. push from the inner face near the free edge, or regrasp-and-pull in steps); not a hinge issue.

@@ -122,14 +122,6 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
     k_pos, k_neg = grow(+1), grow(-1)
     e_pos, e_neg = (k_pos + 1) * bin_m, k_neg * bin_m          # outer bin edges
 
-    def jamb(sign, last, max_m=0.10):
-        # first dense bin after the frame gap: the hinge axis sits at the jamb, past the gap (PyBullet
-        # door: a 6 cm gap, axis 8.7 cm beyond the panel's visible end; real doors: a few mm)
-        for i in range(1, int(round(max_m / bin_m)) + 1):
-            k2 = last + sign * i
-            if counts.get(k2, 0) >= low:
-                return k2 * bin_m if sign > 0 else (k2 + 1) * bin_m
-        return None
     if abs(e_pos) + abs(e_neg) < min_width_m:
         return None
     # The rose (where the handle meets the door) is the bump just proud of the face; it sits near the
@@ -143,8 +135,10 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
     ref_s = rose_s if rose_s is not None else 0.0
     far, near = (e_pos, e_neg) if abs(e_pos - ref_s) >= abs(e_neg - ref_s) else (e_neg, e_pos)
     ratio = abs(far - ref_s) / max(abs(near - ref_s), 1e-3)
-    j = jamb(+1, k_pos) if far == e_pos else jamb(-1, k_neg)
-    hinge_s = far if j is None else j
+    # The hinge is only a HYPOTHESIS here: the visible panel end far from the rose. Where the axis really is
+    # (frame gaps differ: 6 cm on the PyBullet door, a few mm on real doors) is measured after a short pull
+    # by hinge_from_swung_panel (helpers/door_open.probe_hinge).
+    hinge_s = far
     hinge = foot + hinge_s * t
     free = foot + near * t
     rose = foot + ref_s * t
@@ -174,7 +168,7 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
         "hinge": [round(float(hinge[0]), 3), round(float(hinge[1]), 3)],
         "free_edge": [round(float(free[0]), 3), round(float(free[1]), 3)],
         "handle_to_hinge_m": round(abs(hinge_s - ref_s), 3),
-        "hinge_gap_m": round(abs(hinge_s - far), 3),
+        "hinge_source": "panel_end",
         "handle_to_free_m": round(abs(near - ref_s), 3),
         "width_m": round(abs(far - near), 3),
         "face_offset_m": round(face_off, 3),
@@ -219,3 +213,97 @@ def measure_door_angle(points, plane, z, z_band=0.15, r_min=0.12, bin_deg=3.0, m
         return None, int(cnt[best])
     sel = ang[(k >= best - 1) & (k <= best + 1)]
     return round(float(np.median(sel)), 1), int(cnt[best])
+
+def hinge_from_swung_panel(points, plane, z, top_z=None, z_off=(0.05, 0.60), inlier_m=0.012, min_deg=3.0,
+                           max_deg=70.0, min_span_m=0.12, iters=400, seed=0, hand_xy=None, hand_clear_m=0.10,
+                           near_hinge_m=0.08):
+    """Measure the hinge axis from depth seen AFTER a short pull opened the door a little.
+
+    The swung panel is a vertical line (in xy) that meets the CLOSED face line (``plane``: ``free_edge``
+    / ``hinge`` / ``tangent`` / ``pull_dir``, measured before the pull) at the hinge: so the hinge comes
+    from the panel's own motion, not from how the frame / jamb looks (frame gaps differ between doors).
+    Points in front of the closed face (+``pull_dir``), above / below the handle height ``z`` by
+    ``z_off`` (skips the lever and rose) and away from the hand are RANSAC-fitted with a line that must
+    cross the closed face within the panel's span (+-15 cm) at ``min_deg``..``max_deg``.
+
+    Returns ``{"hinge": [x, y], "open_deg", "free_edge": [x, y] (the other panel end on the closed face),
+    "flipped": bool (the hinge is at the end ``plane`` called free), "n", "span_m"}`` or None.
+    """
+    P = np.asarray(points, float).reshape(-1, 3)
+    P = P[np.all(np.isfinite(P), axis=1)]
+    t = np.asarray(plane["tangent"], float)[:2]
+    t /= np.linalg.norm(t)
+    n = np.asarray(plane["pull_dir"], float)[:2]
+    n /= np.linalg.norm(n)
+    f0 = np.asarray(plane["free_edge"], float)[:2]
+    s_h = float((np.asarray(plane["hinge"], float)[:2] - f0) @ t)
+    lo_s, hi_s = min(0.0, s_h) - 0.15, max(0.0, s_h) + 0.15
+    width = abs(s_h)
+    top = top_z if top_z is not None else plane.get("top_z")
+    dz = P[:, 2] - float(z)
+    zk = (np.abs(dz) > z_off[0]) & (np.abs(dz) < z_off[1]) & (P[:, 2] > 0.08)
+    if top is not None:
+        zk &= P[:, 2] < float(top) - 0.02
+    D = P[:, :2] - f0
+    s, off = D @ t, D @ n
+    k = zk & (off > 0.015) & (off < width * math.sin(math.radians(max_deg)) + 0.05) \
+        & (s > lo_s - width) & (s < hi_s + width)
+    if hand_xy is not None:
+        k &= np.linalg.norm(P[:, :2] - np.asarray(hand_xy, float)[:2], axis=1) > hand_clear_m
+    Q = np.c_[s[k], off[k]]                      # (s, off) coordinates: closed face = off 0
+    if len(Q) < 30:
+        return None
+    rng = np.random.default_rng(seed)
+    best, best_score = None, 0
+    for _ in range(iters):
+        i, j = rng.choice(len(Q), 2, replace=False)
+        d = Q[j] - Q[i]
+        L = float(np.linalg.norm(d))
+        if L < 0.05:
+            continue
+        d /= L
+        if abs(d[1]) < 1e-6:
+            continue
+        s0 = float(Q[i, 0] - Q[i, 1] * d[0] / d[1])         # where the line crosses off = 0
+        ang = math.degrees(math.atan2(abs(d[1]), abs(d[0])))
+        if not (lo_s <= s0 <= hi_s and min_deg <= ang <= max_deg):
+            continue
+        nr = np.array([-d[1], d[0]])
+        inl = np.abs((Q - Q[i]) @ nr) < inlier_m
+        u = (Q[inl] - [s0, 0.0]) @ (d if d[1] > 0 else -d)   # distance from the hinge along the panel
+        u = u[u > -0.03]
+        if len(u) < 20:
+            continue
+        span = float(np.percentile(u, 95) - max(0.0, np.percentile(u, 5)))
+        if span < min_span_m:
+            continue
+        if len(u) > best_score:
+            best, best_score = (s0, d if d[1] > 0 else -d), len(u)
+    if best is None:
+        return None
+    s0, d = best
+    nr = np.array([-d[1], d[0]])
+    inl = Q[np.abs((Q - [s0, 0.0]) @ nr) < inlier_m]
+    # refine from the panel away from the hinge: frame / jamb faces near the hinge sit just in front of the
+    # closed face, flatten the line and (pivoting about the far panel) push the hinge several cm off
+    far = inl[(inl - [s0, 0.0]) @ d > near_hinge_m]
+    if len(far) >= 20:
+        inl = far
+    c = inl.mean(0)                                          # refine: principal direction of the inliers
+    _, _, vt = np.linalg.svd(inl - c, full_matrices=False)
+    d = vt[0] if vt[0][1] > 0 else -vt[0]
+    if abs(d[1]) > 1e-6:
+        s_ref = float(c[0] - c[1] * d[0] / d[1])
+        if lo_s <= s_ref <= hi_s:
+            s0 = s_ref
+    ang = math.degrees(math.atan2(abs(d[1]), abs(d[0])))
+    toward = float(np.sign(d[0]))                            # the panel runs from the hinge toward +s or -s
+    hinge = f0 + s0 * t
+    free_s = s0 + toward * width
+    flipped = (abs(s0 - 0.0) < abs(s0 - s_h))                # the hinge is at the end called "free" before
+    u = (inl - [s0, 0.0]) @ d
+    return {"hinge": [round(float(hinge[0]), 3), round(float(hinge[1]), 3)],
+            "open_deg": round(ang, 1),
+            "free_edge": [round(float((f0 + free_s * t)[0]), 3), round(float((f0 + free_s * t)[1]), 3)],
+            "flipped": bool(flipped), "n": int(len(inl)),
+            "span_m": round(float(np.percentile(u, 95) - np.percentile(u, 5)), 3)}

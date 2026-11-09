@@ -84,26 +84,26 @@ DECOMPOSITION RULES:
 [INSERT RECOVERY_FROM_FAILURE]
 
 IN-CONTEXT EXAMPLE:
-User command: "Open the door" (the head-camera shows a gray cylinder standing in front of the door, occluding the door handle).
-Reasoning: The cylinder occludes the door handle, so it must be moved aside before the handle can be seen and grasped. Dispatch the clearing subtask FIRST; only it runs, then I re-observe.
-First turn - dispatch the NEXT subtask (clear the occluder):
+User command: "Put the apple in the drawer" (the head-camera shows a cereal box standing on the counter in front of the closed drawer, hiding its handle).
+Reasoning: The box blocks the drawer front, so it must be moved aside before the drawer can be opened, and the drawer must be open before the apple can go in. Dispatch the clearing subtask FIRST; only it runs, then I re-observe.
+First turn - dispatch the NEXT subtask (clear the blocker):
 ```python
 result = execute_subtasks([
-    {"prompt": "Clear the gray cylinder in front of the door out of the way - pick and place it about 30 cm to the side, or push / topple it - so it ends clear of the door and its swing path, then move the hand back to the pose it started this subtask from. Success = the gray cylinder no longer stands in front of the door (toppled / lying clear of the door and its swing path is fine) and no longer occludes the door region. The handle was hidden, so whether it is visible now is NOT part of success.", "max_attempts": 2},
+    {"prompt": "Move the cereal box in front of the drawer out of the way - pick and place it aside on the counter, or push / topple it - so it ends clear of the drawer front and the drawer's opening path, then move the hand back to the pose it started this subtask from. Success = the box no longer stands in front of the drawer (lying clear of the drawer and its path is fine) and no longer hides the drawer front. The handle was hidden, so whether it is visible now is NOT part of success.", "max_attempts": 2},
 ])
 print(result["executed"], result["success"], len(result["remaining"]))
 ```
-Second turn - after the cylinder is cleared, the UPDATED SCENE ANALYSIS shows the robot arm is now hovering over / occluding the door handle. Insert a prep subtask to move the arm clear BEFORE opening the door:
+Second turn - the box is cleared, but the UPDATED SCENE ANALYSIS shows the robot arm now hovering over / occluding the drawer handle. Insert a prep subtask to move the arm clear BEFORE opening:
 ```python
 result = execute_subtasks([
-    {"prompt": "Move the robot arm up and away so it no longer hovers over or occludes the door handle, then hold clear of the door. Success = the door handle is fully visible and unobstructed by the arm in the head camera.", "max_attempts": 2},
+    {"prompt": "Move the robot arm up and away so it no longer hovers over or occludes the drawer handle, then hold clear. Success = the drawer handle is fully visible and unobstructed by the arm in the head camera.", "max_attempts": 2},
 ])
 print(result["executed"], result["success"])
 ```
-Third turn - the handle is now visible and clear; dispatch the door-opening subtask:
+Third turn - the handle is visible and clear; dispatch the opening subtask, then (next turn) the placing one:
 ```python
 result = execute_subtasks([
-    {"prompt": "Grasp the door lever handle and open the door by rotating it about its hinge. Success = the door is WIDE open - swung >= ~60 deg about its hinge, wide enough for a mobile robot to pass; only ajar (a small gap) is a failure.", "max_attempts": 3},
+    {"prompt": "Grasp the drawer handle and pull the drawer open. Success = the drawer is open far enough that its inside is exposed and an apple fits in (clearly moved from its start); only a tiny gap is a failure.", "max_attempts": 3},
 ])
 print(result["executed"], result["success"])
 ```

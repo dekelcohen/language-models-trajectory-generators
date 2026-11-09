@@ -365,13 +365,26 @@ if args.guarded != "off":
                 d = self.measure_door_angle()
                 return dict(VISION, door_open_deg=d) if d is not None and d > 10.0 else VISION
 
-            def measure_door_angle(self):
+            def _depth_pts(self):
                 c = call([config.CAPTURE_IMAGES])
                 dep = np.load(os.path.splitext(config.depth_image_head_path)[0] + ".npy").astype(np.float32)
                 mp = os.path.splitext(config.depth_image_head_path)[0] + "_robot_mask.npy"
-                pts = depth_to_world(dep, c[0], c[1], c[5] if len(c) > 5 else None,
-                                     robot_mask=np.load(mp) if os.path.exists(mp) else None)
-                deg, n = _mda(pts, VISION, float(lp[2]))
+                return depth_to_world(dep, c[0], c[1], c[5] if len(c) > 5 else None,
+                                      robot_mask=np.load(mp) if os.path.exists(mp) else None)
+
+            def find_hinge_from_depth(self, hand_xy=None):
+                from touch.door_plane import hinge_from_swung_panel
+                plane, z = self._door_plane
+                found = hinge_from_swung_panel(self._depth_pts(), plane, z, hand_xy=hand_xy)
+                print(f"[door] find_hinge_from_depth {found} (eval: true hinge {np.round(hinge[:2], 3).tolist()}, "
+                      f"door {math.degrees(door_angle()):.1f} deg)", flush=True)
+                if found:
+                    self._door_plane = (dict(plane, hinge=found["hinge"], free_edge=found["free_edge"],
+                                             hinge_source="swung_panel"), z)
+                return found
+
+            def measure_door_angle(self):
+                deg, n = _mda(self._depth_pts(), self._door_plane[0], float(lp[2]))
                 print(f"[door] measure_door_angle {deg} ({n} pts; true {math.degrees(door_angle()):.1f})", flush=True)
                 return deg
 

@@ -137,6 +137,78 @@ def push_door(api, plane, door_deg, max_deg=85.0, hover=0.12):
                      log=lambda m: api.logger.info(f"[door_open] {m}"))
 
 
+def probe_hinge(api, plane, pull_m=0.18, step=0.02, min_deg=3.0, refit_below_deg=15.0, arc_m=0.10):
+    """Find the hinge by moving the door, not by looking at the frame: with the lever held, pull straight out
+    along ``pull_dir`` (no hinge-side guess; a lever slides along the bar between the fingers while the
+    panel swings), then fit the swung panel in head depth: it meets the closed face at the hinge
+    (``touch.door_plane.hinge_from_swung_panel``). Stops early if the hand stalls (the door does not open
+    this way) or the contact guard trips. Returns ``{"hinge", "free_edge", "open_deg", "flipped",
+    "pulled_m", "source": "swung_panel" | "none", "reason"}``; the hand keeps holding the lever."""
+    from common_utils import Trajectory
+    dz = config.gripper_depth_offset_franka
+    st = api.get_robot_state()
+    out = {"hinge": None, "open_deg": 0.0, "pulled_m": 0.0, "source": "none", "flipped": False}
+    if not st.get("gripper_holding"):
+        out["reason"] = "not holding the lever"
+        return out
+    n = _unit2(plane["pull_dir"])
+    tip0 = np.asarray(st["eef_pos"], float)
+    rot = float(st.get("rotation") or 0.0)
+    try:
+        api.guard_motion("hold", on_trip="stop")
+    except Exception:
+        pass
+    p, stalls, guard = tip0.copy(), 0, None
+    for k in range(int(math.ceil(pull_m / step))):
+        tgt = tip0[:2] + n * min(pull_m, step * (k + 1))
+        m = api.execute_trajectory(Trajectory([[float(tgt[0]), float(tgt[1]), tip0[2] + dz, rot]], "door: probe pull"))
+        guard = (m or {}).get("guard") if isinstance(m, dict) else None
+        pn = np.asarray(api.get_robot_state()["eef_pos"], float)
+        stalls = stalls + 1 if float(np.linalg.norm(pn[:2] - p[:2])) < 0.3 * step else 0
+        p = pn
+        if guard or stalls >= 2:
+            break
+    out["pulled_m"] = round(float(np.dot(p[:2] - tip0[:2], n)), 3)
+    holding = bool(api.get_robot_state().get("gripper_holding"))
+    found = api.find_hinge_from_depth(hand_xy=p[:2]) if callable(getattr(api, "find_hinge_from_depth", None)) else None
+    api.logger.info(f"[door_open] probe pull {out['pulled_m'] * 100:.0f} cm (guard={guard and guard.get('check')}, "
+                    f"stalls={stalls}, holding={holding}) -> swung panel {found}")
+    # The hinge error is ~u*dtheta/theta: at < ~15 deg it is several cm, enough to jam the following arc pull.
+    # Continue along the arc about the first fit (small steps, tangent re-computed; short arcs tolerate the
+    # error) and re-fit the wider-open panel.
+    if found and min_deg <= found["open_deg"] < refit_below_deg and holding and arc_m > 0:
+        c = np.asarray(found["hinge"], float)[:2]
+        moved = 0.0
+        for _ in range(int(math.ceil(arc_m / step))):
+            r = p[:2] - c
+            t = _unit2(np.array([-r[1], r[0]]))
+            if float(np.dot(t, n)) < 0:
+                t = -t
+            tgt = p[:2] + t * step
+            m = api.execute_trajectory(Trajectory([[float(tgt[0]), float(tgt[1]), tip0[2] + dz, rot]],
+                                                  "door: probe arc"))
+            g2 = (m or {}).get("guard") if isinstance(m, dict) else None
+            pn = np.asarray(api.get_robot_state()["eef_pos"], float)
+            moved += float(np.linalg.norm(pn[:2] - p[:2]))
+            p = pn
+            if g2 or float(np.linalg.norm(pn[:2] - tgt)) > 0.6 * step:
+                break
+        holding = bool(api.get_robot_state().get("gripper_holding"))
+        f2 = api.find_hinge_from_depth(hand_xy=p[:2])
+        api.logger.info(f"[door_open] probe arc {moved * 100:.0f} cm about {np.round(c, 3).tolist()} "
+                        f"(holding={holding}) -> swung panel {f2}")
+        if f2 and not f2.get("flipped") and f2["open_deg"] > found["open_deg"]:
+            found = f2
+        out["pulled_m"] = round(out["pulled_m"] + moved, 3)
+    if found and found["open_deg"] >= min_deg:
+        out.update(found, source="swung_panel", holding=holding)
+    else:
+        out["reason"] = (f"door opened < {min_deg:.0f} deg on a {out['pulled_m'] * 100:.0f} cm straight pull"
+                         if found or out["pulled_m"] > 0.03 else "the hand could not pull (door stuck / pushes away)")
+        out["holding"] = holding
+    return out
+
+
 def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_from_deg=30.0):
     """Open a hinged door wide (>= ``goal_deg`` measured from head depth). ``handle`` = world [x, y, z] of
     any point on the handle (from detect_object). Steps: estimate_door_plane -> grasp_door_lever ->
@@ -175,7 +247,23 @@ def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_fr
             deg = measure(deg)
             api.logger.info(f"[door_open] grasp miss {misses}; door now {deg} deg")
             continue
-        r = api.guarded_pull(direction=plane["pull_dir"], hinge=plane["hinge"], max_deg=max_deg)
+        # a partly open door with a measured hinge: continue from the measured angle (no wrong-side flips)
+        start = deg if partly and plane.get("hinge_source") == "swung_panel" else 0.0
+        if plane.get("hinge_source") != "swung_panel" and not partly:
+            pr = probe_hinge(api, plane)
+            pulls.append({"probe": {k: pr.get(k) for k in ("source", "hinge", "open_deg", "flipped", "pulled_m",
+                                                           "reason")}})
+            if pr["source"] == "swung_panel":
+                plane = dict(plane, hinge=pr["hinge"], free_edge=pr["free_edge"], hinge_source="swung_panel")
+                res["plane"] = plane
+                start = float(pr["open_deg"])
+            if not pr.get("holding"):
+                misses += 1
+                _release_and_clear(api)
+                deg = measure(deg)
+                api.logger.info(f"[door_open] lost the lever on the probe pull; door now {deg} deg")
+                continue
+        r = api.guarded_pull(direction=plane["pull_dir"], hinge=plane["hinge"], max_deg=max_deg, start_deg=start)
         moves += 1
         _release_and_clear(api)
         deg = measure(deg)

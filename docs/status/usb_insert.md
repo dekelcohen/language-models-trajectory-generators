@@ -167,3 +167,18 @@ Run: `images_usb_u4`, packaged to `outputs/2026-11-08/usb_u4_false_slipped_seatc
 | u9 | opus-5.5 / gpt-6-sol | FAIL (90 min budget) | plug slipped; insert searched y 0.58-0.66 (port at 0.496), then a line search with an empty hand |
 - Only the defaults (opus LLM + terra perception) inserted. Swapping either model hurt: sol/astra as LLM
   wander in the planner; sol as perception put the port box ~8 cm off. Keep the defaults.
+
+
+## 2026-11-09: generalized to plug insertion (not USB-specific)
+- Scene `sim_envs/genesis/usb.py` (task `usb`) is parametric, defaults = the original USB-A scene:
+  `PLUG_TYPE=usb_a|usb_c|hdmi|peg`, `PORT_FACE=left|right|back`, `PORT_DIR_DEG` (laptop turned so the face
+  normal points there; port opening kept at the same reachable spot), `PORT_U`, `PLUG_YAW_DEG`,
+  `PORT_DISTRACTOR=<type>` (a second keyed port: a foreign plug stops at 3 mm), `PLUG_SCENE_SEED` (random,
+  headings limited to faces the fixed head camera sees >= 15 deg). Retention/success in the port frame.
+  Smoke-tested (`usb_pipeline_e2e.py --stage scene`, env `vlm_genesis`): default, hdmi/back/10 deg + usb_a
+  distractor, seed 3, peg/right/200 deg, usb_c/seed 7 all build with the plug resting on its pedestal.
+- Perception: `estimate_opening` works for any face heading; `estimate_face_normal(point)` (head depth) and
+  `face_normal_from_touches` give the insertion axis. NEW perception dependency: the head camera must see
+  the port face's depth (else two touches on the face give the axis).
+- Control: `insert_with_touch(insert_force=, opening_width=)`; the skill adapts them per retry.
+- Not yet run end to end with the LLM on the new layouts (next step).

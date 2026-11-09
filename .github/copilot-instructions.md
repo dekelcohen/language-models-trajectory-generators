@@ -67,6 +67,26 @@ hinge as a starting assumption).
 **Keep the physics honest**: no weld / attach-constraint grasps or other cheats; objects are
 held by contact + friction only.
 
+## Generalize, do not overfit the scene
+
+Skills, prompts, helpers and control code must work for the same object category (door, drawer,
+plug/socket, kettle...) in a different setup: moved, rotated, mirrored, resized, stiffer/looser,
+different looks, lighting or camera view. Do not write code that only works in the current scene.
+- **Never hard-code** absolute world coordinates, scene-specific offsets/gaps, or a force, size or
+  angle tuned on one asset. Two examples: "the hinge is 10 cm past the panel", or `hinge=[0.42, -0.30]`
+  in a prompt example. Measure such values from pixels / depth / proprioception, or derive them from
+  measured geometry. Make them parameters that adapt across retries.
+- **Category priors are fine** when they hold for most instances, and should be stated as priors. For
+  example: "on a lever door the hinge is on the panel edge far from the handle". So is "a plug enters
+  along the socket's normal". Prefer verifying them by touch / motion (e.g. pull a little and see how
+  the panel swings) over trusting them blindly.
+- Prompt examples and skills: use symbolic values (`p["hinge"]`), not numbers or names from the test
+  scene. Keep rollout anecdotes in `docs/status/`, not as rules in `SKILL.md`.
+- Validate on perturbed scenes (`docs/plans/perturb_scenes.md`), not only on the scene you tuned on.
+- **New perception / sensing assumptions or dependencies must be flagged.** Examples: a VLM that
+  locates the hinge, a new detector, a new sensor, or a model of the frame. Call them out explicitly
+  in the summary to the user. Preferably ask first (plan mode) before adding them.
+
 **Does the real robot know its gripper 3D position?** Yes. libfranka reports the EE pose
 (`O_T_EE`) at 1 kHz from the joint encoders + forward kinematics, and the Franka Hand reports
 the finger width.

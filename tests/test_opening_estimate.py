@@ -47,6 +47,21 @@ class EstimateOpeningTest(unittest.TestCase):
         self.assertFalse(est["confident"])
         self.assertTrue(any("more views" in n for n in est["notes"]))
 
+    def test_turned_face_keeps_the_estimate_on_the_face(self):
+        """A face 30 deg off the world axes: off-face hits are judged along its normal, and the search
+        line runs along the face, not along world y."""
+        import math
+        n = [math.cos(math.radians(30)), math.sin(math.radians(30)), 0.0]
+        t = [-n[1], n[0], 0.0]
+        port = [0.1, 0.5, 0.07]
+        hits = [[port[i] + s * t[i] for i in range(3)] for s in (-0.01, 0.0, 0.004, 0.012)]
+        hits.append([port[i] + 0.03 * n[i] for i in range(3)])      # 3 cm off the face
+        est = estimate_opening(hits, axis=n)
+        self.assertEqual(est["n_used"], 4)
+        self.assertAlmostEqual(est["search_line"][0], t[0], delta=1e-3)
+        off = sum((est["position"][i] - port[i]) * n[i] for i in range(3))
+        self.assertLess(abs(off), 1e-3)
+
     def test_empty(self):
         self.assertIsNone(estimate_opening([])["position"])
 
