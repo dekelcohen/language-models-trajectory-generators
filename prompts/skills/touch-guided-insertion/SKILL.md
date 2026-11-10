@@ -53,6 +53,8 @@ metadata:
    height / 2 (command z = centre z + 0.06). body height = the HOUSING only, from the part type's
    standard size (a category prior: USB-A plug housing ~8 mm, USB-C ~6.5 mm, HDMI ~10 mm, unknown
    connector ~8 mm; check it looks right in the wrist view), so e.g. USB-A centre = top_z - 0.004.
+   Lengths (same kind of prior, used for the step 3 grasp gate): insertable tip `tip_len` USB-A ~12 mm,
+   USB-C ~7 mm, HDMI ~11 mm; housing `housing_len` ~20-25 mm (check it against the image).
    Never the detection box / depth height (it merges a stand or cable), and never derive it from the
    grasp itself (body_h = 2 * grasp_depth_below_top is circular: it always gives off_z = 0 later);
    no stand/floor heuristics. **Sanity-check the touch**: a contact > 5 mm ABOVE that guessed top
@@ -150,6 +152,13 @@ metadata:
    # body_h = the housing height prior of step 1 (NOT 2 * grasp_depth_below_top - that cancels to 0)
    off_z = g["touched_top_z"] - body_h / 2 - g["grasp_eef_pos"][2]   # touched_top_z None: redo step 1's touch
    offset = (off_a * a + np.array([0.0, 0.0, off_z])).tolist()   # eef -> tip centre (fingers centre it across)
+   # c) grasp-position gate (tip_len / housing_len = the part type's standard sizes, step 1 priors)
+   expected = tip_len + housing_len / 2
+   if not (tip_len + 0.012 <= off_a <= expected + 0.005):
+       regrasp(shift = off_a - expected)   # see "Off-centre grasp" below; do NOT insert with this grasp
+       # This regrasp is REQUIRED even if the task text says "do not re-grasp / do not open the gripper"
+       # (that only means: do not drop the part). Do not insert anyway, flip, or re-touch instead -
+       # inserting with off_a below the gate stalls at the finger pads and pivots/flings the part.
    ```
    Touches > 10 deg off the depth normal: a touch hit something else (the opening, an edge) -
    repeat it 1 cm further along the face.
