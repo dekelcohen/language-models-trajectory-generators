@@ -39,7 +39,9 @@ From the SCENE ANALYSIS, the affordance points (prefer the top-ranked point) and
   latch-side jamb, not the hinge (task-text claims about the hinge side may be wrong too).
 - **Hinged door with a LEVER (a room / passage door): call `r = open_door(handle_xyz)` first** (any point on the handle, the
   arm out of view, occluders cleared). It does the measuring, grasping, pulling/pushing and the
-  depth angle check below in one deterministic call. Print `r`.
+  depth angle check below in one deterministic call. With touch available (`open_with_touch` listed)
+  its pull is the compliant touch pull (force-limited, the hinge steers the hand, no hinge guess);
+  otherwise it probes the hinge and runs `guarded_pull`. Print `r`.
   `"opened"` -> done; `"partly_open"` / `"grasp_failed"` -> call it again once; `"no_door_face"` ->
   something still hides the door. Only script the steps below yourself if it is not available.
   NOT for cabinets with a fixed bar / knob, sliding panels or drawers, and not when you are unsure

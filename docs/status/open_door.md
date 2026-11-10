@@ -465,3 +465,21 @@ Before the fixes: r4-r8 16-21 min (2 of 5 FAIL), q1 42 min, q2 29 min. All three
   - Port it to PyBullet and the real robot with Cartesian impedance (FR3 supports it).
   - Keep the depth door plane only as an optional prior that seeds the first direction.
   - No new perception dependency was added.
+
+## 2026-11-10 - touch pull made primary in `open_door`; Genesis agent rollout
+
+- **Change**: `helpers/door_open.py` `open_door` now pulls with `touch.recovery.open_with_touch` (compliant, no hinge assumed) right after the grasp holds. It skips the push-around branch.
+  - Fallback: on `--no-touch`, or on a sim without torque control (PyBullet: `unsupported`), it keeps the same grasp and runs `probe_hinge` + `guarded_pull` as before.
+  - A hinge fitted by the touch pull replaces the depth/prior hinge for later moves (`hinge_source="touch"`). `res["method"]` = `touch_pull` | `guarded_pull`.
+  - Skills (`open-close-door-cabinet-drawer`, `touch-guided-pull`), README ("Opening a door with touch (Genesis)") and `tests/test_door_plane.py` updated.
+- **PyBullet port postponed.** "Touch" is not a tactile sensor: it is joint-torque impedance control plus a force estimate from the impedance error.
+  - It needs the adapter methods `supports_torque_control`, `get_link_jacobian`, `get_gravity_torques` and `set_joint_torques`. Only `GenesisAdapter` has them.
+  - PyBullet could support them (TORQUE_CONTROL after disabling the velocity motors, `calculateJacobian`, `calculateInverseDynamics`), but it needs adapter work plus tuning.
+- **Agent rollout** `door:hidden`, Genesis, Opus 5.5 + gpt-6.1-terra, capped at 1 h: **FAIL** (door peak 10.8 deg eval / ~7 deg vision).
+  - HF: `rollouts/2026-11-10/door_hidden_genesis_touchpull_fail`.
+  - Subtask 1 (move the occluding cylinder) succeeded. Subtask 2 (open) failed in both attempts.
+  - **The top-down lever grasp misses on Genesis.** Most closes reached 0.5-1 mm (nothing held) or stayed 50-78 mm (open); about 1 in 3+ held.
+  - **Hand sweep is not door sweep.** The touch pull logged 40 deg and `guarded_pull` logged 48 deg over 55 cm, while vision read 0.7 deg. The fingers slid along / off the lever.
+    - Swept angle from the hand path must be cross-checked (vision, or felt load) before it is trusted as door motion.
+  - The harness A/B 61 deg used a SIDE grasp.
+- **Next**: on Genesis, try a side grasp of the lever (`approach_yaw`). Gate "door moved" on the felt load staying up during the sweep.

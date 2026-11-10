@@ -306,6 +306,26 @@ python main.py --list-tasks
 
 For the full argument reference, see [`document.md` §2](document.md).
 
+### Opening a door with touch (Genesis)
+
+The door task runs best on Genesis. There `open_door` pulls the grasped lever with the compliant touch pull
+(`touch/pull.py`, `touch/recovery.py:open_with_touch`):
+- The hand pulls with a limited force and stays compliant sideways, so the hinge itself steers it.
+- No hinge position is assumed: it is fitted from the hand's own path.
+- Slips are detected from the finger width and trigger a re-grasp.
+
+Touch needs joint-torque control, which only the Genesis adapter has. On PyBullet (or with `--no-touch`),
+`open_door` falls back to a hinge probe from depth plus `guarded_pull`.
+
+```
+python main.py -lm copilot-claude-opus-5.5 --seg-provider moondream --task door:hidden -r franka --sim genesis \
+  --planner-perception-vlm copilot-gpt-6.1-terra --review-provider vlm:copilot-gpt-6.1-terra \
+  --attempts 2 --max-planner-iter 4 --reasoning-effort medium -c "open the door"
+```
+- `--task door` has no occluding pole; `door:hidden` has one.
+- `--touch` is on by default.
+- Genesis needs the `vlm_genesis` conda env (see [Simulators](#simulators-pybullet--genesis--adding-your-own)).
+
 ### Simulation Environments (`sim_envs/`)
 
 PyBullet scenes are defined as **sim-env profiles** under `sim_envs/`, selected by `--task`:

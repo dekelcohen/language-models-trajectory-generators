@@ -209,20 +209,31 @@ def probe_hinge(api, plane, pull_m=0.18, step=0.02, min_deg=3.0, refit_below_deg
     return out
 
 
-def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_from_deg=30.0):
+def _swung_dir(plane, door_deg):
+    n = np.asarray(plane["pull_dir"][:2], float)
+    if door_deg and abs(door_deg) > 1.0:
+        n = _rot_about(n, np.zeros(2), _open_sign(plane) * math.radians(abs(door_deg)))
+    return [float(n[0]), float(n[1]), 0.0]
+
+
+def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_from_deg=30.0, touch=True):
     """Open a hinged door wide (>= ``goal_deg`` measured from head depth). ``handle`` = world [x, y, z] of
     any point on the handle (from detect_object). Steps: estimate_door_plane -> grasp_door_lever ->
-    guarded_pull (pull + push) -> measure_door_angle. Then, until >= ``goal_deg`` (``max_pulls`` moves):
-    a door >= ``push_from_deg`` open is pushed from behind (``push_door``), a less open one is re-grasped
-    at the swung lever and pulled again (grasp misses do not count, at most 2). Releases and lifts at the
-    end. Returns {"outcome": "opened" | "partly_open" | "no_door_face" | "grasp_failed", "door_deg",
-    "pulls", "plane"}."""
+    pull -> measure_door_angle. The pull is the compliant touch pull (``touch.recovery.open_with_touch``:
+    force-limited, compliant sideways, the hinge steers the hand; no hinge prior) when the simulator has
+    torque control (Genesis) and ``touch``; otherwise probe_hinge + guarded_pull (pull + push). Then,
+    until >= ``goal_deg`` (``max_pulls`` moves): without touch a door >= ``push_from_deg`` open is pushed
+    from behind (``push_door``); otherwise (and with touch always) the swung lever is re-grasped and pulled
+    again (grasp misses do not count, at most 2). Releases and lifts at the end. Returns {"outcome":
+    "opened" | "partly_open" | "no_door_face" | "grasp_failed", "door_deg", "pulls", "plane", "method"}."""
     plane = api.estimate_door_plane(handle)
     if not plane:
         return {"outcome": "no_door_face", "door_deg": None, "pulls": [], "plane": None,
                 "hint": "no door face in depth: clear the occluder / move the arm out of view, then retry"}
     deg = float(plane.get("door_open_deg") or 0.0)
     pulls, misses, moves = [], 0, 0
+    use_touch = bool(touch) and getattr(getattr(api, "args", None), "touch", True) is not False
+    touch_hinge = None
     res = {"outcome": "partly_open", "door_deg": deg, "pulls": pulls, "plane": plane}
 
     def measure(prev):
@@ -230,7 +241,7 @@ def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_fr
         return prev if m is None else float(m)
 
     while deg < goal_deg and moves < max_pulls and misses <= 2:
-        if deg >= push_from_deg:
+        if deg >= push_from_deg and not use_touch:
             out, hand = push_door(api, plane, deg, max_deg=max_deg)
             moves += 1
             _release_and_clear(api)
@@ -247,6 +258,29 @@ def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_fr
             deg = measure(deg)
             api.logger.info(f"[door_open] grasp miss {misses}; door now {deg} deg")
             continue
+        if use_touch:
+            from touch.recovery import open_with_touch
+            r = open_with_touch(api, direction=_swung_dir(plane, deg), rotation=float(g["rotation"]),
+                                target_deg=max(10.0, goal_deg + 5.0 - deg), handle_name="door handle",
+                                pull_config={"hinge": touch_hinge} if touch_hinge else None)
+            if r.get("outcome") in ("disabled", "unsupported", "error", None):
+                api.logger.info(f"[door_open] touch pull {r.get('outcome')} -> probe_hinge + guarded_pull")
+                use_touch = False
+            else:
+                moves += 1
+                if r.get("hinge"):
+                    touch_hinge = r["hinge"]
+                    # the fitted (moved-door) hinge replaces the depth hypothesis for the re-grasp of the swung lever
+                    plane = dict(plane, hinge=list(touch_hinge["centre_xy"]), free_edge=list(g["xyz"][:2]),
+                                 hinge_source="touch")
+                    res["plane"] = plane
+                _release_and_clear(api)
+                deg = measure(deg)
+                pulls.append({"grasp": g, "touch_pull": {k: r.get(k) for k in ("outcome", "swept_deg", "travel_cm",
+                                                                                 "hinge")}, "door_deg": deg})
+                api.logger.info(f"[door_open] touch pull {moves}: {r.get('outcome')} swept={r.get('swept_deg')} "
+                                f"hinge={touch_hinge} -> door {deg} deg")
+                continue
         # a partly open door with a measured hinge: continue from the measured angle (no wrong-side flips)
         start = deg if partly and plane.get("hinge_source") == "swung_panel" else 0.0
         if plane.get("hinge_source") != "swung_panel" and not partly:
@@ -271,6 +305,7 @@ def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_fr
                       "door_deg": deg})
         api.logger.info(f"[door_open] pull {moves}: {r.get('outcome')} swept={r.get('swept_deg')} -> door {deg} deg")
     res["door_deg"] = round(deg, 1)
+    res["method"] = "touch_pull" if use_touch else "guarded_pull"
     if deg >= goal_deg:
         res["outcome"] = "opened"
     elif moves == 0:

@@ -14,6 +14,9 @@ metadata:
 
 # Touch-guided pull
 
+Hinged LEVER (room / passage) door: call `open_door(handle_xyz)` (door skill); it grasps the lever
+and runs this pull itself. Use the steps below for other handles (cabinets, drawers, bars, knobs).
+
 1. Grasp the handle exactly as the door skill says (top-down for a lever, incl. the unlatch
    press). Check `gripper_holding()` (measured: closed fingers stalled on the handle).
 2. Do NOT script the arc and do not hunt for the hinge. Keep the gripper closed and call:

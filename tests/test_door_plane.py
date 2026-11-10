@@ -116,3 +116,49 @@ def test_lever_grasp_follows_the_door_about_the_hinge():
     g = lever_grasp_now(plane, 90.0)
     assert np.allclose(g["xyz"], [-0.1, -0.3, 0.65], atol=1e-6)        # swung toward -y (the robot)
     assert abs(abs(g["rotation"])) < 1e-6 or abs(abs(g["rotation"]) - math.pi) < 1e-6
+
+
+def _open_door_with(monkeypatch, touch_result):
+    """Run helpers.door_open.open_door on a fake API; returns (result, calls)."""
+    import math
+    from types import SimpleNamespace
+    from helpers import door_open
+    from touch import recovery
+    plane = {"hinge": [0.0, 0.0], "free_edge": [0.5, 0.0], "pull_dir": [0.0, -1.0, 0.0], "top_z": 1.0,
+             "lever_grasp": {"xyz": [0.3, -0.1, 0.65], "rotation": -math.pi / 2}}
+    calls, angle = [], {"deg": 0.0}
+    monkeypatch.setattr(door_open, "grasp_door_lever", lambda api, p, door_deg=0.0, offsets=(): calls.append("grasp")
+                        or {"holding": True, "xyz": [0.3, -0.1, 0.65], "rotation": -math.pi / 2})
+    monkeypatch.setattr(door_open, "_release_and_clear", lambda api: None)
+    monkeypatch.setattr(door_open, "probe_hinge", lambda api, p: calls.append("probe")
+                        or {"source": "none", "holding": True})
+
+    def touch_pull(api, **kw):
+        calls.append(("touch", kw["direction"]))
+        if touch_result["outcome"] == "opened":
+            angle["deg"] = 70.0
+        return touch_result
+    monkeypatch.setattr(recovery, "open_with_touch", touch_pull)
+
+    def guarded(direction, hinge=None, **kw):
+        calls.append("guarded")
+        angle["deg"] = 70.0
+        return {"outcome": "opened"}
+    api = SimpleNamespace(estimate_door_plane=lambda h: plane, measure_door_angle=lambda: angle["deg"],
+                          guarded_pull=guarded, logger=SimpleNamespace(info=lambda m: None),
+                          args=SimpleNamespace(touch=True))
+    return door_open.open_door(api, [0.3, -0.1, 0.65]), calls
+
+
+def test_open_door_pulls_with_touch_and_no_hinge_probe(monkeypatch):
+    res, calls = _open_door_with(monkeypatch, {"outcome": "opened", "swept_deg": 66.0,
+                                               "hinge": {"centre_xy": [0.0, 0.0], "radius": 0.3}})
+    assert res["outcome"] == "opened" and res["method"] == "touch_pull"
+    assert "probe" not in calls and "guarded" not in calls
+    assert calls[1] == ("touch", [0.0, -1.0, 0.0])          # starts along the door normal, toward the robot
+
+
+def test_open_door_falls_back_to_guarded_pull_without_torque_control(monkeypatch):
+    res, calls = _open_door_with(monkeypatch, {"outcome": "unsupported"})
+    assert res["outcome"] == "opened" and res["method"] == "guarded_pull"
+    assert calls == ["grasp", ("touch", [0.0, -1.0, 0.0]), "probe", "guarded"]   # same grasp, no re-grasp
