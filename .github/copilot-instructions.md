@@ -3,6 +3,13 @@
 VLM-driven robot manipulation (planner -> LLM trajectory code -> VLM reviewer) in PyBullet /
 Genesis / MetaWorld sims. Full design notes: `document.md`. Living status logs: `docs/status/`.
 
+## Model selection
+
+- Use Claude Opus, high reasoning effort, for planning, reasoning over complex logic and debugging
+  hard bugs.
+- For the rest (paper summarization, implementation that follows a detailed plan), try sub-agents
+  with Claude Opus or Claude Sonnet at medium reasoning effort.
+
 ## Rollout outputs
 
 Package every rollout under `outputs/<run-date>/<descriptive-run-name>/` (e.g.
