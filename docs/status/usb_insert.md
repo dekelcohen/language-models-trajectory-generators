@@ -182,3 +182,32 @@ Run: `images_usb_u4`, packaged to `outputs/2026-11-08/usb_u4_false_slipped_seatc
   the port face's depth (else two touches on the face give the axis).
 - Control: `insert_with_touch(insert_force=, opening_width=)`; the skill adapts them per retry.
 - Not yet run end to end with the LLM on the new layouts (next step).
+
+## 2026-11-10: regression after removing the overfitted skill content (commit 76177a6)
+Default USB-A scene, opus-5.5 LLM / terra perception+reviewer, `--touch --attempts 3`. Each run hit a
+different general gap that the deleted scene-specific text had been papering over:
+| run | result | root cause | fix (general, no scene numbers) |
+|---|---|---|---|
+| p1 | FAIL at pickup | the box merged the plug and its pedestal; the LLM assumed the plug lay on the floor | skill step 1: a box top is a guess when the object sits on a support; grasp from the measured top |
+| p2 | FAIL | circular `body_h = 2 * grasp_depth` gave a 0 tool z offset | skill: housing-height priors per connector family + ban on deriving it from the grasp depth |
+| p3 | FAIL | pointing scatter along the face read as two openings; point insert at the wrong one, blind back-off flung the plug | skill: points a few cm apart at one height = ONE opening unless an image shows two; line-search with `estimate_opening` |
+| p4 | FAIL | "right-side edge" (head-image words) sent the LLM to the far face; plug jammed into the screen | skill: resolve side words by measured positions (face nearest the pickup); carry around/above the device |
+| p5 | FAIL | wrist pointing scattered 16 cm along the face; the hard-coded +/-4 cm search cap stopped 1 mm short | `touch/opening_estimate.py`: `MAX_SEARCH_HALF=0.08`, note asking for more head-on views when the along-face spread > 5 cm; test `test_wide_scatter_widens_the_search` |
+| p6 | FAIL | height hits bimodal (0.045-0.054 vs 0.070-0.072); the median fell between the clusters and rejected all | `estimate_opening`: height = the densest z cluster; test `test_bimodal_heights_keep_the_densest_cluster` |
+| p7 | FAIL | the low cluster was the HELD PLUG: in straight-on wrist views it covers the port and terra points at it (same pixel ~(127,92) in every view) | `locate_with_wrist_camera`: prompt "never point at an object held between the fingers" + while holding, drop hits within 10% of the image of the projected fingertip centre (proprioception + wrist calibration) |
+| p8 | FAIL | estimate right (z 0.069 = truth), but `search_half` = farthest hit + half a width: the sweep ended on the far edge, the edge finder never got the near one | `estimate_opening(opening_width=)`: reach + a full width; test `test_line_search_reaches_both_edges_of_the_far_opening` |
+| p9 | FAIL | line search found the opening (5.4 mm in) but stalled: tool offset 16.7 mm, the finger pads (~9.3 mm half-width) hit the face first; plug lost after | skill: grasp the middle of the HOUSING, `off_a` >= tip length + 1.2 cm else regrasp; `insert_with_touch` returns/prints `finger_clearance_m` (`config.FINGER_PAD_HALF_WIDTH`) |
+| p10 | FAIL | held-plug filter worked, estimate right, tool offset 24 mm, BUT the plug was carried back-to-front (tilt 180 deg): the wrist "metal tip" hit was on the stand (z 0.028, 3 cm below the plug top) and only 4 mm from the body hit, so tip - body had the wrong sign; the body met the face, the probe "advanced" past the plug length and the plug was flung | skill step 1: trust the tip direction only if both hits are ON the part (z near its top) and >= ~1 cm apart; else re-view along its length |
+- Pickup has worked in every run since fix 1; tool offset is correct (+1.8 mm) since fix 2.
+- Scripted A/B (`research/touch/usb_pipeline_e2e.py --stage all --calib touch --grasp-touch --sweep 0.025`):
+  the pre-rewrite scene (worktree at 76177a6~1) seated 1/3, the new parametric scene 0/4. Collision
+  geometry, physics constants and plug URDF are identical (only inertia differs; restoring the old inertia
+  did not help, reverted). Traces match until contact and then diverge chaotically, so the insert
+  controller was already marginal; the scene rewrite is not the systematic regression - the skill text is.
+- Open: after a slip, the plug is sometimes flung metres away (contact blow-up); not fixed.
+- Harness check of the finger limit (`outputs/touch/e2e_wiggle1`, err y -13 / z +0.8 mm, sweep 32 mm):
+  found and seated the opening, but the harness grasp (eef->tip 19.3 mm) stops at 10.0 mm = exactly the
+  success threshold -> "not inserted". A wiggle-on-stall and a final seat push were tried in
+  `touch/insertion.py` and reverted (the stall is the fingers, not alignment).
+- No new perception dependency added.
+- Rollouts: `outputs/2026-11-10/plug_usba_*` (HF `rollouts/2026-11-10/`).

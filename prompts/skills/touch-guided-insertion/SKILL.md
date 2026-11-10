@@ -16,7 +16,9 @@ metadata:
 
 # Touch-guided insertion
 
-1. Grasp the part across its body (not the tip), fingertip centre near its middle; lift; check
+1. Grasp the part across its body (not the tip), fingertip centre near the middle of the BODY/housing
+   (not of the whole part: the finger pads reach ~1 cm toward the tip and must stay clear of the face
+   when the tip is fully in - step 3 "Off-centre grasp"); lift; check
    `gripper_holding()` (True = closed fingers stalled on an object, measured finger width; trust it
    over a wrist/head image of the fingers, which the hand itself occludes).
    Depth: the fingertips end ~0.06 m below the commanded pose z, so command z = part centre z + 0.06
@@ -31,19 +33,30 @@ metadata:
    part's tip axis onto the insertion axis. A pick at 1.571 then poses at 0 turned the plug 90 deg,
    so its side, not its tip, met the face (every early LLM run). The part may lie pointing anywhere:
    before the pick, get its tip direction from the camera (e.g. locate "metal tip of the plug" and
-   "plug body" and take tip - body, horizontal). After the pick the carry rotation must turn by
+   "plug body" and take tip - body, horizontal). Trust that only if both points are ON the part (z
+   within ~1 cm of its measured top - a hit on the stand / floor below is not the part) and they are
+   >= ~1 cm apart horizontally (both halves of one part); else take another view (wrist ~10 cm above
+   the part, turned to look along its length) and locate again - a wrong sign carries the part
+   back-to-front, so its body, not its tip, meets the face. After the pick the carry rotation must turn by
    delta = atan2(axis) - atan2(tip direction) (wrap to [-pi, pi]; axis from step 2) - the hand and
    the part turn together.
    Small parts: take x,y from the affordance point, not the detection box centre (the box may merge the stand).
    **Measure the top by touch first** (depth on a small part is a few mm off; a grasp below the body's
    mid-height lets it pivot or slide in the fingers later): `close_gripper()`, move the fingertips
    3 cm above the guessed top at the part's x,y, then
+   (guessed top = the HIGHEST affordance / depth point z, else the detection's Position z + 0.06 = its
+   box top. The box may include a stand / pedestal / support under the part, so the part can sit
+   cm above the floor even when a description says "on the floor": never start the touch below that
+   top, and never replace a touched top with a floor-based guess.)
    `r = move_until_contact([0, 0, -1], max_travel=0.05, force=3.0)`;
    `top_z = r["finger_bottom_z"]`. Rise 3 cm, `open_gripper()`, grasp at centre z = top_z - body
-   height / 2 (command z = centre z + 0.06). body height = the HOUSING only (measure it from the
-   images / touch; e.g. a USB-A plug's is ~8 mm, so centre = top_z - 0.004), never the detection box / depth height (it merges a stand or cable);
-   no stand/floor heuristics. **Sanity-check the touch**: a contact > 5 mm ABOVE the located
-   point's z (or > body height + 5 mm above the surface it lies on) hit something else - the
+   height / 2 (command z = centre z + 0.06). body height = the HOUSING only, from the part type's
+   standard size (a category prior: USB-A plug housing ~8 mm, USB-C ~6.5 mm, HDMI ~10 mm, unknown
+   connector ~8 mm; check it looks right in the wrist view), so e.g. USB-A centre = top_z - 0.004.
+   Never the detection box / depth height (it merges a stand or cable), and never derive it from the
+   grasp itself (body_h = 2 * grasp_depth_below_top is circular: it always gives off_z = 0 later);
+   no stand/floor heuristics. **Sanity-check the touch**: a contact > 5 mm ABOVE that guessed top
+   (highest depth point / Position z + 0.06 - not the raw Position z) hit something else - the
    edge of the support it fell off, a neighbour - not the part: do not grasp there (it closes on
    air). Re-locate from straight above (wrist camera looking down, 15-20 cm over the point) and
    touch again; a dropped part usually lies on the floor next to its support. The arm settles a few mm LOW under load: before
@@ -63,7 +76,11 @@ metadata:
    it returns the whole face/edge, cm off). Which face holds the port is a guess too: the device may
    be turned to any heading and the port may be on either side or the back. List its faces the part
    could enter that face the robot's side, the one nearest the arm's base first (best reach and view),
-   and try them in that order (step 5).
+   and try them in that order (step 5). Side words in the subtask ("the right edge") are usually from
+   the head image, not world axes: resolve them with measured positions (e.g. "nearest where the part
+   was picked up" = the face whose detected position is closest to the pickup point). Carry the part
+   AROUND the device or above its highest point (screen / lid included, from its detection), never
+   straight across it.
    Finish a face (touch insert at its candidates) before viewing the next one. Skip faces > 0.8 m
    from the arm base (reach limit: pushes there stall or knock the part out of the grasp).
    Holding the part, park the fingertips ~0.12-0.15 m in
@@ -74,7 +91,10 @@ metadata:
    ```
    Each entry: `{"label", "position": [x, y, z], "pixel"}` (~1 mm accurate). A device can show
    several similar openings (USB next to HDMI; only one fits the part): keep all candidates, note
-   which looks like the part's tip (width / height ratio, shape), and try that one first (step 5). None found or the gripper
+   which looks like the part's tip (width / height ratio, shape), and try that one first (step 5).
+   Points a few cm apart along the face at the same height are usually ONE opening scattered by
+   pointing, not two: treat them as separate openings only when one wrist image clearly shows two
+   distinct holes; otherwise pass them all to `estimate_opening` and line-search (step 4). None found or the gripper
    hides the face: shift the hand 0.1 m sideways / higher and call again. The wrist camera turns
    with the hand: if the palm / held part fills the view at the carry rotation, take the views at
    carry rotation +-1.571 (the part turns too - harmless in free space), then turn back to the carry
@@ -85,11 +105,12 @@ metadata:
    candidates of all views - outliers (other faces, odd heights, rim hits) are rejected inside:
    ```python
    port_c, edge_c = [], []
+   w_open = ...   # the opening's width along the face (m), the prior for its type (step 4)
    # for each view pose: port_c += locate_with_wrist_camera("<part type> port opening on the <device> side")
    #                     edge_c += locate_with_wrist_camera("top edge of the <device> side face")
    fn = estimate_face_normal(port_c[0]["position"])  # head depth: {"normal", "axis", "along", ...}
    axis = fn["axis"]               # insertion direction = into the face; NEVER assume a world axis
-   est = estimate_opening(port_c, edge_c, axis=axis)   # prints its result
+   est = estimate_opening(port_c, edge_c, axis=axis, opening_width=w_open)   # prints its result
    port = est["position"]          # aim point [x, y, z]; None -> no usable hit: new views
    ```
    `estimate_face_normal` None (face not seen by the head camera): take the axis from the two
@@ -126,18 +147,22 @@ metadata:
    off_a = float(np.dot(np.array(port) - (hits[0] + hits[1]) / 2, a))   # eef -> tip end, along the axis
    # b) height: from the touched grasp (step 1; recorded across subtasks) - tip centred on the body height
    g = get_grasp_info()      # {"grasp_eef_pos", "touched_top_z"}
+   # body_h = the housing height prior of step 1 (NOT 2 * grasp_depth_below_top - that cancels to 0)
    off_z = g["touched_top_z"] - body_h / 2 - g["grasp_eef_pos"][2]   # touched_top_z None: redo step 1's touch
    offset = (off_a * a + np.array([0.0, 0.0, off_z])).tolist()   # eef -> tip centre (fingers centre it across)
    ```
    Touches > 10 deg off the depth normal: a touch hit something else (the opening, an edge) -
    repeat it 1 cm further along the face.
    'no_contact' on a): the face is farther - start 2 cm closer and retry.
-   **Off-centre grasp -> regrasp.** Expected off_a = middle of the part -> tip end (about half its
-   length). More than 5 mm beyond that = held near the back end: the long lever lets the part pitch in
-   the fingers and wedge a few mm into the opening. Put it back (fingertips over the spot where it
+   **Off-centre grasp -> regrasp.** Expected off_a = the middle of the HOUSING (body) -> tip end
+   (insertable tip length + half the housing length; NOT half the whole part). Lower bound: the finger
+   pads reach ~1 cm along the part axis past the fingertip centre, so with off_a < tip length + 1.2 cm
+   the fingers hit the face before the part is in - it stalls a few mm in ("stopped early ... jam") however
+   well aligned. Upper: more than 5 mm beyond expected = held near the back end: the long lever lets the part pitch in
+   the fingers and wedge a few mm into the opening. Either way, put it back (fingertips over the spot where it
    was, 1.5 cm high; `move_until_contact([0, 0, -1], max_travel=0.03, force=3.0)` until it rests on the
    table; `open_gripper()`; rise 4 cm), shift the grasp along the part axis by (off_a - expected) toward
-   the tip, descend to the same `eef_pos` z, `close_gripper()`, lift, and redo touch a).
+   the tip (a negative shift = away from the tip), descend to the same `eef_pos` z, `close_gripper()`, lift, and redo touch a).
    Do NOT press the held tip down onto a surface or edge-scan it against the deck to measure its height:
    at ~2 N it pivots / slides in the fingers. off_z comes from `get_grasp_info()` only; if that has
    no `touched_top_z`, put the part down and redo step 1 (touch + grasp).

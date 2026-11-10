@@ -111,3 +111,26 @@ Owner: slide-cabinet agent. Branch `tracking`. Updated on every new conclusion/d
 - cab_tt1: `-lm copilot-claude-opus-5.5`, terra perception/review, `--attempts 3`. **Success**: `target_link_pos` y 0.106 -> -0.221 (slid ~33 cm), `plan_completed`.
 - Planner subtask 1 failed all 3 attempts from hinge confusion: the panel was treated as a swing door. The planner re-planned subtask 2 as a slide, which succeeded. The same confusion was seen with gemini, so it is not a terra regression.
 - Rollout: `outputs/2026-11-02/slide_cabinet_ALLterra_regression`.
+
+## 2026-11-10: slide regression root cause and fix
+- Failing run: `outputs/2026-11-09/regression_slide_cabinet_opus_FAIL` ("slide upper-right-cabinet to the right").
+- How it failed:
+  1. The planner copied the passage-door rule "open WIDE >= 60 deg" into the cabinet's success criteria.
+  2. The LLM called `open_door` (lever-door helper) on the sliding panel: grasp_failed x3.
+  3. That call set `_door_plane`, so the reviewer got a "DOOR SWING ANGLE 0 deg (60+ = wide open)" line.
+  4. The reviewer rejected a real 24 cm slide.
+- Fixes:
+  - `prompts/planner_prompt.py`: the WIDE >= 60 rule is for room/passage doors only; cabinets, drawers and
+    lids just need to be clearly open.
+  - `prompts/review_prompt.py`: the door example applies to passage doors only; a slid panel or drawer
+    counts as open with no swing.
+  - `api._door_angle_review_evidence`: says the angle only measures a swing (a slid panel reads ~0 deg).
+  - Door skill: `open_door` is only for lever passage doors. When the mechanism is unknown, run a short
+    guarded test pull first.
+- Results (opus / terra / terra, `--touch --attempts 2 --max-planner-iter 4`), both on the first attempt
+  in about 3 min:
+
+  | command | outcome | handle y (start 0.106) | rollout |
+  |---|---|---|---|
+  | "open the right cabinet" | SUCCESS | -0.224 | `outputs/2026-11-10/slide_cabinet_open_right_fix_SUCCESS` |
+  | "slide upper-right-cabinet to the right" | SUCCESS | -0.135 | `outputs/2026-11-10/slide_cabinet_slide_right_fix_SUCCESS` |

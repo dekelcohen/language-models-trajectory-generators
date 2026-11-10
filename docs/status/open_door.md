@@ -429,3 +429,39 @@ Before the fixes: r4-r8 16-21 min (2 of 5 FAIL), q1 42 min, q2 29 min. All three
   sweeps the panel shut: on this placement the free edge swings toward the robot base and the arm cannot
   reach behind the panel (descent lands on the panel / blocked 28-30 cm short). Needs a different push
   route (e.g. push from the inner face near the free edge, or regrasp-and-pull in steps); not a hinge issue.
+
+## 2026-11-10: DoorBot comparison and hinge-free pull A/B
+- **How DoorBot (arXiv 2504.09358, ICRA 2025) uses touch**
+  - Vision is used only to approach: a RANSAC door plane positions the base, and a learned model grasps
+    and unlocks the handle.
+  - Haptics are motor currents and gripper resistance, used for:
+    - the unlock stop and reverse thresholds;
+    - detecting a missed grasp or a collision;
+    - telling push from pull with a small backward test motion.
+  - It then pushes or pulls the base along a predefined path. There is no hinge, arc or door-angle estimate.
+- **Our closest equivalent** is `touch/pull.py` `PullController` (via `open_with_touch`). It is
+  Genesis-only. It pulls with a force-controlled grasp and stays compliant sideways. It re-estimates the
+  pull direction from the measured hand motion, then fits a circle after 5 cm and follows its tangent.
+  It needs no hinge prior and no door surface, so it should also work for rotating handles and faucets.
+- **A/B results**
+  - Harness: `research/touch/door_pull_e2e.py`.
+  - Door angle is from the sim state and used for evaluation only.
+
+  | method | base | DOOR_POSE 0.03,-0.04,15 | mirror |
+  |---|---|---|---|
+  | Genesis compliant pull, no hinge prior (`--touch`) | **61.2 deg OPEN** (52 s) | **53.0 deg** (skewed start, slipped at 57) | 0 (harness grasp, see below) |
+  | PyBullet `guarded_pull`, depth hinge (`--guarded right --vision --vision-grasp --approach top`) | 30.4 (reported 64) | 0 (reported 51) | invalid |
+  | PyBullet `guarded_pull`, hand-path fit (`--guarded line --approach top`) | 44.0; skewed start 38.3 | 8 (slipped, fit r = 0.74 m) | invalid |
+
+  - Mirror rows are harness limitations, not method results:
+    - the scripted grasp uses fixed latch-frame lever offsets (lines 132-135), which miss on the mirrored
+      URDF;
+    - the eval "true mid" is the unmirrored point.
+- **Conclusion**
+  - The force-compliant pull with no hinge prior is best.
+  - The position-controlled variants are weak, and the depth hinge was not better than the hand-path fit.
+- **Recommendation**
+  - Make the compliant pull the primary door/rotating-handle skill.
+  - Port it to PyBullet and the real robot with Cartesian impedance (FR3 supports it).
+  - Keep the depth door plane only as an optional prior that seeds the first direction.
+  - No new perception dependency was added.

@@ -586,6 +586,7 @@ class API:
             "This image is from a robot's wrist camera (the white robot gripper is in view). "
             f"Point at EVERY visible instance of: {description}. Best match first, at most {int(max_points)}. "
             "Point at the centre of each instance; skip ones hidden by the gripper. "
+            "Never point at an object held between the gripper fingers - it is not the target, even if it looks like it. "
             f"Coordinates format: {coords_format}. Answer ONLY a JSON list like "
             '[{"point": [..], "label": "short label"}]; [] if none is visible.'
         )
@@ -630,6 +631,24 @@ class API:
                             "position": [round(float(c), 4) for c in np.asarray(world).flatten()[:3]],
                             "pixel": [ui, vi]})
 
+        # A held object sits at a fixed spot in the wrist image (around the fingertips); the VLM often
+        # points at it instead of the target behind it (plug p6/p7: every straight-on view hit the held
+        # plug, ~1.6 cm below the port). Drop hits on the projected fingertip centre while holding.
+        state = self.get_robot_state() if results else {}
+        if state.get("gripper_holding") and state.get("eef_pos") is not None:
+            tip_px = utils.project_3d_world_pos_to_2d_pixel(
+                self.wrist_camera_position, self.wrist_camera_orientation_q, "wrist", (width, height),
+                np.asarray(state["eef_pos"], dtype=float), self.cam_info)
+            if tip_px:
+                r_px = 0.1 * min(width, height)
+                self.logger.info(PROGRESS + f"[wrist-locate] holding: fingertip pixel {tip_px}, hits {[r['pixel'] for r in results]}" + ENDC)
+                near = [r for r in results if np.hypot(r["pixel"][0] - tip_px[0], r["pixel"][1] - tip_px[1]) <= r_px]
+                if near:
+                    results = [r for r in results if r not in near]
+                    self.logger.info(WARNING + f"[wrist-locate] dropped {len(near)} hit(s) on the held object "
+                                     f"(within {r_px:.0f} px of the fingertip pixel {tip_px}): {[r['pixel'] for r in near]}" + ENDC)
+                    print(f"locate_with_wrist_camera: dropped {len(near)} hit(s) on the object held in the gripper "
+                          "(it hides what is behind it - view the target from a side so the held object is not in front of it).")
         try:
             import cv2
             img = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
@@ -712,7 +731,15 @@ class API:
         for ev in res.get("events", []):
             self.logger.info(PROGRESS + f"[touch]   {ev}" + ENDC)
         summary = {k: v for k, v in res.items() if k != "events"}
+        # robot geometry: how deep the part can go before the finger pads meet the face
+        clearance = float(off @ a) - config.FINGER_PAD_HALF_WIDTH
+        res["finger_clearance_m"] = summary["finger_clearance_m"] = round(clearance, 4)
         print(f"insert_with_touch: {summary}")
+        if res.get("outcome") != "seated":
+            print(f"insert_with_touch: the finger pads reach the face after {1000 * clearance:.0f} mm of insertion "
+                  "(tool_offset along the axis - pad half-width); a part whose insertable tip is longer cannot "
+                  "seat from this grasp - regrasp farther back on the body.")
+            self.logger.info(PROGRESS + f"[touch] not seated; finger clearance {1000 * clearance:.1f} mm" + ENDC)
         self._record_touch("insert", res)
         self._budget_tick("insert_with_touch")
         return res
@@ -1672,8 +1699,12 @@ class API:
         if deg is None:
             return ("DOOR ANGLE (head depth camera): not measurable now (too few panel points visible); "
                     "judge from the frames.")
-        return (f"DOOR ANGLE (head depth camera, measured now about the hinge seen before the door "
-                f"opened; about +-5 deg): the door is open {deg:.0f} deg (60 deg or more = wide open).")
+        # slide_cabinet regression (2026-11-09): open_door was tried on a SLIDING panel; "0 deg" then made the
+        # reviewer fail a panel that had slid 23 cm. The swing angle says nothing about slides / drawers.
+        return (f"DOOR SWING ANGLE (head depth camera, measured now about the hinge assumed before the door "
+                f"opened; about +-5 deg): {deg:.0f} deg. This only measures a SWING about a hinge: a panel that "
+                f"slid sideways or a drawer pulled straight out reads ~0 deg here although it IS open - judge "
+                f"slides and drawers from the frames / displacement evidence, not from this angle.")
 
     def _apply_pull_proprio_verdict(self, facts, success, reason, improvement_steps, camera_moved=()):
         """Measured-veto + retry direction bookkeeping -> (success, reason, improvement_steps).

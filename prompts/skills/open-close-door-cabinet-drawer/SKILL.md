@@ -37,11 +37,20 @@ From the SCENE ANALYSIS, the affordance points (prefer the top-ranked point) and
   Note which edge of the door the handle sits near: the hinge is on the **opposite** edge.
   Frames have a post on BOTH edges: a "hinge" detection within ~0.3 m of the handle is the
   latch-side jamb, not the hinge (task-text claims about the hinge side may be wrong too).
-- **Hinged door with a lever: call `r = open_door(handle_xyz)` first** (any point on the handle, the
+- **Hinged door with a LEVER (a room / passage door): call `r = open_door(handle_xyz)` first** (any point on the handle, the
   arm out of view, occluders cleared). It does the measuring, grasping, pulling/pushing and the
   depth angle check below in one deterministic call. Print `r`.
   `"opened"` -> done; `"partly_open"` / `"grasp_failed"` -> call it again once; `"no_door_face"` ->
   something still hides the door. Only script the steps below yourself if it is not available.
+  NOT for cabinets with a fixed bar / knob, sliding panels or drawers, and not when you are unsure
+  whether the panel swings or slides: `open_door` assumes a lever and a swing (on a sliding cabinet it
+  returned `grasp_failed` 3x and its "0 deg" swing reading later misled the reviewer).
+- **Mechanism unknown (swing or slide?)**: let the panel tell you. Grasp the handle, then make a
+  short guarded test motion (~3-4 cm) under `guard_motion(on_trip="return")`, first along the
+  mechanism the task text / scene suggests ("slide ... to the right" = a slide; a track, overlapping
+  panels or a gap between panels = a slide); if the hand stalls / the handle slips while holding,
+  try the other one (straight out along the face normal vs. sideways along the face). Then open
+  fully along the direction that moved.
 - **Measure the door, don't guess it** (hinged doors): with the arm out of view and occluders
   cleared, `p = estimate_door_plane(handle_xyz)` (any point on the handle; it finds the rose - where
   the handle meets the door - in depth). It fits the door face in head depth and returns
@@ -92,7 +101,7 @@ Start from this procedure, verbatim:
   Print `tip_dir` and the shifted grasp xy. Derive it from your own detect_object; a coordinate quoted in the task text is only a hint - discard it if it disagrees.
 - **Keep the unlatch press small (~0.02-0.03 m).** If the lever resists, pull anyway - pressing deeper frees nothing and just levers the jaws off the bar. Run the press under `guard_motion(on_trip="return")`: a `jam` verdict there only means a stiff lever (not a failure); then restore `guard_motion("hold")` and pull.
 - **Hold that z for the whole pull arc** - rising peels the jaws off. "That z" = the MEASURED hand z after the press (`m = execute_trajectory(press)`; `m["pose"][2]`, trajectory frame - NOT `m["eef_pos"]`, the fingertips 6 cm lower), never the commanded press target: a stalled press leaves the hand above it, and an arc planned from the target drives the hand down into the lever (fingers forced open, grip lost). Same after any stalled arc segment: re-plan the next one from `m["pose"]`.
-- **Pull along the hinge arc and turn the wrist with the door**: at swept angle `a`, top-down `rotation += a`, side `approach_yaw += a` (same sign as the arc). A fixed wrist twists the lever out of the jaws after ~20 deg. The hinge is the far door edge the lever's free tip points toward; do not trust a hinge box detection; measure the hinge with `probe_door_hinge()` (or let `guarded_pull` fit it from a straight pull) - too far is safer than too near. **Open WIDE: >= 60 deg is required** (a mobile robot must pass through; a door left at 10-30 deg is a failure) - plan the arc to ~75-80 deg. If the hand stops short (reach / IK stall, lever slipping out at a large angle) below 60 deg: release, move the hand around the panel's free (latch) edge, and push that edge further along the same arc (fingers closed, pushing the panel face from the inside, the hand following the arc about the hinge) until >= 60 deg.
+- **Pull along the hinge arc and turn the wrist with the door**: at swept angle `a`, top-down `rotation += a`, side `approach_yaw += a` (same sign as the arc). A fixed wrist twists the lever out of the jaws after ~20 deg. The hinge is the far door edge the lever's free tip points toward; do not trust a hinge box detection; measure the hinge with `probe_door_hinge()` (or let `guarded_pull` fit it from a straight pull) - too far is safer than too near. **Open WIDE: >= 60 deg is required for a room / passage door** (a mobile robot must pass through; a door left at 10-30 deg is a failure; a cabinet door only needs to be clearly open) - plan the arc to ~75-80 deg. If the hand stops short (reach / IK stall, lever slipping out at a large angle) below 60 deg: release, move the hand around the panel's free (latch) edge, and push that edge further along the same arc (fingers closed, pushing the panel face from the inside, the hand following the arc about the hinge) until >= 60 deg.
 - **Lever parallel to the door face, ~0.1 m out:** stay top-down - step 4's short-axis offset drops one jaw into the lever-door gap. This is NOT a 2b trigger; go to the side only on 2b trigger 3 (a top-down attempt on this lever already failed geometrically).
   If the `touch-guided-pull` skill is listed: grasp + press as above, then open with `open_with_touch()` instead of scripting the arc.
   Otherwise, for a top-down grasp, prefer `r = guarded_pull(direction=<pull normal>, hinge=[hx, hy])` over a hand-written arc: it holds the measured z, turns the wrist, mirrors the hinge after an early slip/jam (wrong side), re-grasps after a late slip and stops at the end stop. Check `r["outcome"]` in ("opened", "end_stop"); on a hinged door it pushes the rest of the way by itself after the pull stalls (outcomes "push_stalled": check the camera, often already wide open; "push_blocked": re-grasp the handle and call it again; "swung_shut": depth shows the panel fell back closed - grasp and pull again; "partly_open": depth shows < 55 deg; `r["vision_deg"]` is the depth-measured door angle) - do not hand-write the push; for a hand-written arc, at least call `guard_motion(on_trip="return")` and react to `motion["guard"]`.
@@ -250,6 +259,9 @@ vertical bar that needs the section 2b side approach, the short-axis offset into
 lever/door gap, the descent depth, the unlatch pressure, phase separation of the approach,
 hinge position, arc radius, and travel distance.
 
-Write the subtask's success criteria so the reviewer can tell these apart, e.g."Success = the door is WIDE open (swung >= ~60 deg, wide enough for a mobile robot to pass; a small gap is not enough). If it is not, report
+Write the subtask's success criteria so the reviewer can tell these apart, e.g. for a room door
+"Success = the door is WIDE open (swung >= ~60 deg, wide enough for a mobile robot to pass; a small
+gap is not enough)", for a cabinet / drawer "Success = it is clearly open (moved well from its closed
+position, interior visible)". If it is not, report
 whether the gripper was still holding the handle at the end."
 

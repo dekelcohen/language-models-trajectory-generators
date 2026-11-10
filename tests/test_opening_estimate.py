@@ -62,6 +62,32 @@ class EstimateOpeningTest(unittest.TestCase):
         off = sum((est["position"][i] - port[i]) * n[i] for i in range(3))
         self.assertLess(abs(off), 1e-3)
 
+    def test_wide_scatter_widens_the_search(self):
+        # plug p5 (2026-11-10): port hits 0.466..0.627 (truth 0.4959), median 0.537; a 4 cm cap
+        # stopped 1 mm short of the port
+        port = [[0.0909, 0.538, 0.0717], [0.0905, 0.6269, 0.0661], [0.0909, 0.4657, 0.0709],
+                [0.0905, 0.4888, 0.0695], [0.0908, 0.5573, 0.0695], [0.0907, 0.5364, 0.0694]]
+        est = estimate_opening(port)
+        self.assertLessEqual(abs(0.4959 - est["position"][1]) + 0.006, est["search_half"])
+        self.assertTrue(any("along the face" in n for n in est["notes"]))
+
+    def test_bimodal_heights_keep_the_densest_cluster(self):
+        # plug p6 (2026-11-10): the median z fell between two height clusters and rejected every hit
+        port = [[0.096, 0.4607, 0.0542], [0.0946, 0.6409, 0.0518], [0.0903, 0.4798, 0.0447],
+                [0.0908, 0.4577, 0.0697], [0.0911, 0.4596, 0.0719], [0.0907, 0.4955, 0.0702]]
+        est = estimate_opening(port)
+        self.assertIsNotNone(est["position"])
+        self.assertAlmostEqual(est["position"][2], 0.069, delta=0.003)
+
+    def test_line_search_reaches_both_edges_of_the_far_opening(self):
+        # plug p8 (2026-11-10): half a width past the farthest hit ended the sweep on the far edge of
+        # the opening, so the edge finder never bracketed it
+        port = [[0.0909, 0.4657, 0.0703], [0.0897, 0.4958, 0.0696], [0.0898, 0.4942, 0.0685],
+                [0.0907, 0.4673, 0.0688]]
+        est = estimate_opening(port, opening_width=0.012)
+        far_edge = abs(0.4959 - est["position"][1]) + 0.006
+        self.assertGreaterEqual(est["search_half"], far_edge + 0.003)
+
     def test_empty(self):
         self.assertIsNone(estimate_opening([])["position"])
 

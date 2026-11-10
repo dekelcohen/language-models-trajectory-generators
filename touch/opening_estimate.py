@@ -8,6 +8,9 @@ estimates carefully. Pure function of camera-derived candidates (Sim2Real safe).
 """
 import statistics
 
+MAX_SEARCH_HALF = 0.08     # m, cap of the suggested line-search half length
+MAX_ALONG_SPREAD = 0.05    # m, kept hits spread wider than this along the face -> advise more views
+
 
 def _pos(c):
     p = c.get("position") if isinstance(c, dict) else c
@@ -15,7 +18,7 @@ def _pos(c):
 
 
 def estimate_opening(candidates, edge_candidates=None, axis=(1, 0, 0), face_tol=0.01,
-                     z_tol=0.004, edge_gap=0.003):
+                     z_tol=0.004, edge_gap=0.003, opening_width=0.012):
     """Aggregate opening candidates (all views of one face) into one aim point.
 
     candidates: `locate_with_wrist_camera(...)` results (dicts with "position") or [x, y, z]
@@ -23,12 +26,14 @@ def estimate_opening(candidates, edge_candidates=None, axis=(1, 0, 0), face_tol=
     edge_candidates: optional hits of the face's top edge; port hits within `edge_gap` of the
         edge height are dropped (the opening sits below the top surface).
     axis: insertion axis (the face normal, any heading); hits are judged in the face's own frame.
+    opening_width: the opening's width along the face (m); the line search reaches this far past the
+        farthest kept hit, so the edge finder can catch BOTH edges of an opening centred on that hit.
 
     Returns dict: position [x, y, z] (None if no candidate survives), n_used, n_total,
     z_spread / along_spread (max-min of the kept), search_half (suggested `search_half` for
     insert_with_touch's line search), search_cross (0.002 when the kept heights spread > 2 mm,
     else None), search_line (the along-face direction), confident
-    (>= 3 kept and z spread <= 4 mm), notes (list of str).
+    (>= 3 kept and z spread <= 4 mm; the height is what must be right), notes (list of str).
     """
     notes = []
     pts = [p for p in (_pos(c) for c in (candidates or [])) if p is not None]
@@ -58,8 +63,11 @@ def estimate_opening(candidates, edge_candidates=None, axis=(1, 0, 0), face_tol=
     if len(on_face) < len(pts):
         notes.append(f"dropped {len(pts) - len(on_face)} off-face hit(s) (> {face_tol * 100:.0f} cm from the face plane)")
 
-    # 2) height: median, reject far hits, median again
-    z0 = statistics.median(p[2] for p in on_face)
+    # 2) height: the densest z cluster (a plain median falls BETWEEN two clusters of a bimodal
+    # scatter and rejects every hit - usb p6), ties -> nearest the median; then reject far hits
+    zmed = statistics.median(p[2] for p in on_face)
+    best = max(on_face, key=lambda q: (sum(abs(p[2] - q[2]) <= z_tol for p in on_face), -abs(q[2] - zmed)))
+    z0 = statistics.median(p[2] for p in on_face if abs(p[2] - best[2]) <= z_tol)
     kept = [p for p in on_face if abs(p[2] - z0) <= z_tol]
     if len(kept) < len(on_face):
         notes.append(f"dropped {len(on_face) - len(kept)} height outlier(s) (> {z_tol * 1000:.0f} mm from median z {z0:.4f})")
@@ -87,16 +95,24 @@ def estimate_opening(candidates, edge_candidates=None, axis=(1, 0, 0), face_tol=
     al = [dot(p, t) for p in kept]
     z_spread = max(zs) - min(zs)
     along_spread = max(al) - min(al)
-    # the line search is centred on the median, so it must reach the FARTHEST kept hit (+ ~half a
-    # port width); spread/2 missed the one correct hit in usb_u5 (median 0.4713, hits 0.462..0.498)
+    # the line search is centred on the median, so it must reach the FARTHEST kept hit plus a full
+    # opening width: the edge finder needs a catch on BOTH edges (with half a width the sweep ended on
+    # the far edge, plug p8: catches only at +20.5 mm, opening centre ~+15.5 mm); spread/2 missed the
+    # one correct hit in usb_u5 (median 0.4713, hits 0.462..0.498).
+    # Capped at 8 cm: pointing at a small opening can scatter that far along the face (a 4 cm cap
+    # stopped 1 mm short of the port when hits spread 0.466..0.627); insert_with_touch extends max_s.
     reach = max(abs(v - statistics.median(al)) for v in al)
     out.update(position=[round(v, 4) for v in pos], n_used=len(kept), z_spread=round(z_spread, 4),
                along_spread=round(along_spread, 4),
-               search_half=round(min(0.04, max(0.015, reach + 0.006)), 3),
+               search_half=round(min(MAX_SEARCH_HALF, max(0.015, reach + float(opening_width))), 3),
                search_cross=0.002 if z_spread > 0.002 else None,
                confident=len(kept) >= 3 and z_spread <= 0.004)
     if len(kept) < 3:
         notes.append("fewer than 3 consistent hits: take 2 more views (camera ~5 cm above the opening height)")
+    if along_spread > MAX_ALONG_SPREAD:
+        notes.append(f"hits spread {along_spread * 100:.1f} cm along the face: take 2 more head-on views "
+                     f"(camera ~5 cm above the opening height) and re-estimate; the line search covers "
+                     f"+-{out['search_half'] * 100:.1f} cm")
     return out
 
 

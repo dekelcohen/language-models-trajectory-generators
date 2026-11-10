@@ -128,6 +128,10 @@ gripper_depth_offset_franka = 0.06
 #: centre, panda_grasptarget). Robot geometry (measured by a guarded touch in Genesis); used to turn a
 #: closed-finger touch of an object's top into that top's height.
 FINGER_BOTTOM_BELOW_EEF = 0.0072
+#: Franka hand, fingers closed, top-down: the finger pads reach this far horizontally (along the pad
+#: width, perpendicular to the closing direction) from eef_pos. Robot geometry (Genesis: a plug held
+#: 19.3 mm eef->tip stopped with its fingers on the face at 10.0 mm insertion, harness e2e_wiggle1).
+FINGER_PAD_HALF_WIDTH = 0.0093
 gripper_depth_offset_sawyer = -0.12
 
 # Segmentation
