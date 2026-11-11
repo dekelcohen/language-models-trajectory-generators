@@ -90,6 +90,12 @@ class InsertConfig:
     col_pitch: float = 0.0003     # m (< 2x the port clearance)
     col_half: float = 0.0009      # m
     max_edge_cycles: int = 2
+    # A one-way pass catches only the edge it is LEAVING (the far edge, seen in the Genesis harness with a
+    # 29 mm aim error: catches at +5.5/+7.8 mm past the centre, never at the near edge), so the two-catch
+    # bracket may never form. On a lone catch, guess the centre half an opening width back (against the
+    # sweep motion; width ~ the edge_*_sep midpoint) and raster columns there, +-guess_col_half along.
+    guess_col_half: float = 0.002  # m
+    max_guess_cycles: int = 2      # counted apart from max_edge_cycles
 
 
 @dataclass
@@ -132,6 +138,9 @@ class SpiralInsertController:
         self.catches: List[tuple] = []    # (along, across) of partial catches in the current mode
         self.path: List[np.ndarray] = []
         self.n_cycles = 0
+        self.sweep_sign = 1.0         # direction of the current raster pass along the line
+        self.n_guesses = 0
+        self.col_kind = None          # "edges" | "guess"
         if self.cfg.sweep_dir is not None:
             d = np.asarray(self.cfg.sweep_dir, float)
             d = d - self.a * float(d @ self.a)
@@ -192,15 +201,24 @@ class SpiralInsertController:
         if self.mode != "raster" or self.n_cycles >= c.max_edge_cycles:
             return
         lo, hi = min(a for a, _ in self.catches), max(a for a, _ in self.catches)
+        col_half = c.col_half
         if c.edge_min_sep <= hi - lo <= c.edge_max_sep:
-            ca = 0.5 * (lo + hi)
+            ca, self.col_kind = 0.5 * (lo + hi), "edges"
             self._event(t, f"edges along the line at {1000 * lo:.2f} / {1000 * hi:.2f}mm -> centre "
                            f"{1000 * ca:.2f}mm, column raster +-{1000 * c.col_half:.1f} x +-{1000 * c.cross_half:.1f}mm")
-            self.mode, self.catches, self.path = "columns", [], []
-            n = int(round(c.col_half / c.col_pitch))
-            for i, j in enumerate([0] + [s * k for k in range(1, n + 1) for s in (1, -1)]):
-                h = c.cross_half if i % 2 == 0 else -c.cross_half
-                self.path += [self._pt(ca + j * c.col_pitch, across + h), self._pt(ca + j * c.col_pitch, across - h)]
+        elif len(self.catches) == 1 and c.guess_col_half > 0 and self.n_guesses < c.max_guess_cycles:
+            ca = along - self.sweep_sign * 0.25 * (c.edge_min_sep + c.edge_max_sep)
+            col_half, self.col_kind = c.guess_col_half, "guess"
+            self.n_guesses += 1
+            self._event(t, f"lone catch = the edge being left -> centre guess {1000 * ca:.2f}mm (half a width "
+                           f"back), column raster +-{1000 * col_half:.1f} x +-{1000 * c.cross_half:.1f}mm")
+        else:
+            return
+        self.mode, self.catches, self.path = "columns", [], []
+        n = int(round(col_half / c.col_pitch))
+        for i, j in enumerate([0] + [s * k for k in range(1, n + 1) for s in (1, -1)]):
+            h = c.cross_half if i % 2 == 0 else -c.cross_half
+            self.path += [self._pt(ca + j * c.col_pitch, across + h), self._pt(ca + j * c.col_pitch, across - h)]
 
     def _follow(self, dt):
         step, off = self.cfg.spiral_speed * dt, self.offset.copy()
@@ -218,20 +236,25 @@ class SpiralInsertController:
         if self.mode == "columns":
             if self.path:
                 return 0.0, self._follow(dt)
-            self.n_cycles += 1
-            self._event(self.t_prev, f"edge cycle {self.n_cycles} found nothing, resume the raster")
+            if self.col_kind == "guess":
+                self._event(self.t_prev, f"centre guess {self.n_guesses} found nothing, resume the raster")
+            else:
+                self.n_cycles += 1
+                self._event(self.t_prev, f"edge cycle {self.n_cycles} found nothing, resume the raster")
             self.mode, self.catches = "raster", []
         if self.d is not None:
             # 0 -> +L, then rows of 2L alternating direction, each shifted across the line
             L = c.sweep_half
             self.sweep_s += c.spiral_speed * dt
             if self.sweep_s < L:
+                self.sweep_sign = 1.0
                 return 0.0, self.sweep_s * self.d
             row, q = divmod(self.sweep_s - L, 2 * L)
             row = int(row)
             if row >= int(c.sweep_rows):
                 return c.spiral_r_max + 1.0, self.offset
             x = L - q if row % 2 == 0 else -L + q
+            self.sweep_sign = -1.0 if row % 2 == 0 else 1.0
             k = 0 if row == 0 else ((row + 1) // 2) * (1 if row % 2 else -1)
             return 0.0, x * self.d + k * c.sweep_pitch * self.p
         r = c.spiral_pitch * self.theta / (2 * np.pi)

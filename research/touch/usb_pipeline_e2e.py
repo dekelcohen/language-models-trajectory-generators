@@ -37,6 +37,7 @@ ap.add_argument("--out", default="outputs/touch/e2e")
 ap.add_argument("--rot", type=float, default=None, help="gripper yaw for the grasp (auto if omitted)")
 ap.add_argument("--grasp-off", default="0,0,0",
                 help="grasp position error dx,dy,dz m (an imperfect pick, like an LLM-planned grasp)")
+ap.add_argument("--grip-force", type=float, default=20.0, help="finger squeeze (N each) during the insert")
 ap.add_argument("--step", type=float, default=0.002,
                 help="max waypoint spacing m (1 sim step each); LLM trajectories use ~0.015 (20 points / 30 cm)")
 ap.add_argument("--llm-z", action="store_true",
@@ -316,7 +317,7 @@ print(f"[e2e] (eval) before insert: tip {tr.get('plug_tip_pos')} depth {tr.get('
 t1 = time.time()
 if args.touch:
     tool = np.array([TIP_X, 0.0, 0.0]) + in_hand
-    spec = {"axis": [1.0, 0.0, 0.0], "tool_offset": tool.tolist(), "max_s": 20.0}
+    spec = {"axis": [1.0, 0.0, 0.0], "tool_offset": tool.tolist(), "max_s": 20.0, "grip_force": args.grip_force}
     if args.sweep:
         sw = {"sweep_dir": [0.0, 1.0, 0.0], "sweep_half": args.sweep}
         if args.pitch is not None:

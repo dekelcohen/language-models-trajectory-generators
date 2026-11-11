@@ -162,3 +162,17 @@ def test_open_door_falls_back_to_guarded_pull_without_torque_control(monkeypatch
     res, calls = _open_door_with(monkeypatch, {"outcome": "unsupported"})
     assert res["outcome"] == "opened" and res["method"] == "guarded_pull"
     assert calls == ["grasp", ("touch", [0.0, -1.0, 0.0]), "probe", "guarded"]   # same grasp, no re-grasp
+
+def test_probe_hinge_turns_a_grasp_slip_into_a_lost_lever_not_a_crash():
+    from types import SimpleNamespace
+    from helpers import door_open
+    state = {"eef_pos": [0.3, -0.1, 0.65], "rotation": 0.0, "gripper_holding": True}
+
+    def execute(traj):
+        state["gripper_holding"] = False
+        raise RuntimeError("Trajectory stopped by the grasp-slip guard. GRASP SLIP (width check): ...")
+    api = SimpleNamespace(get_robot_state=lambda: dict(state), execute_trajectory=execute,
+                          guard_motion=lambda *a, **k: None, find_hinge_from_depth=lambda hand_xy: None,
+                          logger=SimpleNamespace(info=lambda m: None))
+    out = door_open.probe_hinge(api, {"pull_dir": [0.0, -1.0, 0.0]})
+    assert out["source"] == "none" and out["holding"] is False      # open_door then re-grasps

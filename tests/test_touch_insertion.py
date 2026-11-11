@@ -190,3 +190,30 @@ def test_grasp_slip_that_looks_seated_is_caught_by_the_sideways_check():
     assert res["outcome"] == "slipped", res["events"]
     res, _ = _run(SlipPort(hole=(0.0, 0.05)), verify_shift=0.0)
     assert res["outcome"] == "seated"   # without the check the slip passes as seated
+
+def test_insert_with_touch_with_tuning_args_does_not_shadow_the_config_module():
+    """USB run 2026-11-11 p14: the plug seated, then insert_with_touch crashed because its local
+    tuning dict was named `config` and hid the config module (config.FINGER_PAD_HALF_WIDTH)."""
+    import logging
+    import types
+    from api import API
+    sent = []
+
+    class _Conn:
+        def send(self, m):
+            sent.append(m)
+
+        def recv(self):
+            return "ok", {"outcome": "seated", "advance_mm": 12.0, "events": []}
+
+    api = API.__new__(API)
+    api.args = types.SimpleNamespace(touch=True)
+    api.main_connection = _Conn()
+    api.logger = logging.getLogger("test")
+    api._record_touch = lambda *a: None
+    api._budget_tick = lambda *a: None
+    res = api.insert_with_touch([1, 0, 0], tool_offset=[0.025, 0, 0], insert_force=18.0,
+                                opening_width=0.012, search_line=[0, 1, 0], search_half=0.04)
+    assert res["outcome"] == "seated" and "finger_clearance_m" in res
+    cfg = sent[0][1]["config"]
+    assert cfg["edge_min_sep"] == 0.75 * 0.012 and cfg["sweep_half"] == 0.04

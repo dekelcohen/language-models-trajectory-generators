@@ -483,3 +483,13 @@ Before the fixes: r4-r8 16-21 min (2 of 5 FAIL), q1 42 min, q2 29 min. All three
     - Swept angle from the hand path must be cross-checked (vision, or felt load) before it is trusted as door motion.
   - The harness A/B 61 deg used a SIDE grasp.
 - **Next**: on Genesis, try a side grasp of the lever (`approach_yaw`). Gate "door moved" on the felt load staying up during the sweep.
+
+## 2026-11-11 - probe grasp-slip no longer aborts `open_door`; PyBullet `door:hidden` successes
+
+- **Crash (d1):** inside `probe_hinge`, the straight probe pull let the lever slide out of the fingers. The grasp-slip guard raised `RuntimeError` from `execute_trajectory`, which aborted the whole `open_door` call.
+- **Fix** (`helpers/door_open.py`): `_exec_guarded` turns a grasp-slip `RuntimeError` into a `{"guard": {"check": "grasp_slip"}}` result. `probe_hinge` uses it for the probe pull and the probe arc, so `open_door` counts a lost lever and re-grasps. Test `test_probe_hinge_turns_a_grasp_slip_into_a_lost_lever_not_a_crash`.
+- **d2** (PyBullet, Opus 5.5 + gpt-6.1-terra, moondream seg): SUCCESS in 7 min, door 73.8 deg by vision (89 deg eval).
+  - HF `rollouts/2026-11-11/door_hidden_pybullet_probefix_SUCCESS`.
+- **d3** (same setup): attempt 1 `partly_open` 5.6 deg (the probe pull lost the lever, then 3 grasp misses). The retry opened it: the reviewer read 62.5 deg, SUCCESS in 18 min.
+  - HF `rollouts/2026-11-11/door_hidden_pybullet_probefix_2_SUCCESS`.
+- Genesis `door:hidden` (top-down lever grasp misses) not retried today.

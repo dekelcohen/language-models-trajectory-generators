@@ -215,3 +215,17 @@ different general gap that the deleted scene-specific text had been papering ove
   `touch/insertion.py` and reverted (the stall is the fingers, not alignment).
 - No new perception dependency added.
 - Rollouts: `outputs/2026-11-10/plug_usba_*` (HF `rollouts/2026-11-10/`).
+
+## 2026-11-11 - lone-catch centre guess, `config` shadowing crash
+
+- **Root cause of the far-error misses (p13, harness):** the line search is a one-directional raster pass, so it only feels the edge it is LEAVING.
+  - With a -29 mm along-face aim error the harness (`--err=-0.029,-0.0008 --sweep 0.042 --rows 5`) logged partial catches only at the far edge (34.5 / 36.8 / 34.6 mm; centre ~29 mm). The two-catch bracket never formed, and the plug was lost. Grip 20 N vs 40 N made no difference.
+- **Fix** (`touch/insertion.py`): on a lone catch, guess the centre half an opening width BACK against the sweep direction (`sweep_sign`), then raster a short column there.
+  - The column is +-`guess_col_half` (2 mm) along x +-`cross_half` across, for at most `max_guess_cycles=2` guesses, counted apart from the edge cycles.
+  - The guess comes from the measured catch + the vision opening width only; no scene numbers.
+  - Harness: the guess landed at 28.0 mm and the plug went in 10.7 mm. Then it pivoted 89 deg in the grasp, with a tip ~1-3 mm off in height after many probes, so the run is still "not inserted". The far-error case remains marginal.
+- **p14 (LLM, USB-A): the plug SEATED** (11.9 mm deep, 0.2 mm lateral, tilt 2.5 deg) through the centre guess (`outputs/2026-11-11/plug_usba_genesis_guess_seated_then_config_crash_FAIL`).
+  - Then `insert_with_touch` raised `AttributeError: 'dict' object has no attribute 'FINGER_PAD_HALF_WIDTH'`. Its local tuning dict was named `config`, which hid the `config` module.
+  - The LLM re-ran the whole block and dragged the seated plug out with closed fingers.
+  - Fixed: the dict is renamed `cfg`, and `max_s` now also budgets the guess columns. Regression test `test_insert_with_touch_with_tuning_args_does_not_shadow_the_config_module`.
+- No new perception dependency added.

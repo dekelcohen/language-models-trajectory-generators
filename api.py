@@ -699,31 +699,33 @@ class API:
         a = np.asarray(axis, dtype=float)
         a = a / np.linalg.norm(a)
         off = (np.asarray(tool_offset, dtype=float) if tool_offset is not None else a * float(tool_length))
-        config = {}
+        cfg = {}  # not `config`: that name is the config module, used below
         if search_radius:
-            config["spiral_r_max"] = float(search_radius)
+            cfg["spiral_r_max"] = float(search_radius)
         if insert_force:
             f = float(insert_force)
-            config.update(f_insert=f, f_max=max(35.0, 1.8 * f))
+            cfg.update(f_insert=f, f_max=max(35.0, 1.8 * f))
         if opening_width:
             w = float(opening_width)
-            config.update(edge_min_sep=0.75 * w, edge_max_sep=1.35 * w)
+            cfg.update(edge_min_sep=0.75 * w, edge_max_sep=1.35 * w)
         if search_line is not None:
             from touch.insertion import InsertConfig
             c = InsertConfig()
-            config.update(sweep_dir=[float(x) for x in search_line], sweep_half=float(search_half))
+            cfg.update(sweep_dir=[float(x) for x in search_line], sweep_half=float(search_half))
             rows = c.sweep_rows
             if search_cross:
                 rows = 1 + 2 * int(np.ceil(float(search_cross) / c.sweep_pitch - 1e-9))
-                config["sweep_rows"] = rows
+                cfg["sweep_rows"] = rows
             travel = float(search_half) * (1 + 2 * rows)
-            # + edge-finder cycles (column raster across the line each)
-            local = c.max_edge_cycles * (2 * round(c.col_half / c.col_pitch) + 1) * (2 * c.cross_half + c.col_pitch)
+            # + edge-finder and centre-guess cycles (column raster across the line each)
+            cols = (c.max_edge_cycles * (2 * round(c.col_half / c.col_pitch) + 1)
+                    + c.max_guess_cycles * (2 * round(c.guess_col_half / c.col_pitch) + 1))
+            local = cols * (2 * c.cross_half + c.col_pitch)
             max_s = max(float(max_s), (travel + local) / c.spiral_speed + 10.0)
         spec = {"axis": a.tolist(), "tool_offset": off.tolist(),
                 "max_s": float(max_s), "grip_force": float(grip_force)}
-        if config:
-            spec["config"] = config
+        if cfg:
+            spec["config"] = cfg
         self.logger.info(PROGRESS + f"[touch] insert_with_touch {spec}" + ENDC)
         self.main_connection.send([TOUCH_INSERT, spec])
         msg, res = self.main_connection.recv()

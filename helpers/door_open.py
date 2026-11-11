@@ -137,6 +137,18 @@ def push_door(api, plane, door_deg, max_deg=85.0, hover=0.12):
                      log=lambda m: api.logger.info(f"[door_open] {m}"))
 
 
+def _exec_guarded(api, traj):
+    """execute_trajectory, but a grasp-slip guard trip (raised as RuntimeError) becomes a guard dict: the
+    caller stops the probe and open_door re-grasps, instead of aborting the whole call."""
+    try:
+        return api.execute_trajectory(traj)
+    except RuntimeError as e:
+        if "grasp-slip" not in str(e):
+            raise
+        api.logger.info(f"[door_open] grasp slip during the probe: {str(e)[:160]}")
+        return {"guard": {"check": "grasp_slip"}}
+
+
 def probe_hinge(api, plane, pull_m=0.18, step=0.02, min_deg=3.0, refit_below_deg=15.0, arc_m=0.10):
     """Find the hinge by moving the door, not by looking at the frame: with the lever held, pull straight out
     along ``pull_dir`` (no hinge-side guess; a lever slides along the bar between the fingers while the
@@ -161,7 +173,7 @@ def probe_hinge(api, plane, pull_m=0.18, step=0.02, min_deg=3.0, refit_below_deg
     p, stalls, guard = tip0.copy(), 0, None
     for k in range(int(math.ceil(pull_m / step))):
         tgt = tip0[:2] + n * min(pull_m, step * (k + 1))
-        m = api.execute_trajectory(Trajectory([[float(tgt[0]), float(tgt[1]), tip0[2] + dz, rot]], "door: probe pull"))
+        m = _exec_guarded(api, Trajectory([[float(tgt[0]), float(tgt[1]), tip0[2] + dz, rot]], "door: probe pull"))
         guard = (m or {}).get("guard") if isinstance(m, dict) else None
         pn = np.asarray(api.get_robot_state()["eef_pos"], float)
         stalls = stalls + 1 if float(np.linalg.norm(pn[:2] - p[:2])) < 0.3 * step else 0
@@ -185,8 +197,8 @@ def probe_hinge(api, plane, pull_m=0.18, step=0.02, min_deg=3.0, refit_below_deg
             if float(np.dot(t, n)) < 0:
                 t = -t
             tgt = p[:2] + t * step
-            m = api.execute_trajectory(Trajectory([[float(tgt[0]), float(tgt[1]), tip0[2] + dz, rot]],
-                                                  "door: probe arc"))
+            m = _exec_guarded(api, Trajectory([[float(tgt[0]), float(tgt[1]), tip0[2] + dz, rot]],
+                                                "door: probe arc"))
             g2 = (m or {}).get("guard") if isinstance(m, dict) else None
             pn = np.asarray(api.get_robot_state()["eef_pos"], float)
             moved += float(np.linalg.norm(pn[:2] - p[:2]))
