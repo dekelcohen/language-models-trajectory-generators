@@ -217,3 +217,21 @@ def test_insert_with_touch_with_tuning_args_does_not_shadow_the_config_module():
     assert res["outcome"] == "seated" and "finger_clearance_m" in res
     cfg = sent[0][1]["config"]
     assert cfg["edge_min_sep"] == 0.75 * 0.012 and cfg["sweep_half"] == 0.04
+
+
+def test_lone_catch_guesses_the_centre_half_a_width_back_but_not_before_the_sweep_moved():
+    """A one-way raster pass only feels the edge it leaves (USB harness, -29 mm aim error): a lone
+    catch guesses the centre half an opening width back against the pass. A catch on the very
+    first probe (no sweep motion yet) is not an edge being left: no guess."""
+    cfg = InsertConfig(sweep_dir=[0.0, 1.0, 0.0], edge_min_sep=0.009, edge_max_sep=0.016)
+    ctrl = SpiralInsertController([1.0, 0.0, 0.0], cfg)
+    ctrl._catch(1.0, adv=0.001)                     # first probe at the start point
+    assert ctrl.mode == "raster" and ctrl.n_guesses == 0
+
+    ctrl = SpiralInsertController([1.0, 0.0, 0.0], cfg)
+    ctrl.sweep_s, ctrl.sweep_sign = 0.035, 1.0
+    ctrl.offset = 0.035 * ctrl.d                    # moving +along, catch at +35 mm
+    ctrl._catch(40.0, adv=0.001)
+    assert ctrl.mode == "columns" and ctrl.col_kind == "guess" and ctrl.n_guesses == 1
+    first_col_along = float(ctrl.path[0] @ ctrl.d)
+    assert abs(first_col_along - (0.035 - 0.25 * (0.009 + 0.016))) < 1e-9

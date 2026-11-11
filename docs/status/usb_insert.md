@@ -229,3 +229,6 @@ different general gap that the deleted scene-specific text had been papering ove
   - The LLM re-ran the whole block and dragged the seated plug out with closed fingers.
   - Fixed: the dict is renamed `cfg`, and `max_s` now also budgets the guess columns. Regression test `test_insert_with_touch_with_tuning_args_does_not_shadow_the_config_module`.
 - No new perception dependency added.
+- **p15 (LLM, USB-A): FAIL.** The wrist-pointing estimate was 45 mm off along the face. At the first catch the plug pivoted 81 deg in the grasp, so the attempt was lost (HF `rollouts/2026-11-11/plug_usba_genesis_45mm_err_pivot_FAIL`).
+  - The harness and p15 also showed a "lone catch" on the very first probe, before any sweep motion. That is not an edge being left, so the guess is now gated on the sweep having moved (`sweep_s > col_pitch`). Test `test_lone_catch_guesses_the_centre_half_a_width_back_but_not_before_the_sweep_moved`.
+- Open: (1) the plug pivots in the grasp on repeated partial catches against the face (far aim errors); (2) the along-face wrist-pointing error sometimes exceeds 3 cm.

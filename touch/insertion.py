@@ -206,7 +206,8 @@ class SpiralInsertController:
             ca, self.col_kind = 0.5 * (lo + hi), "edges"
             self._event(t, f"edges along the line at {1000 * lo:.2f} / {1000 * hi:.2f}mm -> centre "
                            f"{1000 * ca:.2f}mm, column raster +-{1000 * c.col_half:.1f} x +-{1000 * c.cross_half:.1f}mm")
-        elif len(self.catches) == 1 and c.guess_col_half > 0 and self.n_guesses < c.max_guess_cycles:
+        elif (len(self.catches) == 1 and c.guess_col_half > 0 and self.n_guesses < c.max_guess_cycles
+              and self.sweep_s > c.col_pitch):  # a catch before the sweep moved is not an edge being left
             ca = along - self.sweep_sign * 0.25 * (c.edge_min_sep + c.edge_max_sep)
             col_half, self.col_kind = c.guess_col_half, "guess"
             self.n_guesses += 1
