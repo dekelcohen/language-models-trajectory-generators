@@ -30,7 +30,7 @@ COPY gpu_server ./gpu_server
 
 # Weights (CoTracker hub repo + checkpoints, RoMa v2, HF models) are downloaded on first load here.
 VOLUME ["/cache"]
-EXPOSE 8765 8766 8775 8776
+EXPOSE 8765 8766 8775 8776 8785 8786
 
 ENTRYPOINT ["python", "-m", "gpu_server.server"]
 CMD ["--modules", "cotracker", "echo", "--preload", "cotracker", "--ws", "0.0.0.0:8765", "--tcp", "0.0.0.0:8766"]

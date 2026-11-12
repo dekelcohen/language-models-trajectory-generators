@@ -4,6 +4,7 @@ import torch
 import math
 import os
 import re
+import time
 import config
 import json
 import models
@@ -41,6 +42,19 @@ def create_trajectory_videos(logger, start_idx=0):
     else:
         logger.info(PROGRESS + f"No trajectory frames from step {start_idx} - no video created." + ENDC)
     return clips
+
+
+def wrist_locate_prompt(description, max_points, coords_format):
+    """Pointing prompt of API.locate_with_wrist_camera (shared with research/touch/pointing_bench.py)."""
+    return (
+        "This image is from a robot's wrist camera (the white robot gripper is in view). "
+        f"Point at EVERY visible instance of: {description}. Best match first, at most {int(max_points)}. "
+        "Point at the centre of each instance; skip ones hidden by the gripper. "
+        "Never point at an object held between the gripper fingers - it is not the target, even if it looks like it. "
+        f"Coordinates format: {coords_format}. Answer ONLY a JSON list like "
+        '[{"point": [..], "label": "short label"}]; [] if none is visible.'
+    )
+
 
 class API:
 
@@ -578,28 +592,38 @@ class API:
         stem = os.path.join(config.images_folder, f"wrist_locate_{safe}_{self.trajectory_step}_{self.task.wrist_locate_count}")
         image_path = stem + ".png"
         rgb.save(image_path)
-
-        model = self.args.planner_perception_vlm
-        coords_key = get_model_info(model).pointing_coords_format
-        coords_format = config.affordance_coords_format_by_key[coords_key]
-        prompt = (
-            "This image is from a robot's wrist camera (the white robot gripper is in view). "
-            f"Point at EVERY visible instance of: {description}. Best match first, at most {int(max_points)}. "
-            "Point at the centre of each instance; skip ones hidden by the gripper. "
-            "Never point at an object held between the gripper fingers - it is not the target, even if it looks like it. "
-            f"Coordinates format: {coords_format}. Answer ONLY a JSON list like "
-            '[{"point": [..], "label": "short label"}]; [] if none is visible.'
-        )
         try:
-            messages = models.call_llm_cached(
-                self.main_connection, self.client, model, prompt, [], role="user", image_paths=[image_path],
-                options={"max_tokens": self.args.max_tokens, "reasoning_effort": self.args.reasoning_effort,
-                         "cache": self.llm_cache, "conversation_key": "wrist_locate"},
-            )
-            text = (messages[-1]["content"] if messages and isinstance(messages[-1], dict) else "") or ""
+            # Sidecar for offline pointing benchmarks (research/touch/pointing_bench.py): depth + camera pose.
+            np.savez_compressed(stem + "_cam.npz", depth=depth,
+                                cam_pos=np.asarray(self.wrist_camera_position, float),
+                                cam_quat=np.asarray(self.wrist_camera_orientation_q, float),
+                                cam_info=json.dumps(self.cam_info, default=str), description=str(description))
+        except Exception as e:
+            print(f"locate_with_wrist_camera: sidecar not saved: {e}")
+
+        model = getattr(self.args, "wrist_pointing_model", None) or self.args.planner_perception_vlm
+        use_molmo = str(model).startswith("gpu-molmo")  # MolmoPoint on gpu_server: pixel points
+        coords_key = "xy_pixels" if use_molmo else get_model_info(model).pointing_coords_format
+        coords_format = config.affordance_coords_format_by_key[coords_key]
+        prompt = wrist_locate_prompt(description, max_points, coords_format)
+        t_point = time.time()
+        try:
+            if use_molmo:
+                from providers.pointing.molmo_remote import point_with_molmo, url_from_model
+                pts = point_with_molmo(image_path, description, max_points, url=url_from_model(model))
+                text = json.dumps([{"point": p, "label": description} for p in pts])
+            else:
+                from helpers.perception_scene_analysis import perception_effort
+                messages = models.call_llm_cached(
+                    self.main_connection, self.client, model, prompt, [], role="user", image_paths=[image_path],
+                    options={"max_tokens": self.args.max_tokens, "reasoning_effort": perception_effort(self.args),
+                             "cache": self.llm_cache, "conversation_key": "wrist_locate"},
+                )
+                text = (messages[-1]["content"] if messages and isinstance(messages[-1], dict) else "") or ""
         except Exception as e:
             print(f"locate_with_wrist_camera: perception VLM failed: {e}")
             return []
+        self.logger.info(PROGRESS + f"[wrist-locate] {model} answered in {time.time() - t_point:.1f}s" + ENDC)
         m = re.search(r"\[.*\]", text, re.DOTALL)
         try:
             items = json.loads(m.group(0)) if m else []
@@ -1156,7 +1180,7 @@ class API:
 
     def grasp_door_lever(self, door_deg=0.0):
         """Top-down grasp at the depth-measured lever middle of the last ``estimate_door_plane`` (fingers across
-        the bar, +-2 cm retries, lever pressed 3 cm). ``door_deg``: the door's current opening (the lever has
+        the bar, +-2 cm retries, an off-centre hold is re-centred, lever pressed down force-limited to 20 N). ``door_deg``: the door's current opening (the lever has
         swung with it). Returns {"holding", "xyz", "rotation", "width", "tries"}."""
         from helpers.door_open import grasp_door_lever
         ref = getattr(self, "_door_plane", None)

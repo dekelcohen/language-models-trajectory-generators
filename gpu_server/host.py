@@ -47,6 +47,7 @@ BUILTIN_MODULES = {
     "echo": "gpu_server.modules.echo:EchoModule",
     "cotracker": "gpu_server.modules.cotracker:CoTrackerModule",
     "romav2": "gpu_server.modules.romav2:RoMaV2Module",
+    "molmo_point": "gpu_server.modules.molmo_point:MolmoPointModule",
 }
 
 _MODULE_OPS = ("load", "unload", "open", "call", "close")

@@ -67,14 +67,96 @@ def _approach(api, plane, door_deg, target, rot, desc, front_m=0.15):
                                       + _line(down, [x, y, z + dz, rot], 0.01), desc))
 
 
-def grasp_door_lever(api, plane, door_deg=0.0, offsets=(0.0, 0.02, -0.02), clear_z=0.12, press_m=0.03):
+def _closed_state(api):
+    st = api.get_robot_state()
+    w = float(st.get("gripper_width") or 0.0)
+    return bool(st.get("gripper_holding")) and w > 0.005, w, st
+
+
+def _move_tip(api, frm, to, rot, desc, step=0.005):
+    from common_utils import Trajectory
+    dz = config.gripper_depth_offset_franka
+    api.execute_trajectory(Trajectory(_line([frm[0], frm[1], frm[2] + dz, rot], [to[0], to[1], to[2] + dz, rot], step),
+                                      desc))
+
+
+def _recentre_hold(api, out, bar_w, min_ratio, rot):
+    """The fingers stalled at a width well under the bar thickness: they pinch a chord of the bar off its
+    centre line (above or below it; the pads then roll off under a pull). Re-open and close again higher
+    / lower by the chord offset ``sqrt(r^2 - (w/2)^2)``: lower first (a descent that stops on the bar leaves
+    the pads above its centre). Keeps the widest hold; returns the updated ``out``."""
+    st = api.get_robot_state()
+    tip = np.asarray(st.get("eef_pos") or out["xyz"], float)
+    r, w0 = 0.5 * bar_w, float(out["width"])
+    dzc = max(0.005, math.sqrt(max(r * r - (0.5 * w0) ** 2, 0.0)))
+    best, cur = (w0, float(tip[2])), tip.copy()
+    for k, zc in enumerate((tip[2] - dzc, tip[2] + dzc)):
+        api.open_gripper()
+        tgt = np.array([tip[0], tip[1], zc])
+        _move_tip(api, cur, tgt, rot, f"door lever: re-centre {k}")
+        api.close_gripper()
+        hold, w, st = _closed_state(api)
+        cur = np.asarray(st.get("eef_pos") or tgt, float)
+        api.logger.info(f"[door_open] re-centre {k} at z {zc:.3f}: holding={hold} width={w:.4f} "
+                        f"(bar {bar_w * 1000:.0f} mm)")
+        if hold and w >= min_ratio * bar_w:
+            return dict(out, holding=True, width=round(w, 4), recentred=True,
+                        xyz=[round(float(v), 3) for v in (tip[0], tip[1], zc)])
+        if hold and w > best[0]:
+            best = (w, float(zc))
+    api.open_gripper()
+    _move_tip(api, cur, [tip[0], tip[1], best[1]], rot, "door lever: back to the best hold")
+    api.close_gripper()
+    hold, w, _ = _closed_state(api)
+    api.logger.info(f"[door_open] re-centre did not reach {min_ratio:.0%} of the bar; best hold at z {best[1]:.3f}: "
+                    f"holding={hold} width={w:.4f}")
+    return dict(out, holding=hold, width=round(w, 4), off_centre=True,
+                xyz=[round(float(v), 3) for v in (tip[0], tip[1], best[1])])
+
+
+def _press_lever(api, press_m, press_force):
+    """Press the held lever down (unlatch) by at most ``press_m``, stopping at ``press_force`` N of
+    resistance (move_until_contact = impedance + felt force, as on a real arm: a sprung lever yields, a
+    stiff one stops the hand). A position-controlled press into a stiff lever jammed at ~1-4 kN on Genesis
+    and peeled the grip, so without force feedback it is only done where the arm is not torque-driven."""
+    from common_utils import Trajectory
+    mu = getattr(api, "move_until_contact", None)
+    res = None
+    if callable(mu):
+        try:
+            res = mu([0.0, 0.0, -1.0], max_travel=float(press_m), force=float(press_force), speed=0.01,
+                     grip_force=30.0)
+        except Exception as e:  # noqa: BLE001
+            api.logger.info(f"[door_open] guarded press failed ({str(e)[:120]})")
+    oc = (res or {}).get("outcome")
+    if oc in ("contact", "no_contact", "over_force"):
+        api.logger.info(f"[door_open] lever press (force-limited {press_force:.0f} N): {oc}, "
+                        f"{res.get('travel_mm')} mm, {res.get('contact_N')} N")
+        return {"mode": "force", "outcome": oc, "travel_mm": res.get("travel_mm")}
+    if oc == "disabled" and getattr(getattr(api, "args", None), "sim", None) == "genesis":
+        api.logger.info("[door_open] lever press skipped: no force feedback (--no-touch) on a torque-driven arm")
+        return {"mode": "skipped"}
+    st = api.get_robot_state()
+    tip, rot = np.asarray(st["eef_pos"], float), float(st.get("rotation") or 0.0)
+    dz = config.gripper_depth_offset_franka
+    api.execute_trajectory(Trajectory(_line([tip[0], tip[1], tip[2] + dz, rot],
+                                            [tip[0], tip[1], tip[2] - press_m + dz, rot], 0.005), "door lever: press"))
+    return {"mode": "position"}
+
+
+def grasp_door_lever(api, plane, door_deg=0.0, offsets=(0.0, 0.02, -0.02), clear_z=0.12, press_m=0.03,
+                     press_force=20.0, min_width_ratio=0.8):
     """Top-down grasp at the depth-measured lever middle, fingers across the bar; checks
-    ``gripper_holding`` and the finger width, and retries +-2 cm along the bar. ``press_m``: press the
-    lever down after closing (unlatch). Returns {"holding", "xyz", "rotation", "width", "tries"}."""
+    ``gripper_holding`` and the finger width, and retries +-2 cm along the bar. A hold narrower than
+    ``min_width_ratio`` x the depth-measured bar thickness (``lever_grasp["bar_width_m"]``) pinches the bar
+    off-centre: re-centred in height (``_recentre_hold``). ``press_m``: press the lever down after closing
+    (unlatch), force-limited to ``press_force`` N where the arm has force feedback.
+    Returns {"holding", "xyz", "rotation", "width", "tries", "press"?, "recentred"? / "off_centre"?}."""
     from common_utils import Trajectory
     g = lever_grasp_now(plane, door_deg)
     if not g:
         return {"holding": False, "reason": "no lever_grasp (lever not seen in depth)", "tries": 0}
+    bar_w = (plane.get("lever_grasp") or {}).get("bar_width_m")
     dz = config.gripper_depth_offset_franka
     u = _unit2(np.asarray(plane["hinge"], float) - np.asarray(plane.get("rose") or plane["free_edge"], float))
     if door_deg and abs(door_deg) > 1.0:
@@ -89,17 +171,23 @@ def grasp_door_lever(api, plane, door_deg=0.0, offsets=(0.0, 0.02, -0.02), clear
         _approach(api, plane, door_deg, (x, y, z + clear_z), rot, f"door lever: above try {k}")
         api.execute_trajectory(Trajectory(_line(above, down, 0.005), f"door lever: descend try {k}"))
         api.close_gripper()
-        st = api.get_robot_state()
-        w = float(st.get("gripper_width") or 0.0)
-        out = {"holding": bool(st.get("gripper_holding")) and w > 0.005, "xyz": [round(float(v), 3) for v in (x, y, z)],
+        hold, w, _ = _closed_state(api)
+        out = {"holding": hold, "xyz": [round(float(v), 3) for v in (x, y, z)],
                "rotation": round(rot, 3), "width": round(w, 4), "tries": k + 1}
         api.logger.info(f"[door_open] grasp try {k} at {out['xyz']} rot {rot:.2f}: holding={out['holding']} width={w:.4f}")
+        if out["holding"] and bar_w and w < min_width_ratio * float(bar_w):
+            api.logger.info(f"[door_open] off-centre hold: width {w * 1000:.0f} mm < {min_width_ratio:.0%} of the "
+                            f"{float(bar_w) * 1000:.0f} mm bar -> re-centre")
+            out = _recentre_hold(api, out, float(bar_w), min_width_ratio, rot)
         if out["holding"]:
             if press_m:
-                api.execute_trajectory(Trajectory(_line(down, [x, y, z - press_m + dz, rot], 0.005), "door lever: press"))
+                out["press"] = _press_lever(api, press_m, press_force)
             return out
         api.open_gripper()
-        api.execute_trajectory(Trajectory(_line(down, above, 0.02), f"door lever: lift after miss {k}"))
+        st = api.get_robot_state()
+        tip = np.asarray(st.get("eef_pos") or [x, y, z], float)
+        api.execute_trajectory(Trajectory(_line([tip[0], tip[1], tip[2] + dz, rot], above, 0.02),
+                                          f"door lever: lift after miss {k}"))
     return out
 
 
@@ -117,6 +205,23 @@ def _release_and_clear(api, up=0.12):
     dz = config.gripper_depth_offset_franka
     a = [tip[0], tip[1], tip[2] + dz, rot]
     api.execute_trajectory(Trajectory(_line(a, [tip[0], tip[1], tip[2] + up + dz, rot], 0.02), "door: release and lift"))
+
+
+def _to_view(api, plane, view):
+    """Hand back to ``view`` (fingertip xyz of a pose the door was already seen from) over the panel top,
+    so the arm does not hide the panel from the head camera nor sweep across a swung door."""
+    from common_utils import Trajectory
+    st = api.get_robot_state()
+    tip, rot = np.asarray(st["eef_pos"], float), float(st.get("rotation") or 0.0)
+    dz = config.gripper_depth_offset_franka
+    top = plane.get("top_z") if plane else None
+    safe = max(float(top) + 0.06 if top is not None else tip[2] + 0.15, tip[2], float(view[2]))
+    a = [tip[0], tip[1], tip[2] + dz, rot]
+    up = [tip[0], tip[1], safe + dz, rot]
+    over = [float(view[0]), float(view[1]), safe + dz, rot]
+    end = [float(view[0]), float(view[1]), float(view[2]) + dz, rot]
+    api.execute_trajectory(Trajectory(_line(a, up, 0.02) + _line(up, over, 0.02) + _line(over, end, 0.02),
+                                      "door: back to the clear view"))
 
 
 def push_door(api, plane, door_deg, max_deg=85.0, hover=0.12):
@@ -247,10 +352,27 @@ def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_fr
     use_touch = bool(touch) and getattr(getattr(api, "args", None), "touch", True) is not False
     touch_hinge = None
     res = {"outcome": "partly_open", "door_deg": deg, "pulls": pulls, "plane": plane}
+    try:  # the plane was just measured from this hand pose: a known clear view of the door
+        view = list(api.get_robot_state()["eef_pos"])
+    except Exception:  # noqa: BLE001
+        view = None
 
-    def measure(prev):
+    def measure(prev, est=None):
+        """Door angle from head depth. When the panel is not seen (arm in view), look again from the clear
+        view; still unseen -> ``est`` (the angle the hand swept the door through while holding it), never
+        a stale pre-pull reading (door:hidden gs: a 40 deg swing was logged as the old 0.8 deg and the
+        re-grasp went to the closed-door lever, knocking the panel shut)."""
         m = api.measure_door_angle()
-        return prev if m is None else float(m)
+        if m is None and view is not None:
+            _to_view(api, plane, view)
+            m = api.measure_door_angle()
+        if m is not None:
+            return float(m)
+        if est is not None:
+            api.logger.info(f"[door_open] door not seen in depth; using the pull's swept arc {est:.1f} deg")
+            return float(est)
+        api.logger.info(f"[door_open] door not seen in depth; keeping the last estimate {prev:.1f} deg")
+        return prev
 
     while deg < goal_deg and moves < max_pulls and misses <= 2:
         if deg >= push_from_deg and not use_touch:
@@ -287,7 +409,8 @@ def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_fr
                                  hinge_source="touch")
                     res["plane"] = plane
                 _release_and_clear(api)
-                deg = measure(deg)
+                sw = r.get("swept_deg")
+                deg = measure(deg, est=(deg + float(sw)) if sw and r.get("hinge") else None)
                 pulls.append({"grasp": g, "touch_pull": {k: r.get(k) for k in ("outcome", "swept_deg", "travel_cm",
                                                                                  "hinge")}, "door_deg": deg})
                 api.logger.info(f"[door_open] touch pull {moves}: {r.get('outcome')} swept={r.get('swept_deg')} "
@@ -312,7 +435,10 @@ def open_door(api, handle, goal_deg=GOAL_DEG, max_pulls=3, max_deg=85.0, push_fr
         r = api.guarded_pull(direction=plane["pull_dir"], hinge=plane["hinge"], max_deg=max_deg, start_deg=start)
         moves += 1
         _release_and_clear(api)
-        deg = measure(deg)
+        sw = r.get("vision_deg")
+        if sw is None and r.get("swept_deg") is not None:
+            sw = start + float(r["swept_deg"])
+        deg = measure(deg, est=sw)
         pulls.append({"grasp": g, "pull": {k: r.get(k) for k in ("outcome", "swept_deg", "vision_deg", "pushed")},
                       "door_deg": deg})
         api.logger.info(f"[door_open] pull {moves}: {r.get('outcome')} swept={r.get('swept_deg')} -> door {deg} deg")

@@ -24,6 +24,12 @@ from config import OK, PROGRESS, WARNING, ENDC
 from llm_providers.model_registry import get_model_info
 
 
+def perception_effort(args):
+    """Reasoning effort of perception VLM calls: --perception-reasoning-effort ('inherit' = --reasoning-effort)."""
+    effort = getattr(args, "perception_reasoning_effort", None)
+    return args.reasoning_effort if effort in (None, "inherit") else effort
+
+
 def _capture_fresh_head_image(ctx):
     """Re-render the head camera so perception analyses the CURRENT world state.
 
@@ -195,7 +201,7 @@ def run_scene_perception(ctx, command):
         messages = models.call_llm_cached(
             ctx.main_connection, ctx.client, args.planner_perception_vlm, prompt, [], role="system",
             image_paths=image_paths,
-            options={"max_tokens": args.max_tokens, "reasoning_effort": args.reasoning_effort, "cache": ctx.llm_cache,
+            options={"max_tokens": args.max_tokens, "reasoning_effort": perception_effort(args), "cache": ctx.llm_cache,
                      "conversation_key": "perception"},
         )
         text = messages[-1]["content"] if messages and isinstance(messages[-1], dict) else ""

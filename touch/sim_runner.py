@@ -35,6 +35,15 @@ def _gains(k_axial, k_lat, a, mass=2.0):
             2 * np.sqrt(k_axial * mass) * P + 2 * np.sqrt(k_lat * mass) * L)
 
 
+def _qdq(sim, body, joints):
+    """Joint positions and velocities, batched when the adapter supports it (hot loop)."""
+    batched = getattr(sim, "get_joint_positions_velocities", None)
+    if batched is not None:
+        return batched(body, joints)
+    states = [sim.get_joint_state(body, j) for j in joints]
+    return [s.position for s in states], [s.velocity for s in states]
+
+
 def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Sequence,
                      step: Callable[[], None], dt: float, axis, tool_offset=(0.0, 0.0, 0.0),
                      grip_force: float = 20.0, max_s: float = 20.0, period_s: float = 0.02,
@@ -78,8 +87,7 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
         p, qx = sim.get_link_pose(body, ee_link)
         R = _R_from_xyzw(qx)
         J = np.asarray(sim.get_link_jacobian(body, ee_link, arm, local_point=tcp_local), float)
-        q = np.array([sim.get_joint_state(body, j).position for j in arm])
-        dq = np.array([sim.get_joint_state(body, j).velocity for j in arm])
+        q, dq = (np.asarray(x, float) for x in _qdq(sim, body, arm))
         tw = J @ dq
         return np.asarray(p, float) + R @ tcp_local, tw[:3], tw[3:], R, J, q, dq
 
@@ -104,7 +112,7 @@ def run_touch_insert(sim, body, ee_link, arm_joints: Sequence, finger_joints: Se
         p, v, *_ = kin()
         Km, Dm = _gains(st["K"], st["K_lat"], a)
         f = -(Km @ (st["p_des"] - p) - Dm @ v) + rng.normal(0.0, force_noise, 3)
-        width = float(sum(sim.get_joint_state(body, j).position for j in fingers)) if fingers else None
+        width = float(sum(_qdq(sim, body, fingers)[0])) if fingers else None
         return TouchState(t=st["t"], ee_pos=p, force=f, gripper_width=width)
 
     def send(cmd):
@@ -206,8 +214,7 @@ def run_touch_pull(sim, body, ee_link, arm_joints: Sequence, finger_joints: Sequ
         p, qx = sim.get_link_pose(body, ee_link)
         R = _R_from_xyzw(qx)
         J = np.asarray(sim.get_link_jacobian(body, ee_link, arm), float)
-        q = np.array([sim.get_joint_state(body, j).position for j in arm])
-        dq = np.array([sim.get_joint_state(body, j).velocity for j in arm])
+        q, dq = (np.asarray(x, float) for x in _qdq(sim, body, arm))
         tw = J @ dq
         return np.asarray(p, float), tw[:3], tw[3:], R, J, q, dq
 
@@ -232,7 +239,7 @@ def run_touch_pull(sim, body, ee_link, arm_joints: Sequence, finger_joints: Sequ
     def read_state():
         p, v, *_ = kin()
         f = -(st["Km"] @ (st["p_des"] - p) - st["Dm"] @ v) + rng.normal(0.0, force_noise, 3)
-        width = float(sum(sim.get_joint_state(body, j).position for j in fingers)) if fingers else None
+        width = float(sum(_qdq(sim, body, fingers)[0])) if fingers else None
         return TouchState(t=st["t"], ee_pos=p, force=f, gripper_width=width)
 
     def send(cmd):

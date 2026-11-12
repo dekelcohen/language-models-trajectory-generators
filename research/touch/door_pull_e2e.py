@@ -152,6 +152,16 @@ shutil.copy(config.rgb_image_head_path, os.path.join(args.out, "head.png"))
 shutil.copy(config.rgb_image_wrist_path, os.path.join(args.out, "wrist.png"))
 VISION = None
 if args.vision:                                      # pixels + depth only; the anchor is the rosette (+ --err)
+    import importlib.util as _iu
+    import types as _types
+    for _m, _names in (("shapely.geometry", ("MultiPoint", "Polygon", "polygon")), ("sklearn.cluster", ("DBSCAN",))):
+        if _iu.find_spec(_m.split(".")[0]) is None:  # the Genesis env lacks them; depth_to_world does not use them
+            _pkg = sys.modules.setdefault(_m.split(".")[0], _types.ModuleType(_m.split(".")[0]))
+            _sub = _types.ModuleType(_m)
+            for _n in _names:
+                setattr(_sub, _n, None)
+            sys.modules[_m] = _sub
+            setattr(_pkg, _m.split(".")[1], _sub)
     import utils as _u
     from touch.door_plane import depth_to_world, estimate_door_plane
     _u.args = _u.args or argparse.Namespace(save_grasp_inputs=False)
@@ -359,6 +369,21 @@ if args.guarded != "off":
 
         class _DoorApi(_GuardApi):
             _door_plane = None
+            args = SimpleNamespace(touch=args.touch, sim=args.sim)
+
+            def move_until_contact(self, direction, max_travel=0.03, force=4.0, speed=0.01, grip_force=20.0,
+                                   max_s=10.0):                # same IPC spec as api.API.move_until_contact
+                if not self.args.touch:
+                    return {"outcome": "disabled"}
+                d = np.asarray(direction, float) / np.linalg.norm(direction)
+                spec = {"mode": "contact", "axis": d.tolist(), "tool_offset": [0.0, 0.0, 0.0], "max_s": float(max_s),
+                        "grip_force": float(grip_force),
+                        "guarded": {"max_travel": float(max_travel), "f_contact": float(force), "speed": float(speed)}}
+                msg, res = call([config.TOUCH_INSERT, spec])
+                out = {"outcome": res.get("outcome"), "eef_pos": res.get("eef_pos"),
+                       "travel_mm": res.get("advance_mm"), "contact_N": res.get("contact_N")}
+                print(f"[door] move_until_contact {out} door={math.degrees(door_angle()):.1f}deg", flush=True)
+                return out
 
             def estimate_door_plane(self, handle):
                 self._door_plane = (VISION, float(lp[2]))
@@ -477,6 +502,23 @@ st_end = call([config.GET_ROBOT_STATE])
 print(f"[door] (eval) lever grasp point now {np.round(lever_now, 3).tolist()} tcp {np.round(st_end['eef_pos'], 3).tolist()} "
       f"along-lever offset {float(np.dot(np.asarray(st_end['eef_pos']) - lever_now, RLv[:, 0])) * 100:.1f}cm", flush=True)
 print(f"[door] open wall time {time.time() - t1:.0f}s", flush=True)
+if os.environ.get("DOOR_DIAG") and args.sim == "genesis":   # eval: joint limits / hand-door contacts at the end
+    try:
+        rb = [h for h in sim._bodies if "panda" in str(sim._bodies[h].source)][0]
+        re_ = sim._body(rb).entity
+        q = np.asarray(re_.get_dofs_position().cpu()).ravel()
+        lo, hi = (np.asarray(v.cpu()).ravel() for v in re_.get_dofs_limit())
+        print(f"[diag] arm q {np.round(q, 3).tolist()} margin-to-limit "
+              f"{np.round(np.minimum(q - lo, hi - q), 3).tolist()}", flush=True)
+        de = sim._body(DOOR).entity
+        cs = re_.get_contacts(with_entity=de)
+        names = {lk.idx: lk.name for lk in list(re_.links) + list(de.links)}
+        fa = np.asarray(cs["force_a"].cpu()).reshape(-1, 3) if "force_a" in cs else None
+        for i, (a, b) in enumerate(zip(np.asarray(cs["link_a"].cpu()).ravel(), np.asarray(cs["link_b"].cpu()).ravel())):
+            print(f"[diag] contact {names.get(int(a), a)} - {names.get(int(b), b)} "
+                  f"F={None if fa is None else np.round(fa[i], 1).tolist()}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[diag] end diag failed: {e}", flush=True)
 ang = door_angle()
 print(f"[door] RESULT {'touch' if args.touch else 'open-loop'} dir={args.dir} err={args.err}: "
       f"door angle {math.degrees(ang):.1f} deg -> {'OPEN' if ang > math.radians(20) else 'not open'}", flush=True)

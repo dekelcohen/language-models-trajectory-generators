@@ -478,11 +478,10 @@ Before the fixes: r4-r8 16-21 min (2 of 5 FAIL), q1 42 min, q2 29 min. All three
 - **Agent rollout** `door:hidden`, Genesis, Opus 5.5 + gpt-6.1-terra, capped at 1 h: **FAIL** (door peak 10.8 deg eval / ~7 deg vision).
   - HF: `rollouts/2026-11-10/door_hidden_genesis_touchpull_fail`.
   - Subtask 1 (move the occluding cylinder) succeeded. Subtask 2 (open) failed in both attempts.
-  - **The top-down lever grasp misses on Genesis.** Most closes reached 0.5-1 mm (nothing held) or stayed 50-78 mm (open); about 1 in 3+ held.
-  - **Hand sweep is not door sweep.** The touch pull logged 40 deg and `guarded_pull` logged 48 deg over 55 cm, while vision read 0.7 deg. The fingers slid along / off the lever.
-    - Swept angle from the hand path must be cross-checked (vision, or felt load) before it is trusted as door motion.
+  - **The top-down lever grasp often failed on Genesis.** In `open_door`, about 2 of ~20 closes held. The rest closed to 0.5-1 mm (nothing held) or stayed 50-78 mm (open). The 2 holds (22.7 / 26.6 mm) were narrower than the 40 mm bar, i.e. off-centre. See 2026-11-12 for the causes.
+  - ~~"Hand sweep is not door sweep: vision read 0.7 deg"~~ - **refuted 2026-11-12**: after the 40 deg touch pull the depth read was `None` and `open_door.measure()` returned the stale pre-pull 0.8 deg. The pull's fitted hinge was within ~2 cm of the true axis, so the door did swing ~40 deg; `guarded_pull` later measured 32.5 deg by vision.
   - The harness A/B 61 deg used a SIDE grasp.
-- **Next**: on Genesis, try a side grasp of the lever (`approach_yaw`). Gate "door moved" on the felt load staying up during the sweep.
+- **Next** (superseded 2026-11-12: keep the top-down grasp): on Genesis, try a side grasp of the lever (`approach_yaw`).
 
 ## 2026-11-11 - probe grasp-slip no longer aborts `open_door`; PyBullet `door:hidden` successes
 
@@ -492,4 +491,35 @@ Before the fixes: r4-r8 16-21 min (2 of 5 FAIL), q1 42 min, q2 29 min. All three
   - HF `rollouts/2026-11-11/door_hidden_pybullet_probefix_SUCCESS`.
 - **d3** (same setup): attempt 1 `partly_open` 5.6 deg (the probe pull lost the lever, then 3 grasp misses). The retry opened it: the reviewer read 62.5 deg, SUCCESS in 18 min.
   - HF `rollouts/2026-11-11/door_hidden_pybullet_probefix_2_SUCCESS`.
-- Genesis `door:hidden` (top-down lever grasp misses) not retried today.
+- Genesis `door:hidden` was not retried on 2026-11-11; see 2026-11-12.
+
+## 2026-11-12 - Genesis `door:hidden`: why it failed, 4 fixes (top-down grasp kept)
+
+Analysis of `rollouts/2026-11-10/door_hidden_genesis_touchpull_fail` vs the PyBullet d2/d3 successes. Same URDF and the same `SimEnvDoor` in both sims. Perception was accurate: `lever_grasp` [-0.272, 0.02, 0.675] rot -0.713 was 3-6 mm across the bar from the true lever middle.
+
+**Root causes (ranked)**
+1. **Position press on a stiff Genesis lever.** `grasp_door_lever` pressed 3 cm by position after closing. The Genesis latch does not yield: a 2 cm press met ~930 N, and a 22.7 mm hold opened the touch pull at 8.3 mm and slipped after 0.8 cm.
+2. **Off-centre holds.** The holds (22.7 / 26.6 mm) were narrower than the 40 mm bar, so the pads pinched a chord above or below the centre line. PyBullet showed the same pattern: d2's 45 / 39 mm holds opened the door, d3's 26 / 19 mm holds lost the lever. Many other Genesis closes hit nothing, partly because round-1 descents stalled or drifted 4-15 cm.
+3. **Stale door angle.** After the 40 deg touch pull, depth saw too few panel points (`None`, 19 points). `measure(prev)` returned the old 0.8 deg, so the re-grasp went to the closed-door lever and likely knocked the open panel shut (next real reading: 0.6 deg).
+4. **The agent drifted after the helper failed.** It grasped the rose with the fingers parallel to the bar, pulled straight at 2.5-2.9 kN, and its push-around hit the door top. The run ended at the 1 h cap.
+
+**Fixes** (`helpers/door_open.py`, `touch/door_plane.py`, `sim_envs/registry.py`; tests in `tests/test_door_plane.py`)
+- **Force-limited lever press**: `move_until_contact(down, max_travel=press_m, force=20 N)`, which stops when a stiff lever resists. Without torque control (PyBullet) the press is still done by position; on Genesis with `--no-touch` it is skipped.
+- **Torsional friction** in `DOOR_SCENE_OPTIONS` (kettle precedent; Genesis point contacts let a pinched round bar roll). The scene builds and grasps still hold.
+- **No stale angle**: when depth does not see the panel, the hand goes back over the panel top to the pose the door was first measured from and measures again. If still unseen, the angle swept by the pull is used, never the pre-pull value.
+- **Off-centre hold -> re-centre**: `lever_grasp["bar_width_m"]` is the bar thickness from head depth (36 mm PyBullet, 33 mm Genesis; true 40). A hold under 0.8 x that width re-opens and closes again lower, then higher, by the chord offset sqrt(r^2 - (w/2)^2). If neither reaches 0.8 x, it keeps the widest hold (`off_centre`).
+  - New sensing assumption: the bar thickness from head depth (prior: a roughly round or square bar).
+
+**Genesis control test** (harness `research/touch/door_pull_e2e.py --sim genesis --approach top --vision --vision-grasp --guarded right --open-door`; the harness now stubs `shapely` / `sklearn`, which `vlm_genesis` lacks):
+- The first grasp held 34.4 mm. The press stopped at 19.7 N after 0.1 mm (the latch is stiff), and the pull started with a 37.7 mm grip.
+- A later 21 mm hold was re-centred to 37 mm.
+- **Result: 19.4 deg (eval), not open.** Pull 1 swept 36.7 deg, then `end_stop` at 45 N; pull 2 swept 28 deg.
+
+**Remaining blockers**
+1. **45 N stall at ~35 deg: the arm hits the panel.** With `DOOR_DIAG=1` the harness lists end contacts: `door_panel - panda_link5` at ~29 N, i.e. the forearm is in the swing path of the panel.
+   - The door itself is free: a hinge-torque probe (`--stage probe`) opens it 66 deg at 10 N·m (about 23 N at the lever), so there is no hinge spring or end stop.
+   - From ~19 deg on, the fingers are forced open (38 -> 79 mm) while the panel pushes the forearm.
+   - Joint 7 is also 0.28 rad from its limit at 30 deg of wrist yaw. The fingers are symmetric, so `rotation + pi` would give more room.
+   - Next: an elbow posture (null-space bias) that keeps link 5 out of the swing, or a stop and re-grasp before the panel reaches the arm. A one-line change will not fix it.
+2. **The door falls back after release** (36 -> 18 deg in the control test). Probably the forearm that touches the panel pushes it while the hand releases and lifts (not verified; PyBullet d2 also fell back once).
+3. **Re-grasping a swinging door misses**: the target is the lever at the last measured angle while the door keeps closing (2 misses in the control test).

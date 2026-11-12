@@ -22,6 +22,13 @@ x-dev: &dev
 services:
   cotracker: *dev
   romav2: *dev
+  molmo:
+    <<: *dev
+    environment:
+      <<: *dev-env
+      GPU_SERVER_TOKEN: ${GPU_SERVER_TOKEN:?set GPU_SERVER_TOKEN in gpu_server/docker/.env}
+      MOLMO_MODEL: ${MOLMO_MODEL:-}
+      MOLMO_QUANT: ${MOLMO_QUANT:-}
   shell:
     <<: *dev
     image: vlm-gpu-server

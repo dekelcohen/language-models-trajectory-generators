@@ -268,6 +268,11 @@ class SimAdapter(ABC):
     def get_joint_state(self, body: Any, joint: Any) -> JointState:
         ...
 
+    def get_joint_positions_velocities(self, body: Any, joints: Sequence[Any]) -> Tuple[List[float], List[float]]:
+        """``(positions, velocities)`` of several 1-DOF joints; backends may batch this (hot control loops)."""
+        states = [self.get_joint_state(body, j) for j in joints]
+        return [s.position for s in states], [s.velocity for s in states]
+
     @abstractmethod
     def reset_joint_state(self, body: Any, joint: Any, position: float) -> None:
         ...

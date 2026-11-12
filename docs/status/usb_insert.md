@@ -16,8 +16,9 @@ Genesis FAIL, top-down lever grasp misses).
   being ~3-5 mm wrong (p16, s2).
 - **Speed:** one rollout takes 17-30+ min, and the 20-min cap kills runs in the middle of the insert (s3). See "Where the time goes".
 - **Default LLM for `--task usb`** is now `copilot-claude-sonnet-5.5` at `--reasoning-effort medium`
-  (`main.py` `TASK_DEFAULT_LM`). An explicit `-lm` / `--reasoning-effort` wins. The effort also applies to the terra
-  perception and reviewer calls.
+  (`main.py` `TASK_DEFAULT_LM`). An explicit `-lm` / `--reasoning-effort` wins. Perception VLM calls (scene analysis,
+  wrist pointing) use `--perception-reasoning-effort` (default `low`; `inherit` = the main effort); the reviewer keeps
+  `--reasoning-effort`. Wrist pointing for usb defaults to `or-google/gemini-3.8-flash` (benchmark below).
 
 ### Sonnet 5.5 vs Opus 5.5 (2026-11-12, medium effort, terra perception and reviewer)
 
@@ -136,19 +137,55 @@ APPROACH --F>3N--> PROBE --advance>2mm--> INSERT --depth>=7mm, slow--> VERIFY --
 | phase | wall time | why |
 |---|---|---|
 | pick + review | 3-8 min | ~5-10 LLM turns (20-60 s each) + review |
-| wrist locate | **5-13 min** | each terra `locate_with_wrist_camera` takes 20-30 s, x2 (port + edge) x 3-4 views, plus view moves; cache misses because the pose differs |
+| wrist locate | **5-13 min** | each terra `locate_with_wrist_camera` takes 15-30 s, x2 (port + edge) x 3-8 views, plus view moves; cache misses because the pose differs. **2026-11-12:** usb wrist pointing now defaults to gemini-3.8-flash (6.5 s/call, more accurate, see below) and perception calls default to `--perception-reasoning-effort low` |
 | touch calibration + regrasp | 3-8 min | each regrasp re-runs put-down, grasp, lift, 2 touches + LLM turns |
-| `insert_with_touch` | 4-15 min | sim time = search_half x (1 + 2 rows) / 5 mm/s, e.g. 52 mm x 11 rows: ~240 s sim; Genesis CPU runs at ~0.25x real time (dt 4.17 ms, python per-step Jacobian/torque loop in `touch/sim_runner.py`) |
+| `insert_with_touch` | 4-15 min | sim time = search_half x (1 + 2 rows) / 5 mm/s, e.g. 52 mm x 11 rows: ~240 s sim. Pure sim time, no LLM inside (o1: 48 s sim took ~6 min wall). |
 
-Ideas: one VLM call for port + edge (or all views in one call); fewer rows when z is confident; a coarse first raster
-pass at 10-15 mm/s; GPU Genesis or a vectorised control step. A real robot runs the search in real time
-(~4 min worst case for the same raster).
+**Sim speed-up (2026-11-12, physics unchanged)**, measured with `research/touch/profile_touch_loop.py`
+(5 s guarded move, Genesis CPU):
+
+| ms per 4.17 ms sim step | before | after |
+|---|---|---|
+| `get_joint_state` (14-18 calls/step, 3 Genesis reads each) | 10.3 | 0.8 (batched `get_joint_positions_velocities`, cached dof indices) |
+| `time.sleep(control_dt)` in `Env.update()` after every step | 4.5 | 0 (now sleeps only what is left of dt: real-time pacing, never slower) |
+| `get_link_pose` (failed `link_ref_frame` import + log line on every call) | 2.2 | 1.5 (import resolved once, warning logged once) |
+| physics `step` | 5.6 | 6.0 |
+| total | 27.3 (0.15x real time) | **14.0 (0.30x)** |
+
+The `Env.update()` sleep fix also speeds every Genesis trajectory (pick, view moves), not only the touch loop.
+Physics (6 ms) is now ~45% of the step; the rest is Python (Jacobian, gravity, recording frames).
+
+### Wrist pointing benchmark (2026-11-12, offline)
+`research/touch/capture_wrist_views.py` (vlm_genesis) saves 16 wrist views around the port face (8 open hand, 8 closed
+fingers; the plug pick in that harness missed, so no held-plug views), each with depth and camera pose. 
+`research/touch/pointing_bench.py` (vlm_traj) sends the exact `locate_with_wrist_camera` prompt and scores the best
+point against the projected port (eval only): pixel error, 3D error of the depth-lifted point, latency. 14 views have the port visible.
+
+| model:effort | hit < 5 mm | hit < 10 mm | px err (median) | 3D err mm (median) | latency s (median) |
+|---|---|---|---|---|---|
+| copilot-gpt-6.1-terra:low | 0.07 | 0.29 | 13.0 | 23.9 | 13.5 |
+| copilot-gpt-6.1-terra:medium | 0.21 | 0.36 | 13.0 | 24.0 | 16.5 |
+| **or-google/gemini-3.8-flash:low** | 0.57 | 0.64 | 2.2 | 4.4 | **6.5** |
+| or-google/gemini-3.8-flash:medium | **0.79** | **0.86** | **1.4** | **3.3** | 18.8 |
+
+- Terra is ~5x less accurate than Gemini Flash; its 13 px median miss is the "along-face scatter" of runs p15/o1.
+- `--task usb` now defaults `--wrist-pointing-model or-google/gemini-3.8-flash` (`main.py` `TASK_DEFAULT_WRIST_POINTING`),
+  at the perception effort (low). Medium is more accurate but as slow as terra. Planner perception stays terra.
+- 29 Gemini prompts used. MolmoPoint (`--wrist-pointing-model gpu-molmo`, `gpu_server` module `molmo_point`) is
+  ready to benchmark with the same script once a GPU server runs it.
+- Each live `locate_with_wrist_camera` now also saves `<image>_cam.npz` (depth + wrist pose), so real rollout views can be added to the bench.
+
+Remaining ideas: one VLM call for port + edge; fewer rows when z is confident; a coarse first raster pass at
+10-15 mm/s, centre-out rows. A real robot runs the search in real time (~4 min worst case for the same raster).
 
 ## Open issues (priority)
 1. Plug pivots in the grasp under repeated 18 N partial catches (p13, p15, o1).
 2. In-hand z offset 3-5 mm off (p16, s2, o1).
 3. Wrist pointing along-face error up to 4.5 cm. That means long searches and more catches (feeds 1).
-4. Rollout time: raise the cap to 30-40 min, or speed up the locate and the sim.
+   2026-11-12: Gemini Flash pointing (default now) cuts the median 3D error from 24 to 4.4 mm offline; to confirm live.
+4. Rollout time: runs may take up to 30 min during experiments. **Target: the touch search (after the
+   LLM/VLM calls) must finish in 1-3 min wall.** Sim loop is 2x faster now (0.30x real time); still needed: coarse
+   first pass / centre-out rows / fewer rows when z is confident.
 5. Sonnet pick rotation is not verified (s1); add a width check against the housing-width prior.
 6. Eval: s2 reported seated at 8.8 mm, under the 10 mm success threshold (VERIFY uses 7 mm advance).
 

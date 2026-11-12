@@ -1,8 +1,8 @@
 # gpu_server - generic GPU model server
 
 One process holds the GPU models. CPU-only clients, or clients in another conda env, call
-them over TCP or WebSocket. Today it serves CoTracker3 (stateful, online) and RoMa v2
-(stateless matching). Local VLMs (Qwen/Molmo) can be added later as further modules.
+them over TCP or WebSocket. Today it serves CoTracker3 (stateful, online), RoMa v2 (stateless
+matching) and MolmoPoint (stateless VLM pointing, see [MolmoPoint](#molmopoint-pointing)).
 
 ```
 client (vlm_traj, CPU)                     server (env_lapa_tracking, GPU)
@@ -21,7 +21,7 @@ $py = "C:\Users\dekelco\AppData\Local\miniconda3\envs\env_lapa_tracking\python.e
 
 | flag | meaning |
 |---|---|
-| `--modules a b` | built-in modules to expose (`cotracker`, `romav2`, `echo`) |
+| `--modules a b` | built-in modules to expose (`cotracker`, `romav2`, `molmo_point`, `echo`) |
 | `--module name=pkg.mod:Class` | register any other module class (repeatable) |
 | `--set mod.key=value` | module config; the value is parsed as JSON when possible |
 | `--preload a b` / `all` | load in the background *after* the ports are bound |
@@ -206,11 +206,13 @@ in bf16 on Ampere (`amp=auto`).
 **Files:**
 - `Dockerfile`: base `pytorch/pytorch:2.8.0-cuda12.6-cudnn9-runtime`; clones RoMaV2 into
   `/opt/RoMaV2` (sources only, no `pip install -e`); copies `config.py`, `providers/`, `gpu_server/`.
-- `requirements.txt`: server deps only (fastapi, uvicorn, websockets, opencv-headless, einops, ...).
-- `docker-compose.yml`: two services from one image, on the client's default ports:
+- `requirements.txt`: server deps only (fastapi, uvicorn, websockets, opencv-headless, einops, ...;
+  plus `transformers==4.57.1`, `accelerate`, `bitsandbytes`, `decord2` for MolmoPoint).
+- `docker-compose.yml`: three services from one image, on the client's default ports:
   - `cotracker`: ws `:8765`, tcp `:8766` (default);
   - `romav2`: ws `:8775`, tcp `:8776`. It is opt-in through the `roma` profile, because client RoMa
     re-detection is off by default (`config.track_roma_enable = False`).
+  - `molmo`: ws `:8785`, tcp `:8786`, opt-in through the `molmo` profile (MolmoPoint pointing).
 - `docker-compose.dev.yml` + `dev-entrypoint.sh`: optional dev overlay (live code, env + caches on
   host dirs), see step 4.
 - Root `.dockerignore`: limits the build context to those files.
@@ -252,7 +254,7 @@ docker compose -f gpu_server/docker/docker-compose.yml logs -f            # wait
   `gpu_server/docker/.env`.
 - Update: `git pull`, then rerun `up -d --build`.
 - Stop: `docker compose -f gpu_server/docker/docker-compose.yml down` (the weights volume stays).
-- Firewall: `sudo ufw allow from <client-ip> to any port 8765:8776 proto tcp`.
+- Firewall: `sudo ufw allow from <client-ip> to any port 8765:8786 proto tcp`.
   Keep these ports off the internet; the token is the only auth.
 
 **3. Client (Windows).** `tcp://` (stdlib) has the least overhead on a LAN. `ws://<ip>:8765/v1/ws`
@@ -291,19 +293,94 @@ docker compose $C restart cotracker                   # pick up code changes
 |---|---|---|
 | CoTracker3 (online) | ~0.1 GB | ~1-2 GB (grid/queries) |
 | RoMa v2 (bf16) | ~0.5 GB | ~1.5-2.5 GB |
+| MolmoPoint-8B, bf16 | ~8.7 B params = ~17.5 GB | 18.3 GiB (measured, erdi28 card); large GPUs only |
+| MolmoPoint-8B, 8-bit | ~10 GB | does not fit |
+| MolmoPoint-8B, 4-bit (nf4 LLM, bf16 vision) | 6.6 GiB | 8.7 GiB (measured, erdi28 card); does not fit 8 GB |
 | MolmoPoint-Vid-4B, bf16 | 4.86 B params = 9.7 GB | does not fit |
 | MolmoPoint-Vid-4B, 8-bit | ~5 GB | ~6.5-7.5 GB (+ video KV cache); alone only |
 | MolmoPoint-Vid-4B, 4-bit (nf4) | ~3 GB | ~4-5 GB; fits next to CoTracker |
 
 Video KV cache: Qwen3-4B-like LLM, ~0.15 MB/token in bf16; about 80 tokens/frame, so 32 frames
-is ~0.4 GB and 128 frames is ~1.5 GB. Quantized loading of the remote-code model is unverified
-(bitsandbytes).
+is ~0.4 GB and 128 frames is ~1.5 GB. Quantized loading of the remote-code model is verified only
+by the erdi28 pre-quantized 8B checkpoint (same nf4 recipe as `molmo_point`'s `4bit`); `8bit` and
+the 4B in nf4 are unverified. Vid-4B numbers are estimates.
 
 **Without Docker** (conda/venv on the box):
 `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126 && pip install -r gpu_server/docker/requirements.txt`,
 clone RoMaV2, then run the same `python -m gpu_server.server ...` commands as in
 `docker-compose.yml` with `--token`. Optional on Linux: `pip install fused-local-corr`
 (faster RoMa local correlation).
+
+## MolmoPoint (pointing)
+
+`molmo_point` module (`gpu_server/modules/molmo_point.py`): Ai2's MolmoPoint VLM points at a
+described object and returns **pixel** points. Used for wrist-camera pointing
+(`api.locate_with_wrist_camera`) instead of a cloud VLM.
+
+- **Method `point`**: input `image` (HxWx3 uint8 RGB); args `description` (prompt becomes
+  `"Point to <description>."`) or a verbatim `prompt`, `max_points`, `max_new_tokens`. Reply:
+  `points` `[[u, v], ...]` in input pixels (model order), `raw` text, `latency_s`, `model`, `quant`.
+- **Method `point_video`** (minimal, unverified): `frames` (T,H,W,3) -> `points` `[[t, u, v], ...]`.
+- MolmoPoint emits grounding tokens, not text coordinates; `model.extract_image_points` decodes them
+  into source-image pixels. Text formats (Molmo 1 `<point x y>` percent, Molmo 2 `coords="..."` x1000)
+  are a fallback parser (`parse_point_text`).
+- **Config** (`--set molmo_point.<k>=...`, or env):
+
+| key | env | default |
+|---|---|---|
+| `model` | `MOLMO_MODEL` | auto by VRAM (below); or any of `allenai/MolmoPoint-8B`, `allenai/MolmoPoint-Vid-4B`, `erdi28/MolmoPoint-8B-bnb-nf4-vision-bf16` |
+| `quant` | `MOLMO_QUANT` | auto: 8B -> `bf16` at >= 20 GB else `4bit`; 4B -> `bf16` at >= 16 GB else `4bit`. Also `8bit`, or `none` = as stored (pre-quantized repos) |
+| `max_new_tokens` | - | 200 |
+
+`4bit` = bitsandbytes nf4 + bf16 compute + double quant on the language model; vision tower,
+connector, patch embedding and pointing head stay bf16 (the erdi28 recipe: quantizing the
+vision path hurt pointing). First load downloads the weights (8B: F32 safetensors, ~35 GB; 4B: ~20 GB)
+into `HF_HOME`.
+
+**Auto mode** (empty `MOLMO_MODEL` / `MOLMO_QUANT`, the compose default), chosen from the GPU's
+total VRAM and logged at load (`[molmo_point] mode: 7.6 GiB VRAM -> auto model ..., quant 4bit`;
+also in `list` -> `info.mode`):
+
+| total VRAM | model | quant | peak |
+|---|---|---|---|
+| < 12 GB (RTX 3070 8 GB) | `MolmoPoint-Vid-4B` | `4bit` (nf4 LLM, bf16 vision) | ~4-5 GB, fits next to CoTracker |
+| 12-20 GB | `MolmoPoint-8B` | `4bit` | 8.7 GiB |
+| >= 20 GB | `MolmoPoint-8B` | `bf16` | 18.3 GiB; best pointing (PointBench 70.9%) |
+
+- The 8B does not fit 8 GB even in nf4 (8.7 GiB peak), hence the 4B there. `4bit` rather than
+  `8bit` for the 4B: 8-bit would be ~6.5-7.5 GB, too close to 8 GB to be a safe default.
+- Vid-4B is trained for **video** pointing only; its single-image quality is unknown, so
+  benchmark it before relying on it.
+- Override with `MOLMO_MODEL` / `MOLMO_QUANT` in `gpu_server/docker/.env`, e.g.
+  `MOLMO_MODEL=erdi28/MolmoPoint-8B-bnb-nf4-vision-bf16` + `MOLMO_QUANT=none` (8B nf4, ~7 GB download).
+
+**Run** (Linux box, Docker, see below for setup):
+```bash
+D="docker compose -f gpu_server/docker/docker-compose.yml"
+$D --profile molmo up -d --build molmo
+$D --profile molmo logs -f molmo     # "[molmo_point] mode: ..." then "module molmo_point ready"
+```
+Without Docker: `python -m gpu_server.server --modules molmo_point echo --preload molmo_point
+--ws 0.0.0.0:8785 --tcp 0.0.0.0:8786 --token <t>`.
+
+**Client** (Windows): `$env:GPU_SERVER_MOLMO_URL = "tcp://<linux-ip>:8786"` (default
+`tcp://127.0.0.1:8786`), `$env:GPU_SERVER_TOKEN = "<token>"`, optional `$env:GPU_SERVER_CODEC = "jpeg"`.
+Python: `providers.pointing.molmo_remote.point_with_molmo(image, description, max_points=4, url=None, token=None)`
+-> `[[u, v], ...]` pixels (image = path, PIL image or RGB array). No local auto-launch.
+
+Smoke test:
+```powershell
+python -c "from gpu_server.client import GpuClient; print(GpuClient('tcp://<linux-ip>:8786').ping())"
+python -c "from providers.pointing.molmo_remote import point_with_molmo as p; print(p('images/rgb_image_wrist.png', 'the USB port', return_reply=True))"
+```
+
+**From `main.py`:** `--wrist-pointing-model gpu-molmo` switches only `locate_with_wrist_camera`
+to MolmoPoint (default: `--planner-perception-vlm`). `gpu-molmo:<url>` picks a server explicitly,
+e.g. `gpu-molmo:tcp://10.0.0.5:8786`. The rest of the function (depth lift, held-object filter)
+is unchanged.
+
+**Benchmark:** `python research/touch/pointing_bench.py --models gpu-molmo ...` (compares it with
+the cloud VLMs on the same wrist images).
 
 ## Security
 
@@ -318,3 +395,6 @@ public, so `expose` always sets a token (generated if not given).
 - remote-vs-local CoTracker parity;
 - the lifecycle: busy/forced shutdown, idle exit, bind-before-preload;
 - the launcher with real detached subprocesses: launch, attach, policies, idle exit, no-launch.
+
+`tests/test_molmo_point.py` (CPU, no download): Molmo output parsers, `point` with a fake
+model/processor, the client glue.

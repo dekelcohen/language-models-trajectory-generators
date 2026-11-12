@@ -176,3 +176,105 @@ def test_probe_hinge_turns_a_grasp_slip_into_a_lost_lever_not_a_crash():
                           logger=SimpleNamespace(info=lambda m: None))
     out = door_open.probe_hinge(api, {"pull_dir": [0.0, -1.0, 0.0]})
     assert out["source"] == "none" and out["holding"] is False      # open_door then re-grasps
+
+
+def test_door_plane_measures_the_lever_bar_thickness():
+    """A 4 cm round bar seen from the front: its visible half-surface spans the full diameter."""
+    import math
+    rose = np.asarray([[x, -0.03, z] for x in np.arange(0.40, 0.45, 0.01) for z in np.arange(0.63, 0.68, 0.01)])
+    bar = np.asarray([[x, -0.10 - 0.02 * math.sin(a), 0.665 + 0.02 * math.cos(a)]
+                      for x in np.arange(0.22, 0.42, 0.005) for a in np.linspace(0.0, math.pi, 9)])
+    pts = np.vstack([_panel([0.0, 0.0], 0.5, 0), _jamb(0.54, 0.64), rose, bar])
+    g = estimate_door_plane(pts, [0.3, -0.11, 0.66], cam_xy=[0.3, -1.0])["lever_grasp"]
+    assert g["bar_width_m"] is not None and abs(g["bar_width_m"] - 0.04) < 0.006
+
+
+class _LeverApi:
+    """Fake arm over a lever: the close yields ``widths`` in turn (0 = closed on air)."""
+
+    def __init__(self, widths, touch_press=None, sim="genesis"):
+        from types import SimpleNamespace
+        self.widths, self.tip, self.calls = list(widths), [0.3, -0.1, 0.65], []
+        self.width = 0.08
+        self.args = SimpleNamespace(touch=touch_press is not None, sim=sim)
+        self.logger = SimpleNamespace(info=lambda m: None)
+        self.touch_press = touch_press
+
+    def get_robot_state(self):
+        return {"eef_pos": list(self.tip), "rotation": 0.0, "gripper_width": self.width,
+                "gripper_holding": 0.005 < self.width < 0.079}
+
+    def open_gripper(self):
+        self.width = 0.08
+
+    def close_gripper(self):
+        self.width = self.widths.pop(0)
+        self.calls.append(("close", round(self.tip[2], 3), self.width))
+
+    def execute_trajectory(self, traj):
+        import config
+        p = traj.points[-1]
+        self.tip = [p[0], p[1], p[2] - config.gripper_depth_offset_franka]
+        self.calls.append(("move", traj.desc if hasattr(traj, "desc") else ""))
+
+    def move_until_contact(self, direction, **kw):
+        self.calls.append(("press", kw.get("force"), kw.get("max_travel")))
+        return self.touch_press if self.touch_press else {"outcome": "disabled"}
+
+
+_LEVER_PLANE = {"hinge": [0.0, 0.0], "free_edge": [0.5, 0.0], "rose": [0.42, 0.0], "pull_dir": [0.0, -1.0, 0.0],
+                "top_z": 1.0, "lever_grasp": {"xyz": [0.3, -0.1, 0.65], "rotation": 0.0, "bar_width_m": 0.04}}
+
+
+def test_grasp_door_lever_recentres_an_off_centre_hold():
+    """22 mm on a 40 mm bar pinches a chord: re-open, re-close lower by the chord offset; keep the full hold."""
+    from helpers.door_open import grasp_door_lever
+    api = _LeverApi([0.022, 0.038], touch_press={"outcome": "no_contact", "travel_mm": 30.0})
+    out = grasp_door_lever(api, _LEVER_PLANE, press_m=0.03)
+    closes = [c for c in api.calls if c[0] == "close"]
+    assert out["holding"] and out.get("recentred") and out["width"] == 0.038
+    assert closes[1][1] < closes[0][1] - 0.01                       # second close ~1.7 cm lower
+    assert out["press"]["mode"] == "force" and ("press", 20.0, 0.03) in api.calls
+
+
+def test_grasp_door_lever_keeps_the_best_hold_when_recentring_fails():
+    from helpers.door_open import grasp_door_lever
+    api = _LeverApi([0.022, 0.001, 0.025, 0.025])
+    out = grasp_door_lever(api, _LEVER_PLANE, press_m=0.0)
+    assert out["holding"] and out.get("off_centre") and out["width"] == 0.025
+
+
+def test_lever_press_is_force_limited_or_skipped_on_a_torque_arm_without_touch():
+    """A position press into a stiff lever jammed at kN on Genesis: no force feedback there -> no press;
+    a position-controlled sim without torque control (PyBullet) still presses by position."""
+    from helpers.door_open import grasp_door_lever
+    api = _LeverApi([0.038])                                            # --no-touch on genesis
+    out = grasp_door_lever(api, _LEVER_PLANE, press_m=0.03)
+    assert out["press"]["mode"] == "skipped" and not any(c == ("move", "door lever: press") for c in api.calls)
+    api = _LeverApi([0.038], touch_press={"outcome": "unsupported"}, sim="pybullet")
+    out = grasp_door_lever(api, _LEVER_PLANE, press_m=0.03)
+    assert out["press"]["mode"] == "position" and ("move", "door lever: press") in api.calls
+
+
+def test_open_door_does_not_reuse_a_stale_angle_after_a_swing(monkeypatch):
+    """door:hidden gs: after a 40 deg touch pull depth saw no panel and the old 0.8 deg came back; the
+    re-grasp then went to the closed-door lever. Now: look again from the clear view, else use the swept arc."""
+    import math
+    from types import SimpleNamespace
+    from helpers import door_open
+    from touch import recovery
+    plane = {"hinge": [0.0, 0.0], "free_edge": [0.5, 0.0], "pull_dir": [0.0, -1.0, 0.0], "top_z": 1.0,
+             "door_open_deg": 0.8, "lever_grasp": {"xyz": [0.3, -0.1, 0.65], "rotation": -math.pi / 2}}
+    grasps, views = [], []
+    monkeypatch.setattr(door_open, "grasp_door_lever", lambda api, p, door_deg=0.0, offsets=(): grasps.append(door_deg)
+                        or {"holding": True, "xyz": [0.3, -0.1, 0.65], "rotation": -math.pi / 2})
+    monkeypatch.setattr(door_open, "_release_and_clear", lambda api: None)
+    monkeypatch.setattr(door_open, "_to_view", lambda api, p, v: views.append(list(v)))
+    monkeypatch.setattr(recovery, "open_with_touch", lambda api, **kw: {
+        "outcome": "slipped", "swept_deg": 40.0, "hinge": {"centre_xy": [0.0, 0.0], "radius": 0.3}})
+    api = SimpleNamespace(estimate_door_plane=lambda h: plane, measure_door_angle=lambda: None,
+                          get_robot_state=lambda: {"eef_pos": [0.1, -0.6, 0.9]},
+                          logger=SimpleNamespace(info=lambda m: None), args=SimpleNamespace(touch=True))
+    door_open.open_door(api, [0.3, -0.1, 0.65], max_pulls=2)
+    assert views and views[0] == [0.1, -0.6, 0.9]                     # looked again from the clear view
+    assert grasps[0] == 0.8 and abs(grasps[1] - 40.8) < 1e-6           # re-grasp on the swung lever

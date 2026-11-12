@@ -1,6 +1,14 @@
-# USB insert: speed, pointing, door, skill simplification (plan, 2026-11-12, paused)
+# USB insert: speed, pointing, door, skill simplification (plan, 2026-11-12)
 
-This work was paused because of the token budget. The status and the step-by-step guide are in `docs/status/usb_insert.md`.
+The status and the step-by-step guide are in `docs/status/usb_insert.md`.
+
+**Progress (2026-11-12, resumed):**
+- Done: 1 (sim 2x faster), 2 (`--perception-reasoning-effort`, default low; reviewer keeps `--reasoning-effort`),
+  3-4 (bench: Gemini Flash 4.4 mm vs terra 24 mm median; now the usb wrist-pointing default), 5 (Molmo module,
+  untested on GPU), 6 (door analysis + 4 fixes, see `open_door.md`; still stalls at ~35 deg: forearm `panda_link5`
+  hits the panel), 8 (docs).
+- 7 (skill ablation): see the usb_insert.md "Skill ablation" section.
+- Still open: touch search (after LLM/VLM) in 1-3 min wall; door forearm collision.
 
 ## Decisions (user)
 - **Pointing comparison:** offline benchmark on saved wrist views first, then 1 live run with the best model.

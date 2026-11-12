@@ -51,9 +51,14 @@ def _pybullet_task_help():
 DEFAULT_LM = "copilot-claude-opus-5.5"
 # Per-task (model, reasoning effort) used when -lm / --reasoning-effort are not given.
 TASK_DEFAULT_LM = {"usb": ("copilot-claude-sonnet-5.5", "medium")}
+# Per-task --wrist-pointing-model default (research/touch/pointing_bench.py: gemini-3.8-flash hit the usb
+# port within 5 mm in 57% of wrist views at low effort, 6.5 s/call, vs terra 7-21%, 14-17 s).
+TASK_DEFAULT_WRIST_POINTING = {"usb": "or-google/gemini-3.8-flash"}
 
 
 def resolve_task_defaults(args):
+    if getattr(args, "wrist_pointing_model", None) is None:
+        args.wrist_pointing_model = TASK_DEFAULT_WRIST_POINTING.get(args.task)
     if args.language_model is None:
         model, effort = TASK_DEFAULT_LM.get(args.task, (DEFAULT_LM, None))
         args.language_model = model
@@ -70,8 +75,10 @@ def build_arg_parser():
     lm.add_argument("--lm-images", action=argparse.BooleanOptionalAction, default=True, help="pass images to LLM prompts (default: True, use --no-lm-images to disable)")
     lm.add_argument("--max-tokens", type=int, default=60000, help="max completion tokens for LLM responses")
     lm.add_argument("--reasoning-effort", type=str, default=None, choices=["xhigh", "high", "medium", "low", "minimal", "none"], help="reasoning effort for reasoning models (OpenRouter, Gemini)")
+    lm.add_argument("--perception-reasoning-effort", dest="perception_reasoning_effort", type=str, default="low", choices=["xhigh", "high", "medium", "low", "minimal", "none", "inherit"], help="reasoning effort of the perception VLM calls (scene analysis before planner calls, wrist-camera pointing). Default: low (latency); 'inherit' = --reasoning-effort. The reviewer keeps --reasoning-effort")
     lm.add_argument("--llm-cache", dest="llm_cache_enabled", action=argparse.BooleanOptionalAction, default=True, help="cache LLM responses on disk (default: True, use --no-llm-cache to disable)")
     lm.add_argument("--planner-perception-vlm", dest="planner_perception_vlm", default="copilot-gpt-6.1-terra", help="VLM used for scene perception/vision analysis run before every planner LLM call; its text answer is injected into the planner prompt.")
+    lm.add_argument("--wrist-pointing-model", dest="wrist_pointing_model", default=None, help="model for locate_with_wrist_camera pointing only (default: --planner-perception-vlm). 'gpu-molmo' = MolmoPoint on gpu_server ($GPU_SERVER_MOLMO_URL, default tcp://127.0.0.1:8786), or 'gpu-molmo:<url>'")
     lm.add_argument("--review-provider", default="vlm:copilot-gpt-6.1-terra", help="review provider for success verification: 'vlm' (uses main model), 'vlm:<model>' (e.g. vlm:or-openai/gpt-5.5), or 'xmem'")
 
     simg = parser.add_argument_group("simulator, robot & task")

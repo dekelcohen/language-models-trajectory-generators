@@ -411,7 +411,13 @@ class Environment:
             traceback.print_exc()
 
         self.sim.step()
-        time.sleep(config.control_dt)
+        # Pace at most to real time: sleep only what is left of control_dt (a slow sim such as Genesis
+        # already takes longer than dt per step, so a full sleep here only doubled the wall time).
+        now = time.perf_counter()
+        last = getattr(self, "_last_update_t", None)
+        wait = config.control_dt - (now - last) if last is not None else config.control_dt
+        time.sleep(max(0.0, wait))
+        self._last_update_t = time.perf_counter()
     
 
 #: Franka Hand finger stroke (fully open width).

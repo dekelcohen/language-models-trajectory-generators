@@ -1,10 +1,12 @@
 # Two servers from one image, matching the client defaults:
 #   cotracker -> ws :8765 / tcp :8766   (config.tracker_remote_url, $GPU_SERVER_URL)
 #   romav2    -> ws :8775 / tcp :8776   (config.track_roma_url,     $GPU_SERVER_ROMA_URL)  [profile: roma]
+#   molmo     -> ws :8785 / tcp :8786   ($GPU_SERVER_MOLMO_URL, MolmoPoint pointing)    [profile: molmo]
 # Usage (from the repo root):
 #   echo "GPU_SERVER_TOKEN=$(openssl rand -hex 16)" > gpu_server/docker/.env
 #   docker compose -f gpu_server/docker/docker-compose.yml up -d --build                  # CoTracker only
 #   docker compose -f gpu_server/docker/docker-compose.yml --profile roma up -d --build   # + RoMa v2
+#   docker compose -f gpu_server/docker/docker-compose.yml --profile molmo up -d --build  # + MolmoPoint
 # Dev mode (live code, persistent python env + model caches on the host): add
 #   -f gpu_server/docker/docker-compose.dev.yml   (see that file)
 x-server: &server
@@ -32,6 +34,19 @@ services:
     command: ["--modules", "romav2", "echo", "--set", "romav2.setting=turbo", "--preload", "romav2",
               "--ws", "0.0.0.0:8775", "--tcp", "0.0.0.0:8776"]
     ports: ["8775:8775", "8776:8776"]
+
+  molmo:
+    <<: *server
+    profiles: [molmo]  # opt-in: MolmoPoint pointing VLM (--wrist-pointing-model gpu-molmo)
+    environment:
+      GPU_SERVER_TOKEN: ${GPU_SERVER_TOKEN:?set GPU_SERVER_TOKEN in gpu_server/docker/.env}
+      # Empty = auto by VRAM (logged at load): < 12 GB -> MolmoPoint-Vid-4B nf4 (RTX 3070 8 GB);
+      # 12-20 GB -> MolmoPoint-8B nf4; >= 20 GB -> MolmoPoint-8B bf16. Vision tower stays bf16.
+      MOLMO_MODEL: ${MOLMO_MODEL:-}
+      MOLMO_QUANT: ${MOLMO_QUANT:-}
+    command: ["--modules", "molmo_point", "echo", "--preload", "molmo_point",
+              "--ws", "0.0.0.0:8785", "--tcp", "0.0.0.0:8786"]
+    ports: ["8785:8785", "8786:8786"]
 
 volumes:
   model-cache:

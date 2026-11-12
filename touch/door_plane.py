@@ -37,6 +37,21 @@ def depth_to_world(depth, cam_pos, cam_q, cam_info=None, stride=2, robot_mask=No
     return np.asarray(out, float).reshape(-1, 3)
 
 
+def _bar_width(offr, sr, z, lo, hi, zc, min_pts, off_m=(0.03, 0.20), z_band=0.06, lim_m=(0.008, 0.08)):
+    """Thickness of the lever bar (m) in its cross-section (door normal x vertical), or None. The visible
+    side of a bar spans its full thickness across the view ray whatever the camera height, so take the
+    extent along the cross-section's principal axis (p3-p97). Prior: a roughly round / square bar."""
+    m = (offr > off_m[0]) & (offr < off_m[1]) & (sr > lo) & (sr < hi) & (np.abs(z - zc) < z_band)
+    if int(m.sum()) < min_pts:
+        return None
+    cs = np.c_[offr[m], z[m]]
+    cs = cs - np.median(cs, axis=0)
+    _, _, vt = np.linalg.svd(cs, full_matrices=False)
+    lo_w, hi_w = np.percentile(cs @ vt[0], [3, 97])
+    w = float(hi_w - lo_w)
+    return round(w, 3) if lim_m[0] <= w <= lim_m[1] else None
+
+
 def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z=0.08,
                         inlier_m=0.015, max_face_m=0.20, bin_m=0.02, max_gap_m=0.02, min_density=0.3,
                         min_width_m=0.2, iters=300, seed=0, rose_off_m=(0.01, 0.06), rose_radius_m=0.3,
@@ -161,7 +176,9 @@ def estimate_door_plane(points, handle, cam_xy, radius=0.7, z_band=0.25, floor_z
             rot = (rot + math.pi / 2) % math.pi - math.pi / 2
             grasp = {"xyz": [round(float(gxy[0]), 3), round(float(gxy[1]), 3),
                              round(float(np.median(P3[lev, 2])) - 0.015, 3)],
-                     "rotation": round(rot, 3), "lever_len_m": round(float(hi - lo), 3), "n": int(lev.sum())}
+                     "rotation": round(rot, 3), "lever_len_m": round(float(hi - lo), 3), "n": int(lev.sum()),
+                     "bar_width_m": _bar_width(offr, sr, P3[:, 2], lo + 0.25 * (hi - lo), hi - 0.1 * (hi - lo),
+                                               float(np.median(P3[lev, 2])), min_rose_pts)}
     return {
         "pull_dir": [round(float(nrm[0]), 3), round(float(nrm[1]), 3), 0.0],
         "tangent": [round(float(t[0]), 3), round(float(t[1]), 3), 0.0],

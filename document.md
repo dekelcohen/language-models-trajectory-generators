@@ -88,7 +88,8 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `-lm, --language_model` | `copilot-claude-opus-5.5` (`--task usb`: `copilot-claude-sonnet-5.5` + `--reasoning-effort medium`, see `main.py` `TASK_DEFAULT_LM`) | Main LLM (planner + subtask code). e.g. `azure-gpt-5`, `copilot-gpt-6-astra`, `or-google/gemini-2.5-flash`, `copilot-claude-opus-5.5`, `copilot-gpt-6-sol` (Copilot models go through the local `copilot` CLI). |
 | `--lm-images / --no-lm-images` | `True` | Attach images to LLM prompts. |
 | `--max-tokens` | `60000` | Max completion tokens. |
-| `--reasoning-effort` | `None` | `xhigh…none` for reasoning models. |
+| `--reasoning-effort` | `None` | `xhigh…none` for reasoning models (LLM and reviewer). |
+| `--perception-reasoning-effort` | `low` | Effort of the perception VLM calls (scene analysis, wrist pointing); `inherit` = `--reasoning-effort`. |
 | `--llm-cache / --no-llm-cache` | `True` | Disk cache of LLM responses (`config.llm_cache_dir`). |
 | `-r, --robot` | `sawyer` | `sawyer` \| `franka`. |
 | `-m, --mode` | `default` | `default` \| `debug`. |
@@ -103,6 +104,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 | `--images-root DIR` | `./images` (or `$IMAGES_ROOT`) | Root folder for all image/video/trajectory output (`config.images_folder` and every path derived from it). Parsed from `sys.argv` *before* `config`/other modules import, via `_apply_early_images_root()` at the top of `main.py`, so it must reach every module regardless of import order. Set this per run to allow 2+ concurrent experiments on the same checkout without overwriting each other's outputs, e.g. `--images-root ./images_run1` / `./images_run2`. |
 | `--review-provider` | `vlm:copilot-gpt-6.1-terra` | Success check: `vlm` (main model), `vlm:<model>` (e.g. `vlm:gemini-3.8-flash`, which gets video), or `xmem`. Terra is cheaper than gemini and gets key frames (images only). |
 | `--planner-perception-vlm` | `copilot-gpt-6.1-terra` | VLM run on the head image before every planner call; its scene analysis is injected into the planner prompt. `gemini-3.8-flash` also works. |
+| `--wrist-pointing-model` | `None` = `--planner-perception-vlm` (`--task usb`: `or-google/gemini-3.8-flash`, `main.py` `TASK_DEFAULT_WRIST_POINTING`) | Model for `locate_with_wrist_camera` pointing only. `gpu-molmo[:<url>]` = MolmoPoint on gpu_server (`gpu_server/README.md`). Benchmark: `research/touch/pointing_bench.py`. |
 | `--affordance-points` / `--no-affordance-points` | on | Ask the perception VLM for ranked 2D grasp-affordance points on the target object, convert them to 3D world coords and inject them into the scene analysis. Disable to drop the pointing block from the perception prompt entirely. |
 | `--attempts` | `2` | Global default per-task attempts (1 first + retries with review between). |
 | `--no-plan` | off | Skip planner; run command as a single `execute_task`. |

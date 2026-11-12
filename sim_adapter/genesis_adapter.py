@@ -103,7 +103,7 @@ class _Body:
     """Bookkeeping for one loaded entity, keyed by the int handle callers see."""
 
     __slots__ = ("handle", "entity", "source", "joints", "links",
-                 "joint_names", "link_names")
+                 "joint_names", "link_names", "dofs_cache")
 
     def __init__(self, handle, entity, source):
         self.handle = handle
@@ -113,9 +113,11 @@ class _Body:
         self.links = []
         self.joint_names = {}
         self.link_names = {}
+        self.dofs_cache = {}
 
     def refresh(self):
         """(Re)build the joint/link tables. Genesis exposes them once the morph is parsed."""
+        self.dofs_cache = {}
         self.joints = list(getattr(self.entity, "joints", []) or [])
         self.links = list(getattr(self.entity, "links", []) or [])
         self.joint_names = {j.name: i for i, j in enumerate(self.joints)}
@@ -609,14 +611,31 @@ class GenesisAdapter(SimAdapter):
         return dict(self._body(body).link_names)
 
     def _dofs(self, body, joint):
-        gs_joint = self._body(body).joints[int(joint)]
-        return [int(d) for d in _to_numpy(gs_joint.dofs_idx_local).reshape(-1)]
+        entry = self._body(body)
+        key = int(joint)
+        dofs = entry.dofs_cache.get(key)
+        if dofs is None:
+            dofs = [int(d) for d in _to_numpy(entry.joints[key].dofs_idx_local).reshape(-1)]
+            entry.dofs_cache[key] = dofs
+        return list(dofs)
 
     def _dofs_many(self, body, joints):
         out = []
         for joint in joints:
             out.extend(self._dofs(body, joint))
         return out
+
+    def get_joint_positions_velocities(self, body, joints):
+        """One batched read per quantity (the touch torque loop calls this every 4 ms sim step)."""
+        joints = list(joints)
+        per = [self._dofs(body, j) for j in joints]
+        if not joints or any(len(d) != 1 for d in per):
+            return super().get_joint_positions_velocities(body, joints)
+        entity = self._body(body).entity
+        dofs = [d[0] for d in per]
+        q = _to_numpy(entity.get_dofs_position(dofs_idx_local=dofs)).reshape(-1)
+        dq = _to_numpy(entity.get_dofs_velocity(dofs_idx_local=dofs)).reshape(-1)
+        return [float(v) for v in q], [float(v) for v in dq]
 
     def get_joint_state(self, body, joint):
         entity = self._body(body).entity
@@ -656,17 +675,24 @@ class GenesisAdapter(SimAdapter):
         pos, quat_wxyz = self._link_com_pose(gs_link)
         return _vector(pos, 3), transforms.wxyz_to_xyzw(_vector(quat_wxyz, 4))
 
-    @staticmethod
-    def _link_com_pose(gs_link):
+    _LINK_REF_FRAME = None   # resolved on first use; False = unavailable in this Genesis build
+
+    @classmethod
+    def _link_com_pose(cls, gs_link):
         """``(pos, quat_wxyz)`` of the link's inertial frame, with a safe fallback."""
-        try:
-            from genesis.engine.solvers.rigid.rigid_solver import link_ref_frame
-        except Exception:
-            # Older/renamed Genesis: fall back to the link origin rather than crashing.
-            # Positions will be off by the inertial offset - loudly, not silently.
-            _log("WARNING link_ref_frame unavailable; link poses use the URDF origin "
-                 "frame and will not match PyBullet's centre-of-mass convention")
+        if cls._LINK_REF_FRAME is None:
+            try:
+                from genesis.engine.solvers.rigid.rigid_solver import link_ref_frame
+                cls._LINK_REF_FRAME = link_ref_frame
+            except Exception:
+                # Older/renamed Genesis: fall back to the link origin rather than crashing.
+                # Positions will be off by the inertial offset - loudly (once), not silently.
+                _log("WARNING link_ref_frame unavailable; link poses use the URDF origin "
+                     "frame and will not match PyBullet's centre-of-mass convention (logged once)")
+                cls._LINK_REF_FRAME = False
+        if cls._LINK_REF_FRAME is False:
             return gs_link.get_pos(), gs_link.get_quat()
+        link_ref_frame = cls._LINK_REF_FRAME
         solver = gs_link._solver
         pos = solver.get_links_pos(gs_link._idx, ref=link_ref_frame.link_COM)
         # There is no ``ref`` for orientation: PyBullet's centre-of-mass frame and URDF

@@ -40,7 +40,9 @@ GENESIS_TASKS = ("usb", "kettle_mug")
 
 #: Door scenes: noslip stops the soft-contact friction creep that slid the gripped lever out
 #: of the fingers at ~10 N pull with ~70 N of friction available (real friction does not creep).
-DOOR_SCENE_OPTIONS = {"rigid": {"noslip_iterations": 5}}
+#: Torsional friction: Genesis contacts are points, so a round bar pinched between the pads rolls /
+#: twists freely about the finger axis (kettle_mug precedent); real rubber pads resist that.
+DOOR_SCENE_OPTIONS = {"rigid": {"noslip_iterations": 5, "enable_torsional_friction": True}}
 
 
 def scene_options_for(task_name):
