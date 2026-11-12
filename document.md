@@ -85,7 +85,7 @@ python main.py --task franka_kitchen:kettle --no-plan
 ### Argument reference
 | Arg | Default | Purpose |
 |-----|---------|---------|
-| `-lm, --language_model` | `copilot-claude-opus-5.5` | Main LLM (planner + subtask code). e.g. `azure-gpt-5`, `copilot-gpt-6-astra`, `or-google/gemini-2.5-flash`, `copilot-claude-opus-5.5`, `copilot-gpt-6-sol` (Copilot models go through the local `copilot` CLI). |
+| `-lm, --language_model` | `copilot-claude-opus-5.5` (`--task usb`: `copilot-claude-sonnet-5.5` + `--reasoning-effort medium`, see `main.py` `TASK_DEFAULT_LM`) | Main LLM (planner + subtask code). e.g. `azure-gpt-5`, `copilot-gpt-6-astra`, `or-google/gemini-2.5-flash`, `copilot-claude-opus-5.5`, `copilot-gpt-6-sol` (Copilot models go through the local `copilot` CLI). |
 | `--lm-images / --no-lm-images` | `True` | Attach images to LLM prompts. |
 | `--max-tokens` | `60000` | Max completion tokens. |
 | `--reasoning-effort` | `None` | `xhigh…none` for reasoning models. |

@@ -48,11 +48,25 @@ def _pybullet_task_help():
         return "'grasp', 'door', 'franka_kitchen:<task>'"
 
 
+DEFAULT_LM = "copilot-claude-opus-5.5"
+# Per-task (model, reasoning effort) used when -lm / --reasoning-effort are not given.
+TASK_DEFAULT_LM = {"usb": ("copilot-claude-sonnet-5.5", "medium")}
+
+
+def resolve_task_defaults(args):
+    if args.language_model is None:
+        model, effort = TASK_DEFAULT_LM.get(args.task, (DEFAULT_LM, None))
+        args.language_model = model
+        if args.reasoning_effort is None:
+            args.reasoning_effort = effort
+    return args
+
+
 def build_arg_parser():
     parser = argparse.ArgumentParser(description="Main Program.")
 
     lm = parser.add_argument_group("language model")
-    lm.add_argument("-lm", "--language_model", default="copilot-claude-opus-5.5", help="select language model (e.g. copilot-claude-opus-5.5 / copilot-gpt-6-astra via the local `copilot` CLI, azure-gpt-5, or-google/gemini-2.5-flash)")
+    lm.add_argument("-lm", "--language_model", default=None, help=f"select language model (e.g. copilot-claude-opus-5.5 / copilot-gpt-6-astra via the local `copilot` CLI, azure-gpt-5, or-google/gemini-2.5-flash). Default: {DEFAULT_LM}, or the per-task default {TASK_DEFAULT_LM}")
     lm.add_argument("--lm-images", action=argparse.BooleanOptionalAction, default=True, help="pass images to LLM prompts (default: True, use --no-lm-images to disable)")
     lm.add_argument("--max-tokens", type=int, default=60000, help="max completion tokens for LLM responses")
     lm.add_argument("--reasoning-effort", type=str, default=None, choices=["xhigh", "high", "medium", "low", "minimal", "none"], help="reasoning effort for reasoning models (OpenRouter, Gemini)")
@@ -172,7 +186,7 @@ def print_skills(args):
 
 
 def main():
-    args = build_arg_parser().parse_args()
+    args = resolve_task_defaults(build_arg_parser().parse_args())
 
     if args.list_tasks:
         print_task_ids()

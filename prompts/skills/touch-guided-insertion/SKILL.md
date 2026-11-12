@@ -154,7 +154,8 @@ metadata:
    offset = (off_a * a + np.array([0.0, 0.0, off_z])).tolist()   # eef -> tip centre (fingers centre it across)
    # c) grasp-position gate (tip_len / housing_len = the part type's standard sizes, step 1 priors)
    expected = tip_len + housing_len / 2
-   if not (tip_len + 0.012 <= off_a <= expected + 0.005):
+   lo = min(tip_len + 0.012, expected - 0.003)   # short housings: never reject a grasp at `expected`
+   if not (lo <= off_a <= expected + 0.005):
        regrasp(shift = off_a - expected)   # see "Off-centre grasp" below; do NOT insert with this grasp
        # This regrasp is REQUIRED even if the task text says "do not re-grasp / do not open the gripper"
        # (that only means: do not drop the part). Do not insert anyway, flip, or re-touch instead -
@@ -167,7 +168,8 @@ metadata:
    (insertable tip length + half the housing length; NOT half the whole part). Lower bound: the finger
    pads reach ~1 cm along the part axis past the fingertip centre, so with off_a < tip length + 1.2 cm
    the fingers hit the face before the part is in - it stalls a few mm in ("stopped early ... jam") however
-   well aligned. Upper: more than 5 mm beyond expected = held near the back end: the long lever lets the part pitch in
+   well aligned (for a short housing the bound relaxes to expected - 3 mm: a grasp at the housing middle
+   is the best available, do not regrasp it). Upper: more than 5 mm beyond expected = held near the back end: the long lever lets the part pitch in
    the fingers and wedge a few mm into the opening. Either way, put it back (fingertips over the spot where it
    was, 1.5 cm high; `move_until_contact([0, 0, -1], max_travel=0.03, force=3.0)` until it rests on the
    table; `open_gripper()`; rise 4 cm), shift the grasp along the part axis by (off_a - expected) toward
