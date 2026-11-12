@@ -4,7 +4,7 @@ Task: `python main.py -r franka --sim genesis --task usb --touch --attempts 3 --
 (run in conda env `vlm_traj`; it spawns the `vlm_genesis` server. `-r franka` is required, the default robot is sawyer).
 Skill: `prompts/skills/touch-guided-insertion/SKILL.md`. Controller: `touch/insertion.py`.
 Door status: see [`open_door.md`](open_door.md) (door:hidden: PyBullet SUCCESS 2/2 on 2026-11-11;
-Genesis FAIL, top-down lever grasp misses).
+Genesis SUCCESS 1/1 on 2026-11-12, 71 deg, after the force-limited press / torsional friction fixes).
 
 ## Status (2026-11-12): OPEN, about 1 seat per 3-4 LLM runs
 

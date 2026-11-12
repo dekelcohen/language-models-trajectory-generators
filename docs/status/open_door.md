@@ -523,3 +523,13 @@ Analysis of `rollouts/2026-11-10/door_hidden_genesis_touchpull_fail` vs the PyBu
    - Next: an elbow posture (null-space bias) that keeps link 5 out of the swing, or a stop and re-grasp before the panel reaches the arm. A one-line change will not fix it.
 2. **The door falls back after release** (36 -> 18 deg in the control test). Probably the forearm that touches the panel pushes it while the hand releases and lifts (not verified; PyBullet d2 also fell back once).
 3. **Re-grasping a swinging door misses**: the target is the lever at the last measured angle while the door keeps closing (2 misses in the control test).
+
+**Agent rollout after the 4 fixes (2026-11-12): SUCCESS, 71 deg** (`rollouts/2026-11-12/door_hidden_genesis_opus_SUCCESS_71deg`, Opus medium, terra perception/reviewer, ~40 min)
+- First Genesis `door:hidden` success. The pole was cleared, then two door attempts.
+- Attempt 1: `guarded_pull` reported `opened` (56 deg swept, vision 86 deg). The LLM called `task_completed()`
+  without releasing, so the reviewer saw the door almost closed (depth 2 deg at the end). The door probably fell back
+  or was pushed shut by the arm (blocker 2).
+- Attempt 2: `pull_with_touch` slipped at 40 deg (45 N); a second `pull_with_touch` reached `opened`, then release
+  and retreat. `measure_door_angle` gave 70.9 deg and the reviewer passed it. The handle moved from (-0.10, -0.01)
+  to (-0.26, 0.08), which agrees.
+- Blockers 1-2 above remain (one success in one run); the forearm collision is still the main risk.

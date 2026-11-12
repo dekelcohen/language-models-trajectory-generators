@@ -8,7 +8,8 @@ The status and the step-by-step guide are in `docs/status/usb_insert.md`.
   untested on GPU), 6 (door analysis + 4 fixes, see `open_door.md`; still stalls at ~35 deg: forearm `panda_link5`
   hits the panel), 8 (docs).
 - 7 (skill ablation): done, 0/4 seated, keep the full skill. It found a new blocker: re-picking a dropped plug fails. See the usb_insert.md "Skill ablation" section.
-- Still open: touch search (after LLM/VLM) in 1-3 min wall; door forearm collision.
+- Still open: touch search (after LLM/VLM) in 1-3 min wall; door forearm collision. Door rerun: Genesis
+  `door:hidden` SUCCESS (71 deg) on 2026-11-12.
 
 ## Decisions (user)
 - **Pointing comparison:** offline benchmark on saved wrist views first, then 1 live run with the best model.
