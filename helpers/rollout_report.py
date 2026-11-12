@@ -163,9 +163,13 @@ def _encode_unfinished_tail(traj, vid_dir):
             continue
         try:
             from debug.dbg_utils import create_video_from_images
-            create_video_from_images(folder_path=traj, output_video_folder_path=vid_dir, base_name=f"{cam}_image",
-                                     start_idx=start, end_idx=float("inf"), fps=15,
-                                     output_filename=f"{cam}_image_attempt_{start}_{{end}}_unfinished.mp4")
+            clip = create_video_from_images(folder_path=traj, output_video_folder_path=vid_dir,
+                                            base_name=f"{cam}_image", start_idx=start, end_idx=float("inf"),
+                                            fps=15, output_filename=f"{cam}_image_attempt_{start}_{{end}}_unfinished.mp4")
+            # `<cam>_image_full.mp4` only holds the finished attempts: append the tail so it shows the whole run
+            if clip:
+                from helpers.video_utils import update_full_video
+                update_full_video(f"{cam}_image", clip, folder_path=traj, out_dir=vid_dir)
         except Exception as e:  # report packaging must not fail on video encoding
             print(f"[rollout_report] could not encode unfinished {cam} clip: {e}")
 

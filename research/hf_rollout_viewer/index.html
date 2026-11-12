@@ -60,16 +60,18 @@ async function hub(url) {
   return r;
 }
 
-async function listAll() {
-  let url = `${HUB}/api/datasets/${REPO}/tree/main/rollouts?recursive=true`;
-  const files = [];
+// Paginated listing. The Link header may be hidden from the browser (CORS), so list one level at a time
+// (dates, runs per date, files per run) to stay under the page size instead of one big recursive listing.
+async function listDir(path, recursive) {
+  let url = `${HUB}/api/datasets/${REPO}/tree/main/${path}?limit=1000${recursive ? "&recursive=true" : ""}`;
+  const out = [];
   while (url) {
     const r = await hub(url);
-    for (const e of await r.json()) if (e.type === "file") files.push(e.path);
+    out.push(...(await r.json()));
     const m = /<([^>]+)>;\s*rel="next"/.exec(r.headers.get("Link") || "");
     url = m ? m[1] : null;
   }
-  return files;
+  return out;
 }
 
 async function blobUrl(path) {
@@ -86,12 +88,12 @@ async function text(path) {
 async function loadIndex() {
   $("runs").textContent = "Loading...";
   INDEX = {};
-  for (const f of await listAll()) {
-    const p = f.split("/");
-    if (p.length < 4) continue;
-    const key = `${p[1]}/${p[2]}`;
-    (INDEX[key] ||= []).push(p.slice(3).join("/"));
-  }
+  const dates = (await listDir("rollouts", false)).filter((e) => e.type === "directory")
+    .map((e) => e.path.split("/")[1]);
+  const perDate = await Promise.all(dates.map(async (d) =>
+    (await listDir(`rollouts/${d}`, false)).filter((e) => e.type === "directory")
+      .map((e) => `${d}/${e.path.split("/")[2]}`)));
+  for (const k of perDate.flat()) INDEX[k] = null;   // files are listed when a run is opened
   const keys = Object.keys(INDEX).sort().reverse();
   const box = $("runs"); box.innerHTML = "";
   let lastDate = "";
@@ -108,6 +110,12 @@ async function loadIndex() {
 
 async function showRun(key, el) {
   document.querySelectorAll(".run").forEach((x) => x.classList.remove("sel")); el?.classList.add("sel");
+  if (!INDEX[key]) {
+    $("runs").style.cursor = "progress";
+    INDEX[key] = (await listDir(`rollouts/${key}`, true)).filter((e) => e.type === "file")
+      .map((e) => e.path.split("/").slice(3).join("/"));
+    $("runs").style.cursor = "";
+  }
   const files = INDEX[key];
   const groups = ["overview", ...[...new Set(files.filter((f) => f.includes("/") && f.endsWith(".png")).map((f) => f.split("/")[0]))].sort()];
   const vids = files.filter((f) => f.endsWith(".mp4")).sort();
