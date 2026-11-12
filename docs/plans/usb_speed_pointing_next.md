@@ -37,7 +37,9 @@ This work was paused because of the token budget. The status and the step-by-ste
 - **Model check:** `allenai/MolmoPoint-8B`, `allenai/MolmoPoint-Vid-4B` and `google/gemini-3.8-flash` all exist. The gpu_server already has a module pattern, Docker for the 3070, and a VRAM table (`gpu_server/README.md` ~L288).
 
 ## Todo
-1. Profile `run_touch_insert` on Genesis and add batched joint reads with a per-joint fallback, without changing the physics. A background profiling agent was started and then aborted; check for `research/touch/profile_touch_loop.py`.
+1. Profile `run_touch_insert` on Genesis and add batched joint reads with a per-joint fallback, without changing the physics. The aborted profiler read the code but measured nothing:
+   - `sim_adapter/genesis_adapter.py` `get_joint_state` makes 3 Genesis calls per joint (position, velocity, `get_dofs_control_force`), so ~42 calls per step in `kin()`.
+   - Fix: batched `get_joint_positions` / `get_joint_velocities` via `entity.get_dofs_position/velocity(dofs)`.
 2. Add `--perception-reasoning-effort` (`main.py`, `api.py:596` wrist locate, planner perception). Decide whether the reviewer (`api.py` ~1893) gets it too.
 3. Pointing dataset:
    - a sidecar (`*.npz`: depth + wrist cam pose/intrinsics) for each `locate_with_wrist_camera` image;
