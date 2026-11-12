@@ -38,6 +38,30 @@ The comparison looks at the LLM's parts only (pick choices, gate handling, code 
   `expected = tip_len + housing_len/2` (23 mm with the LLM's 22 mm housing prior). So a perfect grasp failed the gate
   (p15, s2, s3) and caused regrasp loops. The bound is now `min(tip_len + 12 mm, expected - 3 mm)`.
 
+### Skill ablation (2026-11-12): simplifying SKILL.md did not help, so keep the full skill
+
+Variants built by `research/touch/skill_ablation/make_variants.py`, loaded with `--skills-dir outputs/_ablation/skills_<v>`:
+- `A_no_situational` (19.5k → 16.8k chars): no tip-direction, multi-face, multiple-openings or wrong-opening rules.
+- `B_lean` (14.4k chars): A, minus the sanity-check, settle-correction, off-centre prose and force adaptation.
+
+All runs used Sonnet medium and a 30-min cap. A1/B1 used terra wrist pointing; A2/B2 used Gemini, which became the default during the batch.
+
+| run | variant | pointing | what happened | result |
+|---|---|---|---|---|
+| A1 | A | terra | off_a 8.6 mm, so it regrasped; dropped on lift (34 N); then re-picks closed on air | CAPPED, no insert |
+| B1 | B | terra | reached insert: `slipped` after 117 s of partial catches (plug slid 18.5 mm in grasp); plug lost; 9 re-picks failed | CAPPED |
+| A2 | A | Gemini | **wrong face**: parked at the laptop's right face (x 0.50, port is at 0.09). Gemini returned [] on the first view, then 2 false hits; `search_exhausted` x2, kept retrying that face | CAPPED |
+| B2 | B | Gemini | right face found; then 15+ grasps: lifts resist 30-40 N and the fingers close on air | CAPPED, no insert |
+
+- 0/4 seated, against 1/4 with the full skill (s1-s3, o1). Removing the wrong-face rule directly caused A2's loop.
+  **Keep the full skill**; no removed part was shown to cause bugs.
+- **New dominant failure: re-picking a put-down or dropped plug** (A1, B1, B2; also s1). The touched top is
+  5.0-5.2 cm, against 5.78 cm on its stand, so the plug has left the stand. Every lift then resists 30-40 N and slips.
+  Next: inspect the scene/contacts after a put-down (plug wedged against the stand?). Make put-down regrasps
+  place the plug back ON the stand, or regrasp in place (open, shift, close) without lifting.
+- Gemini pointing found the correct port in B2 but gave 2 false hits on the wrong face in A2. Pointing does not replace face selection.
+- HF: `rollouts/2026-11-12/plug_usba_abl{A,B}_*`.
+
 ## Step-by-step: what runs, and how each step has failed
 
 The planner splits the task into 2 subtasks: (1) pick up the plug, (2) insert it. Each subtask is LLM code in the agent
@@ -179,6 +203,7 @@ Remaining ideas: one VLM call for port + edge; fewer rows when z is confident; a
 10-15 mm/s, centre-out rows. A real robot runs the search in real time (~4 min worst case for the same raster).
 
 ## Open issues (priority)
+0. Re-picking a put-down / dropped plug fails: the lift resists 30-40 N, then the fingers close on air (ablation A1, B1, B2, s1). This blocks every regrasp path.
 1. Plug pivots in the grasp under repeated 18 N partial catches (p13, p15, o1).
 2. In-hand z offset 3-5 mm off (p16, s2, o1).
 3. Wrist pointing along-face error up to 4.5 cm. That means long searches and more catches (feeds 1).

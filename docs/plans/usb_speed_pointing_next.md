@@ -7,7 +7,7 @@ The status and the step-by-step guide are in `docs/status/usb_insert.md`.
   3-4 (bench: Gemini Flash 4.4 mm vs terra 24 mm median; now the usb wrist-pointing default), 5 (Molmo module,
   untested on GPU), 6 (door analysis + 4 fixes, see `open_door.md`; still stalls at ~35 deg: forearm `panda_link5`
   hits the panel), 8 (docs).
-- 7 (skill ablation): see the usb_insert.md "Skill ablation" section.
+- 7 (skill ablation): done, 0/4 seated, keep the full skill. It found a new blocker: re-picking a dropped plug fails. See the usb_insert.md "Skill ablation" section.
 - Still open: touch search (after LLM/VLM) in 1-3 min wall; door forearm collision.
 
 ## Decisions (user)
